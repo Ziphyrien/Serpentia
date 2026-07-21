@@ -1,0 +1,73 @@
+name: Dependency Auto Merge
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    outputs:
+      merged: ${{ steps.merge.outputs.merged }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find Dependabot pull request
+        id: pull-request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [[ -z "$PR_NUMBER" ]]; then
+            echo "No pull request is associated with this CI run."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          endpoint="repos/$REPOSITORY/pulls/$PR_NUMBER"
+          actor="$(gh api "$endpoint" --jq '.user.login')"
+          state="$(gh api "$endpoint" --jq '.state')"
+          head_sha="$(gh api "$endpoint" --jq '.head.sha')"
+
+          if [[ "$actor" != "dependabot[bot]" ]]; then
+            echo "The pull request is not authored by Dependabot."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$state" != "open" || "$head_sha" != "$RUN_SHA" ]]; then
+            echo "The pull request is closed or its head changed after this CI run."
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "merge=true" >> "$GITHUB_OUTPUT"
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Merge Dependabot pull request
+        id: merge
+        if: steps.pull-request.outputs.merge == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          NUMBER: ${{ steps.pull-request.outputs.number }}
+        run: |
+          gh pr merge "$NUMBER" --repo "$REPOSITORY" --squash --delete-branch
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+
+  sync-worker-types:
+    needs: auto-merge
+    if: needs.auto-merge.outputs.merged == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/sync-worker-types.yml
