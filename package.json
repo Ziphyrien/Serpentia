@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vp dev",
     "clean": "bun -e \"import { rmSync } from 'node:fs'; rmSync('.svelte-kit', { recursive: true, force: true })\"",
-    "build": "bun run clean && vp build",
-    "deploy": "vp build && wrangler deploy",
+    "build": "bun run clean && vp build && bun scripts/compose-worker.ts",
+    "deploy": "bun run build && wrangler deploy",
     "preview": "wrangler dev .svelte-kit/cloudflare/_worker.js --port 4173",
     "prepare": "svelte-kit sync || echo ''",
     "check": "bun run clean && wrangler types && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
@@ -23,10 +23,12 @@
     "effect": "^4.0.0-beta.100",
     "howler": "^2.2.4",
     "lucide-svelte": "^1.0.1",
+    "partyserver": "0.5.8",
     "pixi.js": "^8.19.0",
     "tailwind-variants": "^3.2.2"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.18.7",
     "@effect/vitest": "^4.0.0-beta.100",
     "@sveltejs/adapter-cloudflare": "^7.2.8",
     "@sveltejs/kit": "^2.63.0",
