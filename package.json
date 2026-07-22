@@ -38,7 +38,7 @@
     "tailwindcss": "^4.3.0",
     "typescript": "6.0.3",
     "vite-plus": "0.2.5",
-    "wrangler": "^4.97.0"
+    "wrangler": "^4.113.0"
   },
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.5"
