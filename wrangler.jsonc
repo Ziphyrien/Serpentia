@@ -4,6 +4,12 @@
   "compatibility_date": "2026-07-21",
   "compatibility_flags": ["nodejs_compat"],
   "main": ".svelte-kit/cloudflare/_worker.js",
+  "routes": [
+    {
+      "pattern": "snake.zipawa.top/*",
+      "zone_name": "zipawa.top",
+    },
+  ],
   "assets": {
     "binding": "ASSETS",
     "directory": ".svelte-kit/cloudflare",
