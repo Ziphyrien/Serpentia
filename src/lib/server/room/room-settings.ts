@@ -5,6 +5,7 @@ import {
   MAX_TOTAL_MESSAGES_PER_SECOND,
   MAX_VOICE_SIGNALS_PER_SECOND,
   type BackendDescriptor,
+  type IceServer,
   type RoomMetadata,
 } from "../../protocol/game";
 import { defaultGameConfig } from "../game/config";
@@ -14,40 +15,53 @@ export const SNAPSHOT_RATE = 10;
 export const RECONNECT_GRACE_SECONDS = 5;
 export const RECONNECT_GRACE_TICKS = defaultGameConfig.tickRate * RECONNECT_GRACE_SECONDS;
 
-export const ROOM_METADATA: RoomMetadata = Object.freeze({
-  protocolVersion: GAME_PROTOCOL_VERSION,
-  roomId: "friends",
-  tickRate: defaultGameConfig.tickRate,
-  snapshotRate: SNAPSHOT_RATE,
-  reconnectGraceTicks: RECONNECT_GRACE_TICKS,
-  voiceMode: "p2p",
-  iceServers: [{ urls: ["stun:stun.cloudflare.com:3478"] }],
-  rules: {
-    arenaHalfSize: defaultGameConfig.arenaHalfSize,
-    baseSpeed: defaultGameConfig.baseSpeed,
-    boostSpeed: defaultGameConfig.boostSpeed,
-    turnRate: defaultGameConfig.turnRate,
-    initialLength: defaultGameConfig.initialLength,
-    minimumLength: defaultGameConfig.minimumLength,
-    boostMinimumLength: defaultGameConfig.boostMinimumLength,
-    boostDrainPerSecond: defaultGameConfig.boostDrainPerSecond,
-    foodRadius: defaultGameConfig.foodRadius,
-    respawnDelayTicks: defaultGameConfig.respawnDelayTicks,
-    respawnInvulnerabilityTicks: defaultGameConfig.respawnInvulnerabilityTicks,
-  },
-  limits: {
-    maxMessageBytes: MAX_CLIENT_MESSAGE_BYTES,
-    maxInputMessagesPerSecond: MAX_INPUT_MESSAGES_PER_SECOND,
-    maxVoiceSignalsPerSecond: MAX_VOICE_SIGNALS_PER_SECOND,
-    maxTotalMessagesPerSecond: MAX_TOTAL_MESSAGES_PER_SECOND,
-    maxInputLagTicks: defaultGameConfig.tickRate * INPUT_LAG_TOLERANCE_SECONDS,
-    maxInputLeadTicks: defaultGameConfig.tickRate * INPUT_LEAD_TOLERANCE_SECONDS,
-  },
-});
+export const DEFAULT_PUBLIC_ICE_SERVERS: ReadonlyArray<IceServer> = [
+  { urls: ["stun:stun.l.google.com:19302"] },
+];
 
-export const BACKEND_DESCRIPTOR: BackendDescriptor = Object.freeze({
-  ...ROOM_METADATA,
-  sessionPath: "/api/session",
-  turnCredentialsPath: "/api/turn-credentials",
-  websocketPath: "/api/parties/game-room/friends",
-});
+export function createRoomMetadata(
+  iceServers: ReadonlyArray<IceServer> = DEFAULT_PUBLIC_ICE_SERVERS,
+): RoomMetadata {
+  return {
+    protocolVersion: GAME_PROTOCOL_VERSION,
+    roomId: "friends",
+    tickRate: defaultGameConfig.tickRate,
+    snapshotRate: SNAPSHOT_RATE,
+    reconnectGraceTicks: RECONNECT_GRACE_TICKS,
+    voiceMode: "p2p",
+    iceServers: iceServers.map((server) => ({ ...server, urls: [...server.urls] })),
+    rules: {
+      arenaHalfSize: defaultGameConfig.arenaHalfSize,
+      baseSpeed: defaultGameConfig.baseSpeed,
+      boostSpeed: defaultGameConfig.boostSpeed,
+      turnRate: defaultGameConfig.turnRate,
+      initialLength: defaultGameConfig.initialLength,
+      minimumLength: defaultGameConfig.minimumLength,
+      boostMinimumLength: defaultGameConfig.boostMinimumLength,
+      boostDrainPerSecond: defaultGameConfig.boostDrainPerSecond,
+      foodRadius: defaultGameConfig.foodRadius,
+      respawnDelayTicks: defaultGameConfig.respawnDelayTicks,
+      respawnInvulnerabilityTicks: defaultGameConfig.respawnInvulnerabilityTicks,
+    },
+    limits: {
+      maxMessageBytes: MAX_CLIENT_MESSAGE_BYTES,
+      maxInputMessagesPerSecond: MAX_INPUT_MESSAGES_PER_SECOND,
+      maxVoiceSignalsPerSecond: MAX_VOICE_SIGNALS_PER_SECOND,
+      maxTotalMessagesPerSecond: MAX_TOTAL_MESSAGES_PER_SECOND,
+      maxInputLagTicks: defaultGameConfig.tickRate * INPUT_LAG_TOLERANCE_SECONDS,
+      maxInputLeadTicks: defaultGameConfig.tickRate * INPUT_LEAD_TOLERANCE_SECONDS,
+    },
+  };
+}
+
+export function createBackendDescriptor(room: RoomMetadata): BackendDescriptor {
+  return {
+    ...room,
+    sessionPath: "/api/session",
+    turnCredentialsPath: "/api/turn-credentials",
+    websocketPath: "/api/parties/game-room/friends",
+  };
+}
+
+export const ROOM_METADATA = createRoomMetadata();
+export const BACKEND_DESCRIPTOR = createBackendDescriptor(ROOM_METADATA);

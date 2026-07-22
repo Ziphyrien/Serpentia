@@ -1,12 +1,12 @@
 import { defineConfig } from "vite-plus";
 import tailwindcss from "@tailwindcss/vite";
-import adapter from "@sveltejs/adapter-cloudflare";
+import adapter from "@sveltejs/adapter-static";
 import { sveltekit } from "@sveltejs/kit/vite";
 
 export default defineConfig({
-  fmt: { ignorePatterns: [".repos/**", "worker-configuration.d.ts"] },
+  fmt: { ignorePatterns: [".repos/**", "build/**"] },
   lint: {
-    ignorePatterns: [".repos/**", "worker-configuration.d.ts"],
+    ignorePatterns: [".repos/**", "build/**"],
     options: { typeAware: true, typeCheck: true },
   },
   plugins: [
@@ -17,7 +17,11 @@ export default defineConfig({
         runes: ({ filename }) =>
           filename.split(/[/\\]/).includes("node_modules") ? undefined : true,
       },
-      adapter: adapter(),
+      adapter: adapter({
+        fallback: "index.html",
+        precompress: true,
+        strict: true,
+      }),
     }),
   ],
   test: {
@@ -29,7 +33,7 @@ export default defineConfig({
           name: "server",
           environment: "node",
           include: ["src/**/*.{test,spec}.{js,ts}"],
-          exclude: ["src/**/*.svelte.{test,spec}.{js,ts}", "src/**/*.worker.spec.ts"],
+          exclude: ["src/**/*.svelte.{test,spec}.{js,ts}"],
         },
       },
     ],

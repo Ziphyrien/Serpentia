@@ -15,7 +15,8 @@ export class Camera {
       this.initialized = true;
     }
     const t = Math.min(1, Math.max(0, (radius - 11) / (30 - 11)));
-    this.targetZoom = RENDER.zoomAtBaseRadius + (RENDER.zoomAtMaxRadius - RENDER.zoomAtBaseRadius) * t;
+    this.targetZoom =
+      RENDER.zoomAtBaseRadius + (RENDER.zoomAtMaxRadius - RENDER.zoomAtBaseRadius) * t;
 
     const lerp = 1 - Math.pow(1 - RENDER.cameraLerp, dtMs / 16.7);
     this.x += (targetX - this.x) * lerp;
@@ -28,7 +29,11 @@ export class Camera {
   }
 
   /** 当前视野的世界坐标范围（含边距），供视口裁剪。 */
-  viewBounds(screenWidth: number, screenHeight: number, margin = 80): {
+  viewBounds(
+    screenWidth: number,
+    screenHeight: number,
+    margin = 80,
+  ): {
     left: number;
     top: number;
     right: number;
@@ -36,6 +41,11 @@ export class Camera {
   } {
     const halfW = screenWidth / 2 / this.zoom + margin;
     const halfH = screenHeight / 2 / this.zoom + margin;
-    return { left: this.x - halfW, top: this.y - halfH, right: this.x + halfW, bottom: this.y + halfH };
+    return {
+      left: this.x - halfW,
+      top: this.y - halfH,
+      right: this.x + halfW,
+      bottom: this.y + halfH,
+    };
   }
 }

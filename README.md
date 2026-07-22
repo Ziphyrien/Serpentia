@@ -1,44 +1,51 @@
-# Serpentia
+# 蛇域
 
-Cloudflare Workers、Durable Objects 和 PartyServer 驱动的朋友多人贪吃蛇。
+Bun、Svelte 5 和 PixiJS 驱动的朋友多人贪吃蛇。游戏采用服务端权威模拟，支持断线续局、排行榜、移动端摇杆、P2P 语音和 coturn 中继。
 
-后端 HTTP/WebSocket 契约、P2P 语音信令和生产配置见 [`docs/backend-api.md`](docs/backend-api.md)。前端可直接复用 `src/lib/protocol/index.ts` 中的共享类型。
+## 架构
 
-## Creating a project
-
-If you're seeing this, you've probably already done this step. Congrats!
-
-```sh
-# create a new project
-npx sv create my-app
+```text
+Bun.serve (HTTP / WebSocket / TLS)
+  -> GameRoom
+    -> RoomController
+      -> GameEngine
 ```
 
-To recreate this project with the same configuration:
+前端由 SvelteKit `adapter-static` 构建为 SPA；Bun 同一进程供应静态资源、HTTP API 和 WebSocket。后端协议定义位于 `src/lib/protocol`，接口说明见 [`docs/backend-api.md`](docs/backend-api.md)。
 
-```sh
-# recreate this project
-bun x sv@0.16.4 create --template minimal --types ts --add tailwindcss="plugins:none" vitest="usages:unit" --install bun .
+## 本地运行
+
+```bash
+bun install
+bun run backend:secrets -- friend-a friend-b
+cp .env.example .env
 ```
 
-## Developing
+把生成的 `ACCESS_KEY_HASHES` 和 `SESSION_SIGNING_SECRET` 写入 `.env`。本地 HTTP 调试时设置：
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+```dotenv
+NODE_ENV=development
+HOST=127.0.0.1
+PORT=3000
+COOKIE_SECURE=false
+TLS_CERT_FILE=
+TLS_KEY_FILE=
 ```
 
-## Building
+启动完整应用：
 
-To create a production version of your app:
-
-```sh
-npm run build
+```bash
+bun run dev
 ```
 
-You can preview the production build with `npm run preview`.
+仅调试前端 UI 可运行 `bun run dev:ui`，但该模式不提供 Bun API 和游戏 WebSocket。
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+## 生产运行
+
+```bash
+bun install --frozen-lockfile
+bun run ready
+bun run start
+```
+
+VPS、systemd、TLS 和 coturn 配置见 [`docs/vps-deployment.md`](docs/vps-deployment.md)。

@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { decodeClientMessage } from "../../../protocol/game";
-import { requestCloudflareTurnCredentials } from "../cloudflare-turn";
+import { createCoturnCredentials } from "../coturn";
 import { VoiceRoster } from "../voice-roster";
 
 export interface VoiceScenario {
@@ -71,87 +71,51 @@ export const voiceScenarios: ReadonlyArray<VoiceScenario> = [
     },
   },
   {
-    name: "Cloudflare TURN credentials are short lived, authenticated, and browser safe",
+    name: "coturn REST credentials are short lived and authenticated",
     run: async () => {
-      const turnKeyId = "a".repeat(32);
-      const turnKeyApiToken = "b".repeat(64);
-      const fakeFetch: typeof fetch = async (input, init) => {
-        const request = new Request(input, init);
-        requireCondition(
-          request.headers.get("authorization") === `Bearer ${turnKeyApiToken}`,
-          "TURN key was not sent as a bearer secret",
-        );
-        const payload: unknown = await request.json();
-        requireCondition(
-          typeof payload === "object" &&
-            payload !== null &&
-            "customIdentifier" in payload &&
-            payload.customIdentifier === "friend-a",
-          "TURN request was not attributed to the authenticated player",
-        );
-        return Response.json(
-          {
-            iceServers: [
-              {
-                urls: ["stun:stun.cloudflare.com:3478", "stun:stun.cloudflare.com:53"],
-              },
-              {
-                urls: [
-                  "turn:turn.cloudflare.com:3478?transport=udp",
-                  "turn:turn.cloudflare.com:53?transport=udp",
-                  "turns:turn.cloudflare.com:443?transport=tcp",
-                ],
-                username: "temporary-user",
-                credential: "temporary-credential",
-              },
-            ],
-          },
-          { status: 201 },
-        );
-      };
-
-      const credentials = await Effect.runPromise(
-        requestCloudflareTurnCredentials({ turnKeyId, turnKeyApiToken }, "friend-a", {
-          fetcher: fakeFetch,
-          now: 1_000,
-          ttlSeconds: 3_600,
-        }),
+      const sharedSecret = "s".repeat(32);
+      const credentials = await createCoturnCredentials(
+        {
+          stunUrls: ["stun:voice.example.com:3478"],
+          turnUrls: [
+            "turn:voice.example.com:3478?transport=udp",
+            "turns:voice.example.com:5349?transport=tcp",
+          ],
+          sharedSecret,
+        },
+        "friend-a",
+        { now: 1_000, ttlSeconds: 3_600 },
       );
       requireCondition(
         credentials.expiresAt === 3_601_000,
         "TURN expiry was calculated incorrectly",
       );
+      const turn = credentials.iceServers.find((server) => server.username !== undefined);
+      requireCondition(turn !== undefined, "authenticated TURN server was removed");
       requireCondition(
-        credentials.iceServers.some((iceServer) => iceServer.username === "temporary-user"),
-        "authenticated TURN server was removed",
+        turn.username === "3601:friend-a",
+        "coturn REST username did not bind expiry and player",
       );
       requireCondition(
-        credentials.iceServers.every((iceServer) =>
-          iceServer.urls.every((url) => !url.includes(":53")),
-        ),
-        "browser-blocked port 53 candidate was returned",
+        turn.credential === (await expectedCoturnCredential(sharedSecret, turn.username)),
+        "coturn REST HMAC credential was incorrect",
       );
     },
   },
   {
-    name: "malformed Cloudflare TURN responses fail closed",
+    name: "malformed coturn configuration fails closed",
     run: async () => {
       let rejected = false;
       try {
-        await Effect.runPromise(
-          requestCloudflareTurnCredentials(
-            { turnKeyId: "a".repeat(32), turnKeyApiToken: "b".repeat(64) },
-            "friend-a",
-            {
-              fetcher: async () => Response.json({ iceServers: [] }, { status: 201 }),
-              ttlSeconds: 3_600,
-            },
-          ),
+        await createCoturnCredentials(
+          { stunUrls: [], turnUrls: [], sharedSecret: "short" },
+          "friend-a",
+          { ttlSeconds: 3_600 },
         );
       } catch {
         rejected = true;
       }
-      requireCondition(rejected, "TURN response without relay credentials was accepted");
+      requireCondition(rejected, "invalid coturn configuration was accepted");
     },
   },
   {
@@ -175,3 +139,18 @@ export const voiceScenarios: ReadonlyArray<VoiceScenario> = [
     },
   },
 ];
+
+async function expectedCoturnCredential(secret: string, username: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-1" },
+    false,
+    ["sign"],
+  );
+  const bytes = new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(username)));
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}

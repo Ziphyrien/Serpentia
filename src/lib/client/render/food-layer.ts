@@ -107,7 +107,15 @@ export class FoodLayer {
       sprite.scale.set(baseScale);
       if (food.kind === "remains") sprite.tint = 0xffc27a;
       this.container.addChild(sprite);
-      return { sprite, fallback: undefined, x: food.position.x, y: food.position.y, kind: food.kind, baseScale, phase };
+      return {
+        sprite,
+        fallback: undefined,
+        x: food.position.x,
+        y: food.position.y,
+        kind: food.kind,
+        baseScale,
+        phase,
+      };
     }
 
     // 降级：程序化光点
@@ -116,9 +124,19 @@ export class FoodLayer {
     const radius = desiredDiameter / 2;
     fallback.circle(0, 0, radius * 1.9).fill({ color, alpha: 0.18 });
     fallback.circle(0, 0, radius).fill({ color });
-    fallback.circle(-radius * 0.25, -radius * 0.25, radius * 0.35).fill({ color: 0xffffff, alpha: 0.9 });
+    fallback
+      .circle(-radius * 0.25, -radius * 0.25, radius * 0.35)
+      .fill({ color: 0xffffff, alpha: 0.9 });
     const baseScale = 1;
     this.container.addChild(fallback);
-    return { sprite: undefined, fallback, x: food.position.x, y: food.position.y, kind: food.kind, baseScale, phase };
+    return {
+      sprite: undefined,
+      fallback,
+      x: food.position.x,
+      y: food.position.y,
+      kind: food.kind,
+      baseScale,
+      phase,
+    };
   }
 }

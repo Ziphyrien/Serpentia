@@ -57,7 +57,9 @@ export class SnapshotBuffer {
     const previous = this.previous;
     const span = this.latestAt - this.previousAt;
     const ratio =
-      previous && span > 0 ? Math.min(1.25, Math.max(0, (renderServerTime - this.previousAt) / span)) : 1;
+      previous && span > 0
+        ? Math.min(1.25, Math.max(0, (renderServerTime - this.previousAt) / span))
+        : 1;
 
     const result: Array<InterpolatedSnake> = [];
     for (const snake of latest.snakes) {
@@ -90,11 +92,11 @@ function toView(snake: SnakeSnapshot): InterpolatedSnake {
 
 function lerpSnake(from: SnakeSnapshot, to: SnakeSnapshot, ratio: number): InterpolatedSnake {
   const maxLength = Math.max(from.body.length, to.body.length);
-  const body: Array<{ x: number; y: number }> = new Array(maxLength);
+  const body: Array<{ x: number; y: number }> = [];
   for (let index = 0; index < maxLength; index += 1) {
     const a = from.body[Math.min(index, from.body.length - 1)];
     const b = to.body[Math.min(index, to.body.length - 1)];
-    body[index] = { x: a.x + (b.x - a.x) * ratio, y: a.y + (b.y - a.y) * ratio };
+    body.push({ x: a.x + (b.x - a.x) * ratio, y: a.y + (b.y - a.y) * ratio });
   }
   let angleDelta = to.angle - from.angle;
   while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;

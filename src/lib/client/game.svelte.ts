@@ -47,7 +47,9 @@ export class GameController {
 
   status = $state<ConnectionStatus>("connecting");
   selfId = $state<PlayerId | undefined>(undefined);
-  leaderboard = $state<Array<{ playerId: string; nickname: string; length: number; kills: number }>>([]);
+  leaderboard = $state<
+    Array<{ playerId: string; nickname: string; length: number; kills: number }>
+  >([]);
   self = $state<HudSelf>({ length: 0, kills: 0, score: 0, alive: true, respawnIn: 0 });
   killFeed = $state<Array<KillFeedEntry>>([]);
   pingMs = $state(0);
@@ -97,22 +99,19 @@ export class GameController {
     this.predictor = new SelfPredictor(descriptor.rules, descriptor.tickRate);
     this.pointer = new PointerInput(this.input);
     this.joystick = new JoystickInput(this.input);
-    this.voice = new VoiceManager(
-      () => this.selfId ?? session.playerId,
-      {
-        onPeersChanged: (peers) => (this.voicePeers = peers),
-        onJoinedChanged: (joined, muted) => {
-          this.voiceJoined = joined;
-          this.voiceMuted = muted;
-        },
-        onError: (message) => {
-          this.voiceError = message;
-          window.setTimeout(() => (this.voiceError = undefined), 4000);
-        },
-        sendVoiceSignal: (target, signal) => this.client?.sendVoiceSignal(target, signal),
-        sendVoiceState: (muted) => this.client?.sendVoiceState(muted),
+    this.voice = new VoiceManager(() => this.selfId ?? session.playerId, {
+      onPeersChanged: (peers) => (this.voicePeers = peers),
+      onJoinedChanged: (joined, muted) => {
+        this.voiceJoined = joined;
+        this.voiceMuted = muted;
       },
-    );
+      onError: (message) => {
+        this.voiceError = message;
+        window.setTimeout(() => (this.voiceError = undefined), 4000);
+      },
+      sendVoiceSignal: (target, signal) => this.client?.sendVoiceSignal(target, signal),
+      sendVoiceState: (muted) => this.client?.sendVoiceState(muted),
+    });
     this.sfx.setVolume(settings.sfxVolume);
     this.sfx.setMuted(settings.sfxMuted);
     this.connect();
@@ -272,8 +271,7 @@ export class GameController {
       }
       for (const death of batch.deaths) {
         const victim = nickOf(death.playerId);
-        const killer =
-          death.cause._tag === "Snake" ? nickOf(death.cause.killerId) : undefined;
+        const killer = death.cause._tag === "Snake" ? nickOf(death.cause.killerId) : undefined;
         this.pushKillFeed(killer ? `${killer} 击杀了 ${victim}` : `${victim} 撞到了边界`);
         if (death.playerId === this.selfId) {
           this.predictor.markDead();
@@ -312,7 +310,8 @@ export class GameController {
   private startRespawnCountdown(respawnAtTick: number, currentTick: number): void {
     if (this.respawnTimer) clearInterval(this.respawnTimer);
     const serverNow = this.clock.serverNow() ?? Date.now();
-    this.respawnAtMs = serverNow + ((respawnAtTick - currentTick) / this.descriptor.tickRate) * 1000;
+    this.respawnAtMs =
+      serverNow + ((respawnAtTick - currentTick) / this.descriptor.tickRate) * 1000;
     const update = (): void => {
       const now = this.clock.serverNow() ?? Date.now();
       const remaining = Math.max(0, (this.respawnAtMs - now) / 1000);
@@ -360,8 +359,7 @@ export class GameController {
     if (this.destroyed) return;
     this.status = "reconnecting";
     this.reconnectAttempts += 1;
-    const delay =
-      forcedDelay ?? Math.min(8_000, 500 * 2 ** Math.min(this.reconnectAttempts, 4));
+    const delay = forcedDelay ?? Math.min(8_000, 500 * 2 ** Math.min(this.reconnectAttempts, 4));
     this.reconnectTimer = setTimeout(() => this.connect(), delay);
   }
 
@@ -377,7 +375,12 @@ export class GameController {
       if (!angleChanged && !boostChanged) return;
       this.lastSentAngle = this.input.angle;
       this.lastSentBoosting = this.input.boosting;
-      this.client.sendInput(this.nextSequence++, this.lastSnapshotTick, this.input.angle, this.input.boosting);
+      this.client.sendInput(
+        this.nextSequence++,
+        this.lastSnapshotTick,
+        this.input.angle,
+        this.input.boosting,
+      );
     }, INPUT.sendIntervalMs);
 
     this.pingTimer = setInterval(() => {

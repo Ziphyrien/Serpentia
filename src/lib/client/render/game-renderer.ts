@@ -83,7 +83,9 @@ export class GameRenderer {
     const position = this.food?.positionOf(foodId);
     if (!position) return;
     const selfHead = this.selfHead();
-    const distance = selfHead ? Math.hypot(position.x - selfHead.x, position.y - selfHead.y) : Infinity;
+    const distance = selfHead
+      ? Math.hypot(position.x - selfHead.x, position.y - selfHead.y)
+      : Infinity;
     if (distance < 720) {
       const color = position.kind === "boost" ? 0xffd75e : 0xfff3f8;
       this.fx?.burst(position.x, position.y, color, position.kind === "ambient" ? 8 : 14, 200, 3.5);
@@ -151,11 +153,11 @@ export class GameRenderer {
     if (selfState && selfSnapshot?.alive) {
       const alpha = selfState.alpha;
       const maxLength = Math.max(selfState.from.body.length, selfState.to.body.length);
-      const body: Array<{ x: number; y: number }> = new Array(maxLength);
+      const body: Array<{ x: number; y: number }> = [];
       for (let index = 0; index < maxLength; index += 1) {
         const a = selfState.from.body[Math.min(index, selfState.from.body.length - 1)];
         const b = selfState.to.body[Math.min(index, selfState.to.body.length - 1)];
-        body[index] = { x: a.x + (b.x - a.x) * alpha, y: a.y + (b.y - a.y) * alpha };
+        body.push({ x: a.x + (b.x - a.x) * alpha, y: a.y + (b.y - a.y) * alpha });
       }
       let angleDelta = selfState.to.angle - selfState.from.angle;
       while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
@@ -200,7 +202,8 @@ export class GameRenderer {
     // 4. 图层同步
     const viewBounds = this.camera.viewBounds(width, height);
     const nowMs = performance.now();
-    if (controller.latestSnapshot) this.food.sync(controller.latestSnapshot.foods, viewBounds, nowMs);
+    if (controller.latestSnapshot)
+      this.food.sync(controller.latestSnapshot.foods, viewBounds, nowMs);
     this.snakes.update(views, viewBounds, this.settings.showNicknames, nowMs);
     this.fx.update(deltaMS);
 

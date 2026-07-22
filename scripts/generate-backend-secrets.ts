@@ -27,7 +27,7 @@ if (playerIds.length === 0) {
   const signingSecret = encodeBase64Url(crypto.getRandomValues(new Uint8Array(32)));
   console.log("Friend access codes (display once):");
   for (const code of codes) console.log(`${code.playerId}: ${code.accessCode}`);
-  console.log("\nWrangler secret values:");
+  console.log("\nVPS environment values:");
   console.log(`ACCESS_KEY_HASHES=${JSON.stringify(records)}`);
   console.log(`SESSION_SIGNING_SECRET=${signingSecret}`);
 }

@@ -68,7 +68,11 @@ export class SelfPredictor {
       length: snapshot.length,
     };
     this.current = state;
-    this.previous = { body: state.body.map((p) => ({ ...p })), angle: state.angle, length: state.length };
+    this.previous = {
+      body: state.body.map((p) => ({ ...p })),
+      angle: state.angle,
+      length: state.length,
+    };
     this.nextTickAt = snapshotServerTime + this.tickMs;
     // 补上 snapshot 生成到抵达之间流逝的 ticks（近似：使用当前意图）
     let guard = 0;
@@ -97,7 +101,9 @@ export class SelfPredictor {
   }
 
   /** 渲染帧：返回 prev/current 之间的插值系数与两步状态。 */
-  renderState(serverNow: number): { from: PredictedStep; to: PredictedStep; alpha: number } | undefined {
+  renderState(
+    serverNow: number,
+  ): { from: PredictedStep; to: PredictedStep; alpha: number } | undefined {
     if (!this.current || !this.previous) return undefined;
     const alpha = Math.min(1, Math.max(0, 1 - (this.nextTickAt - serverNow) / this.tickMs));
     return { from: this.previous, to: this.current, alpha };
@@ -110,7 +116,9 @@ export class SelfPredictor {
     const maximumTurn = this.rules.turnRate * secondsPerTick;
 
     const angle =
-      intentAngle === undefined ? current.angle : turnTowards(current.angle, intentAngle, maximumTurn);
+      intentAngle === undefined
+        ? current.angle
+        : turnTowards(current.angle, intentAngle, maximumTurn);
     if (intentBoosting !== undefined) this.boosting = intentBoosting;
 
     const canBoost = this.boosting && current.length > this.rules.boostMinimumLength;

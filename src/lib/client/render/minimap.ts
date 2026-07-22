@@ -29,10 +29,20 @@ export class Minimap {
 
     // 场地区域与边框
     ctx.fillStyle = "rgba(21, 29, 61, 0.55)";
-    ctx.fillRect(toX(-this.halfSize), toY(-this.halfSize), this.halfSize * 2 * scale, this.halfSize * 2 * scale);
+    ctx.fillRect(
+      toX(-this.halfSize),
+      toY(-this.halfSize),
+      this.halfSize * 2 * scale,
+      this.halfSize * 2 * scale,
+    );
     ctx.strokeStyle = "rgba(61, 220, 132, 0.8)";
     ctx.lineWidth = 1.5;
-    ctx.strokeRect(toX(-this.halfSize), toY(-this.halfSize), this.halfSize * 2 * scale, this.halfSize * 2 * scale);
+    ctx.strokeRect(
+      toX(-this.halfSize),
+      toY(-this.halfSize),
+      this.halfSize * 2 * scale,
+      this.halfSize * 2 * scale,
+    );
 
     // 食物（抽样，避免过量绘制）
     ctx.fillStyle = "rgba(255, 243, 248, 0.5)";

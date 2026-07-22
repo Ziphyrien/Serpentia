@@ -1,4 +1,4 @@
-import { Container, Graphics, Sprite, Text, type Texture } from "pixi.js";
+import { Container, Graphics, Sprite, Text } from "pixi.js";
 import { skinForPlayer, type SkinDefinition } from "../config";
 import { HEAD_TEXTURE_CONTENT, type GameTextures } from "./assets";
 
@@ -147,7 +147,12 @@ export class SnakeLayer {
       if (point.y > maxY) maxY = point.y;
     }
     const radius = snake.radius;
-    if (maxX < view.left - radius || minX > view.right + radius || maxY < view.top - radius || minY > view.bottom + radius) {
+    if (
+      maxX < view.left - radius ||
+      minX > view.right + radius ||
+      maxY < view.top - radius ||
+      minY > view.bottom + radius
+    ) {
       nodes.root.visible = false;
       return;
     }

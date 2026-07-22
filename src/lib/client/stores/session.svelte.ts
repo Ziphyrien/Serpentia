@@ -78,8 +78,7 @@ export class SessionStore {
     try {
       await fetch("/api/session", { method: "DELETE" });
     } finally {
-      const descriptor =
-        this.state.status === "authenticated" ? this.state.descriptor : undefined;
+      const descriptor = this.state.status === "authenticated" ? this.state.descriptor : undefined;
       if (descriptor) this.state = { status: "anonymous", descriptor };
       else await this.bootstrap();
     }

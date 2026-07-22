@@ -1,6 +1,6 @@
-# Serpentia 后端接口
+# 蛇域后端接口
 
-后端已经提供朋友房间所需的鉴权、房间协调、服务端权威模拟、状态广播、断线续局和 WebRTC P2P 信令。前端不得直接修改权威游戏状态，也不得通过游戏 WebSocket 传输音频。
+Bun 后端提供朋友房间所需的鉴权、房间协调、服务端权威模拟、状态广播、断线续局和 WebRTC P2P 信令。前端不得直接修改权威游戏状态，也不得通过游戏 WebSocket 传输音频。
 
 共享 TypeScript 契约位于 `src/lib/protocol/index.ts`。前端应优先直接导入其中的消息、快照和 HTTP 类型，而不是复制一份可能漂移的声明。
 
@@ -67,7 +67,7 @@ Content-Type: application/json
 - `INVALID_REQUEST`：Content-Type、JSON 或字段格式无效
 - `INVALID_ACCESS`：访问码或昵称无效
 - `RATE_LIMITED`：同一来源一分钟内尝试过多
-- `RUNTIME_UNAVAILABLE`：Cloudflare 运行时或房间暂不可用
+- `RUNTIME_UNAVAILABLE`：Bun 服务或房间暂不可用
 - `SERVER_MISCONFIGURED`：生产 secret 缺失或格式错误
 
 ### 退出
@@ -84,20 +84,20 @@ DELETE /api/session
 POST /api/turn-credentials
 ```
 
-该端点要求有效的 `serpentia_session` cookie。后端使用 Worker Secrets 中的长期 TURN Key 调用 Cloudflare Realtime API，只向浏览器返回短期凭据：
+该端点要求有效的 `serpentia_session` cookie。后端使用 coturn `static-auth-secret` 生成符合 TURN REST API 规范的短期 HMAC-SHA1 凭据，长期共享密钥不会返回浏览器：
 
 ```json
 {
   "iceServers": [
-    { "urls": ["stun:stun.cloudflare.com:3478"] },
+    { "urls": ["stun:voice.example.com:3478"] },
     {
       "urls": [
-        "turn:turn.cloudflare.com:3478?transport=udp",
-        "turn:turn.cloudflare.com:80?transport=tcp",
-        "turns:turn.cloudflare.com:443?transport=tcp"
+        "turn:voice.example.com:3478?transport=udp",
+        "turn:voice.example.com:3478?transport=tcp",
+        "turns:voice.example.com:5349?transport=tcp"
       ],
-      "username": "temporary-user",
-      "credential": "temporary-credential"
+      "username": "1784761600:friend-a",
+      "credential": "temporary-hmac-credential"
     }
   ],
   "expiresAt": 1784761600000,
@@ -105,15 +105,15 @@ POST /api/turn-credentials
 }
 ```
 
-凭据有效期为 6 小时；前端应在 `refreshAfter` 后重新请求，并通过 `RTCPeerConnection.setConfiguration()` 更新 `iceServers`。浏览器容易阻塞的 53 端口会在后端过滤。每位玩家十分钟最多签发 12 次。
+凭据有效期为 6 小时；前端应在 `refreshAfter` 后重新请求，并通过 `RTCPeerConnection.setConfiguration()` 更新 `iceServers`。每位玩家十分钟最多签发 12 次。
 
 可能的错误码：
 
 - `UNAUTHORIZED`：会话不存在或已过期
 - `RATE_LIMITED`：凭据请求过于频繁
-- `RUNTIME_UNAVAILABLE`：Cloudflare 房间协调暂不可用
-- `SERVER_MISCONFIGURED`：TURN 或会话 Secret 缺失
-- `TURN_UNAVAILABLE`：Cloudflare Realtime 凭据 API 调用失败
+- `RUNTIME_UNAVAILABLE`：Bun 房间协调暂不可用
+- `SERVER_MISCONFIGURED`：coturn 或会话 Secret 缺失
+- `TURN_UNAVAILABLE`：coturn 临时凭据生成失败
 
 ## WebSocket
 
@@ -277,7 +277,7 @@ WebSocket 错误码：
 7. `refreshAfter` 到达后刷新凭据并调用 `setConfiguration()`
 8. 成员离开 roster 时关闭对应 `RTCPeerConnection`
 
-默认媒体拓扑仍是浏览器 WebRTC P2P mesh：能够直连时走 STUN/P2P；双方对称 NAT 等无法打洞的情况自动走 Cloudflare TURN。没有安装 RealtimeKit，也没有接入 Realtime SFU，游戏 WebSocket 不承载音频。
+默认媒体拓扑仍是浏览器 WebRTC P2P mesh：能够直连时走 STUN/P2P；双方对称 NAT 等无法打洞的情况自动走 VPS 上的 coturn。没有接入 SFU，游戏 WebSocket 不承载音频。
 
 ## 生产配置
 
@@ -289,13 +289,20 @@ bun run backend:secrets -- friend-a friend-b
 
 该命令只输出到终端，不写入仓库。访问码只展示一次，应分别交给对应朋友。
 
-将命令输出的两个值分别写入 Cloudflare Secrets：
+将命令输出的两个值写入 VPS 的 `.env`，并配置 Bun/TLS/coturn：
 
-```bash
-wrangler secret put ACCESS_KEY_HASHES
-wrangler secret put SESSION_SIGNING_SECRET
-wrangler secret put TURN_KEY_ID
-wrangler secret put TURN_KEY_API_TOKEN
+```dotenv
+NODE_ENV=production
+HOST=0.0.0.0
+PORT=443
+COOKIE_SECURE=true
+TLS_CERT_FILE=/etc/letsencrypt/live/snake.example.com/fullchain.pem
+TLS_KEY_FILE=/etc/letsencrypt/live/snake.example.com/privkey.pem
+ACCESS_KEY_HASHES='[...]'
+SESSION_SIGNING_SECRET=...
+STUN_URLS=stun:voice.example.com:3478
+TURN_URLS=turn:voice.example.com:3478?transport=udp,turns:voice.example.com:5349?transport=tcp
+TURN_SHARED_SECRET=...
 ```
 
 `ACCESS_KEY_HASHES` 的格式为：
@@ -315,4 +322,4 @@ bun run check
 bun run build
 ```
 
-会话 cookie 使用 `SameSite=Strict`，因此正式前端应与这些 API 同源部署；本地开发可通过同源 SvelteKit dev server 或代理访问。
+会话 cookie 使用 `SameSite=Strict`，因此前端、API 和 WebSocket 必须由同一个 Bun 服务同源供应。生产语音需要 HTTPS；Bun 可通过 `TLS_CERT_FILE` 和 `TLS_KEY_FILE` 直接终止 TLS。完整部署步骤见 [`vps-deployment.md`](vps-deployment.md)。

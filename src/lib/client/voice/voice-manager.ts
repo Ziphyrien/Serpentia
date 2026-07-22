@@ -1,4 +1,9 @@
-import type { PlayerId, TurnCredentialsResponse, VoiceParticipant, VoiceSignal } from "$lib/protocol";
+import type {
+  PlayerId,
+  TurnCredentialsResponse,
+  VoiceParticipant,
+  VoiceSignal,
+} from "$lib/protocol";
 
 interface PeerEntry {
   pc: RTCPeerConnection;
@@ -88,7 +93,7 @@ export class VoiceManager {
   leave(): void {
     if (!this.joined) return;
     this.joined = false;
-    for (const playerId of [...this.peers.keys()]) this.dropPeer(playerId);
+    for (const playerId of this.peers.keys()) this.dropPeer(playerId);
     this.localStream?.getTracks().forEach((track) => track.stop());
     this.localStream = undefined;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
@@ -130,7 +135,7 @@ export class VoiceManager {
       if (participant.playerId === this.selfId()) continue;
       this.ensurePeer(participant);
     }
-    for (const playerId of [...this.peers.keys()]) {
+    for (const playerId of this.peers.keys()) {
       if (!this.roster.has(playerId)) this.dropPeer(playerId);
     }
     this.emitPeers();

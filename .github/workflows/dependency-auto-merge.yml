@@ -64,10 +64,3 @@ jobs:
         run: |
           gh pr merge "$NUMBER" --repo "$REPOSITORY" --squash --delete-branch
           echo "merged=true" >> "$GITHUB_OUTPUT"
-
-  sync-worker-types:
-    needs: auto-merge
-    if: needs.auto-merge.outputs.merged == 'true'
-    permissions:
-      contents: write
-    uses: ./.github/workflows/sync-worker-types.yml

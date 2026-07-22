@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "server/**/*.ts",
+    "scripts/**/*.ts",
+    "src/lib/protocol/**/*.ts",
+    "src/lib/server/**/*.ts"
+  ]
+}

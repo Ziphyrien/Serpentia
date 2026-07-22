@@ -1,6 +1,5 @@
 import { GameEngine } from "../../game/engine";
 import { gameConfig } from "../../game/__tests__/game-config";
-import { encodeNicknameHeader, readPlayerIdentity } from "../connection-identity";
 import { ConnectionTrafficGuard } from "../connection-traffic-guard";
 import { RoomController } from "../room-controller";
 
@@ -63,44 +62,6 @@ export const roomScenarios: ReadonlyArray<RoomScenario> = [
       requireCondition(snake.id === "friend-a", "connection spoofed player identity");
       requireCondition(snake.boosting, "authorized boost input was not applied");
       requireCondition(snake.lastInputSequence === 1, "input acknowledgement was not exposed");
-    },
-  },
-  {
-    name: "PartyServer ingress accepts a bounded trusted player identity",
-    run: () => {
-      const identity = readPlayerIdentity(
-        new Request("https://snake.example/api/parties/game-room/friends", {
-          headers: {
-            "x-serpentia-player-id": "friend-a",
-            "x-serpentia-nickname": encodeNicknameHeader("  Alpha   Friend  "),
-            "x-serpentia-session-expires-at": "2000",
-          },
-        }),
-        1000,
-      );
-      requireCondition(identity !== undefined, "valid identity was rejected");
-      requireCondition(identity.playerId === "friend-a", "player id changed");
-      requireCondition(identity.nickname === "Alpha Friend", "nickname was not normalized");
-    },
-  },
-  {
-    name: "PartyServer ingress rejects missing or unsafe player identity",
-    run: () => {
-      requireCondition(
-        readPlayerIdentity(new Request("https://snake.example")) === undefined,
-        "missing identity was accepted",
-      );
-      requireCondition(
-        readPlayerIdentity(
-          new Request("https://snake.example", {
-            headers: {
-              "x-serpentia-player-id": "friend-a",
-              "x-serpentia-nickname": "A".repeat(25),
-            },
-          }),
-        ) === undefined,
-        "unsafe nickname was accepted",
-      );
     },
   },
   {

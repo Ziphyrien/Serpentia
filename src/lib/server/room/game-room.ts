@@ -1,86 +1,57 @@
 import { Effect } from "effect";
-import { Server, type Connection, type ConnectionContext, type WSMessage } from "partyserver";
 import {
   GAME_PROTOCOL_VERSION,
   MAX_CLIENT_MESSAGE_BYTES,
   decodeClientMessage,
   encodeServerMessage,
   type ClientMessage,
+  type RoomMetadata,
   type ServerErrorCode,
   type ServerMessage,
   type TickEventBatch,
   type VoiceSignal,
 } from "../../protocol";
-import { AccessAttemptLimiter } from "../access/attempt-limiter";
 import { defaultGameConfig } from "../game/config";
 import { GameEngine } from "../game/engine";
 import { VoiceRoster } from "../voice/voice-roster";
-import { readPlayerIdentity, type ConnectionIdentity } from "./connection-identity";
+import type { ConnectionIdentity } from "./connection-identity";
 import { ConnectionTrafficGuard, type MessageCategory } from "./connection-traffic-guard";
 import { RoomController } from "./room-controller";
 import { RECONNECT_GRACE_TICKS, ROOM_METADATA, SNAPSHOT_RATE } from "./room-settings";
 
-type RoomConnection = Connection<ConnectionIdentity>;
-
 const MAX_CATCH_UP_TICKS = 5;
 
-export class GameRoom extends Server<Env> {
-  static options = { hibernate: true };
+/** Bun WebSocket 与游戏房间之间的最小传输契约。 */
+export interface GameRoomConnection {
+  readonly id: string;
+  readonly identity: ConnectionIdentity;
+  send(message: string): void;
+  close(code: number, reason: string): void;
+}
 
+/**
+ * 进程内权威房间。只依赖最小连接接口，不依赖具体宿主运行时。
+ * 单 VPS 由一个实例承载 friends 房间。
+ */
+export class GameRoom {
   private readonly controller = new RoomController(
     new GameEngine(defaultGameConfig, 0x5eed),
     RECONNECT_GRACE_TICKS,
   );
   private readonly voiceRoster = new VoiceRoster();
-  private readonly accessAttemptLimiter = new AccessAttemptLimiter();
-  private readonly turnCredentialAttemptLimiter = new AccessAttemptLimiter(12, 10 * 60_000);
   private readonly trafficGuard = new ConnectionTrafficGuard();
+  private readonly connections = new Map<string, GameRoomConnection>();
   private readonly pendingEvents: Array<TickEventBatch> = [];
   private timer: ReturnType<typeof setTimeout> | undefined;
   private nextTickAt = 0;
 
-  override onStart(): void {
-    for (const connection of this.getConnections<ConnectionIdentity>()) {
-      const identity = connection.state;
-      if (identity === null) continue;
-      if (identity.sessionExpiresAt <= Date.now()) {
-        this.sendError(connection, "SESSION_EXPIRED", true);
-        connection.close(4401, "Session expired");
-        continue;
-      }
-      const result = this.controller.join(connection.id, identity);
-      if (result._tag === "Rejected") {
-        connection.close(4409, "Nickname is already in use");
-        continue;
-      }
-      this.voiceRoster.join(identity.playerId, identity.nickname);
-    }
-    if (this.controller.shouldRun) this.startLoop();
-  }
+  constructor(private readonly metadata: RoomMetadata = ROOM_METADATA) {}
 
-  override onRequest(request: Request): Response {
-    if (request.method !== "POST") return new Response("Not found", { status: 404 });
-
-    const pathname = new URL(request.url).pathname;
-    if (pathname === "/__access-attempt") {
-      const source = request.headers.get("x-serpentia-source") ?? "unknown";
-      return this.accessAttemptLimiter.allow(source)
-        ? new Response(null, { status: 204 })
-        : new Response("Too many attempts", { status: 429 });
-    }
-    if (pathname === "/__turn-credential-attempt") {
-      const playerId = request.headers.get("x-serpentia-player-id") ?? "unknown";
-      return this.turnCredentialAttemptLimiter.allow(playerId)
-        ? new Response(null, { status: 204 })
-        : new Response("Too many attempts", { status: 429 });
-    }
-    return new Response("Not found", { status: 404 });
-  }
-
-  override onConnect(connection: RoomConnection, context: ConnectionContext): void {
-    const identity = readPlayerIdentity(context.request);
-    if (identity === undefined) {
-      connection.close(4401, "A valid game session is required");
+  connect(connection: GameRoomConnection): void {
+    const identity = connection.identity;
+    if (identity.sessionExpiresAt <= Date.now()) {
+      this.sendError(connection, "SESSION_EXPIRED", true);
+      connection.close(4401, "Session expired");
       return;
     }
 
@@ -91,10 +62,10 @@ export class GameRoom extends Server<Env> {
       return;
     }
 
-    connection.setState(identity);
+    this.connections.set(connection.id, connection);
     this.voiceRoster.join(identity.playerId, identity.nickname);
     if (result.replacedConnectionId !== undefined) {
-      this.getConnection(result.replacedConnectionId)?.close(4001, "Reconnected elsewhere");
+      this.connections.get(result.replacedConnectionId)?.close(4001, "Reconnected elsewhere");
     }
 
     this.send(connection, {
@@ -104,16 +75,19 @@ export class GameRoom extends Server<Env> {
       resumed: result.resumed,
       sessionExpiresAt: identity.sessionExpiresAt,
       serverTime: Date.now(),
-      room: ROOM_METADATA,
+      room: this.metadata,
       snapshot: result.snapshot,
       voice: this.voiceRoster.snapshot(),
     });
-    this.broadcastVoiceRoster([connection.id]);
+    this.broadcastVoiceRoster(connection.id);
     this.startLoop();
   }
 
-  override onMessage(connection: RoomConnection, message: WSMessage): void {
-    if (connection.state !== null && connection.state.sessionExpiresAt <= Date.now()) {
+  receive(connectionId: string, message: string | Uint8Array): void {
+    const connection = this.connections.get(connectionId);
+    if (connection === undefined) return;
+
+    if (connection.identity.sessionExpiresAt <= Date.now()) {
       this.sendError(connection, "SESSION_EXPIRED", true);
       connection.close(4401, "Session expired");
       return;
@@ -150,39 +124,41 @@ export class GameRoom extends Server<Env> {
     this.handleMessage(connection, decoded);
   }
 
-  override onClose(connection: RoomConnection): void {
-    this.trafficGuard.forget(connection.id);
-    const left = this.controller.leave(connection.id);
-    if (left && connection.state !== null) {
-      this.voiceRoster.leave(connection.state.playerId);
+  disconnect(connectionId: string): void {
+    const connection = this.connections.get(connectionId);
+    if (connection === undefined) return;
+    this.connections.delete(connectionId);
+    this.trafficGuard.forget(connectionId);
+
+    const left = this.controller.leave(connectionId);
+    if (left) {
+      this.voiceRoster.leave(connection.identity.playerId);
       this.broadcastVoiceRoster();
     }
     if (!this.controller.shouldRun) this.stopLoop();
   }
 
-  override onError(connection: RoomConnection, error: unknown): void {
+  reportError(connectionId: string, error: unknown): void {
     console.error(
       JSON.stringify({
         level: "error",
         event: "game_room_websocket_error",
-        connectionId: connection.id,
+        connectionId,
         error: String(error),
       }),
     );
-    connection.close(1011, "WebSocket transport error");
+    this.connections.get(connectionId)?.close(1011, "WebSocket transport error");
   }
 
-  override onException(error: unknown): void {
-    console.error(
-      JSON.stringify({
-        level: "error",
-        event: "game_room_exception",
-        error: String(error),
-      }),
-    );
+  dispose(): void {
+    this.stopLoop();
+    for (const connection of this.connections.values()) {
+      connection.close(1001, "Server shutting down");
+    }
+    this.connections.clear();
   }
 
-  private handleMessage(connection: RoomConnection, message: ClientMessage): void {
+  private handleMessage(connection: GameRoomConnection, message: ClientMessage): void {
     switch (message._tag) {
       case "ping":
         this.send(connection, {
@@ -210,10 +186,9 @@ export class GameRoom extends Server<Env> {
     }
   }
 
-  private handleVoiceState(connection: RoomConnection, muted: boolean): void {
-    const identity = connection.state;
+  private handleVoiceState(connection: GameRoomConnection, muted: boolean): void {
+    const identity = connection.identity;
     if (
-      identity === null ||
       !this.controller.isCurrentConnection(connection.id, identity.playerId) ||
       !this.voiceRoster.setMuted(identity.playerId, muted)
     ) {
@@ -224,13 +199,12 @@ export class GameRoom extends Server<Env> {
   }
 
   private forwardVoiceSignal(
-    connection: RoomConnection,
+    connection: GameRoomConnection,
     targetPlayerId: string,
     signal: VoiceSignal,
   ): void {
-    const identity = connection.state;
+    const identity = connection.identity;
     if (
-      identity === null ||
       !this.controller.isCurrentConnection(connection.id, identity.playerId) ||
       !this.voiceRoster.has(identity.playerId)
     ) {
@@ -244,9 +218,7 @@ export class GameRoom extends Server<Env> {
 
     const targetConnectionId = this.controller.connectionIdForPlayer(targetPlayerId);
     const target =
-      targetConnectionId === undefined
-        ? undefined
-        : this.getConnection<ConnectionIdentity>(targetConnectionId);
+      targetConnectionId === undefined ? undefined : this.connections.get(targetConnectionId);
     if (target === undefined || !this.voiceRoster.has(targetPlayerId)) {
       this.sendError(connection, "VOICE_TARGET_UNAVAILABLE", true);
       return;
@@ -311,15 +283,13 @@ export class GameRoom extends Server<Env> {
       result.events.respawnedPlayerIds.length > 0 ||
       result.expiredPlayerIds.length > 0;
     if (urgent || this.controller.currentTick % snapshotInterval === 0) {
-      this.broadcast(
-        encodeServerMessage({
-          v: GAME_PROTOCOL_VERSION,
-          _tag: "snapshot",
-          serverTime: Date.now(),
-          snapshot: this.controller.snapshot(),
-          events: this.pendingEvents.splice(0),
-        }),
-      );
+      this.broadcast({
+        v: GAME_PROTOCOL_VERSION,
+        _tag: "snapshot",
+        serverTime: Date.now(),
+        snapshot: this.controller.snapshot(),
+        events: this.pendingEvents.splice(0),
+      });
     }
     if (!this.controller.shouldRun) this.stopLoop();
   }
@@ -330,35 +300,55 @@ export class GameRoom extends Server<Env> {
 
   private closeExpiredSessions(): void {
     const now = Date.now();
-    for (const connection of this.getConnections<ConnectionIdentity>()) {
-      if (connection.state === null || connection.state.sessionExpiresAt > now) continue;
+    for (const connection of this.connections.values()) {
+      if (connection.identity.sessionExpiresAt > now) continue;
       this.sendError(connection, "SESSION_EXPIRED", true);
       connection.close(4401, "Session expired");
     }
   }
 
-  private broadcastVoiceRoster(without?: Array<string>): void {
+  private broadcastVoiceRoster(withoutConnectionId?: string): void {
     this.broadcast(
-      encodeServerMessage({
+      {
         v: GAME_PROTOCOL_VERSION,
         _tag: "voice-roster",
         voice: this.voiceRoster.snapshot(),
-      }),
-      without,
+      },
+      withoutConnectionId,
     );
   }
 
-  private rejectRateLimitedConnection(connection: RoomConnection): void {
+  private broadcast(message: ServerMessage, withoutConnectionId?: string): void {
+    const encoded = encodeServerMessage(message);
+    for (const connection of this.connections.values()) {
+      if (connection.id === withoutConnectionId) continue;
+      try {
+        connection.send(encoded);
+      } catch (error) {
+        this.reportError(connection.id, error);
+      }
+    }
+  }
+
+  private rejectRateLimitedConnection(connection: GameRoomConnection): void {
     this.sendError(connection, "RATE_LIMITED", true);
     connection.close(4429, "Message rate limit exceeded");
   }
 
-  private sendError(connection: RoomConnection, code: ServerErrorCode, retryable: boolean): void {
+  private sendError(
+    connection: GameRoomConnection,
+    code: ServerErrorCode,
+    retryable: boolean,
+  ): void {
     this.send(connection, { v: GAME_PROTOCOL_VERSION, _tag: "error", code, retryable });
   }
 
-  private send(connection: RoomConnection, message: ServerMessage): void {
-    connection.send(encodeServerMessage(message));
+  private send(connection: GameRoomConnection, message: ServerMessage): void {
+    try {
+      connection.send(encodeServerMessage(message));
+    } catch (error) {
+      this.reportError(connection.id, error);
+    }
   }
 }
 

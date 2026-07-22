@@ -1,0 +1,23 @@
+[Unit]
+Description=Serpentia Bun game server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=serpentia
+Group=serpentia
+WorkingDirectory=/opt/serpentia
+EnvironmentFile=/opt/serpentia/.env
+ExecStart=/home/serpentia/.bun/bin/bun run start
+Restart=always
+RestartSec=3
+TimeoutStopSec=15
+LimitNOFILE=65536
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
