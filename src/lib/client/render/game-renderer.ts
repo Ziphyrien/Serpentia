@@ -1,0 +1,230 @@
+import { Application, Container } from "pixi.js";
+import type { GameController } from "../game.svelte";
+import type { SettingsStore } from "../stores/settings.svelte";
+import { RENDER, skinForPlayer } from "../config";
+import { loadGameTextures, type GameTextures } from "./assets";
+import { Camera } from "./camera";
+import { ArenaLayer } from "./arena-layer";
+import { FoodLayer } from "./food-layer";
+import { SnakeLayer, type SnakeRenderView } from "./snake-layer";
+import { FxLayer } from "./fx-layer";
+
+/**
+ * 渲染编排器：拥有 Pixi Application 与所有图层，
+ * 每帧从控制器/模拟层拉取最新状态并驱动图层。
+ * 是渲染侧唯一的组合点。
+ */
+export class GameRenderer {
+  private app: Application | undefined;
+  private textures: GameTextures | undefined;
+  private world = new Container();
+  private camera = new Camera();
+  private arena: ArenaLayer | undefined;
+  private food: FoodLayer | undefined;
+  private snakes: SnakeLayer | undefined;
+  private fx: FxLayer | undefined;
+  private started = false;
+  private destroyed = false;
+  private trailAccumulator = 0;
+  private selfRadiusSmooth = 11;
+  private lastBoosting = false;
+
+  constructor(
+    private readonly controller: GameController,
+    private readonly settings: SettingsStore,
+  ) {}
+
+  async init(host: HTMLElement): Promise<void> {
+    const app = new Application();
+    await app.init({
+      preference: "webgl",
+      antialias: true,
+      resizeTo: host,
+      background: 0x0b1020,
+      resolution: this.settings.highQuality
+        ? Math.min(RENDER.maxDevicePixelRatio, window.devicePixelRatio || 1)
+        : 1,
+      autoDensity: true,
+    });
+    if (this.destroyed) {
+      app.destroy();
+      return;
+    }
+    this.app = app;
+    host.appendChild(app.canvas);
+
+    this.textures = await loadGameTextures();
+    if (this.destroyed) return;
+
+    const rules = this.controller.descriptor.rules;
+    this.arena = new ArenaLayer(this.textures.bgTile, rules.arenaHalfSize);
+    this.food = new FoodLayer(this.textures.foodPearl, this.textures.foodGold, rules.foodRadius);
+    this.snakes = new SnakeLayer(this.textures);
+    this.fx = new FxLayer();
+
+    app.stage.addChild(this.arena.screenContainer);
+    this.world.addChild(this.arena.worldContainer);
+    this.world.addChild(this.food.container);
+    this.world.addChild(this.snakes.container);
+    this.world.addChild(this.fx.container);
+    app.stage.addChild(this.world);
+
+    this.resize();
+  }
+
+  start(): void {
+    if (this.started || !this.app) return;
+    this.started = true;
+    this.app.ticker.add(({ deltaMS }) => this.frame(deltaMS));
+  }
+
+  /** 食物被吃：闪光 + 就近音效（由控制器在事件到达时调用）。 */
+  foodConsumed(foodId: number): void {
+    const position = this.food?.positionOf(foodId);
+    if (!position) return;
+    const selfHead = this.selfHead();
+    const distance = selfHead ? Math.hypot(position.x - selfHead.x, position.y - selfHead.y) : Infinity;
+    if (distance < 720) {
+      const color = position.kind === "boost" ? 0xffd75e : 0xfff3f8;
+      this.fx?.burst(position.x, position.y, color, position.kind === "ambient" ? 8 : 14, 200, 3.5);
+      if (distance < 400) this.controller.sfx.eat(position.kind !== "ambient");
+    }
+    this.food?.remove(foodId);
+  }
+
+  /** 蛇死亡：沿身体爆裂（由控制器在事件到达时调用）。 */
+  snakeDied(playerId: string): void {
+    const last = this.snakes?.lastBodyOf(playerId);
+    if (!last || last.body.length === 0) return;
+    const samples = Math.min(14, last.body.length);
+    const stride = Math.max(1, Math.floor(last.body.length / samples));
+    for (let index = 0; index < last.body.length; index += stride) {
+      const point = last.body[index];
+      this.fx?.burst(point.x, point.y, last.skin.body, 5, 180, 4);
+    }
+  }
+
+  resize(): void {
+    if (!this.app) return;
+    this.arena?.resize(this.app.screen.width, this.app.screen.height);
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    this.snakes?.destroy();
+    this.food?.destroy();
+    this.fx?.destroy();
+    this.app?.destroy(true);
+    this.app = undefined;
+  }
+
+  private frame(deltaMS: number): void {
+    if (!this.app || !this.arena || !this.food || !this.snakes || !this.fx) return;
+    const controller = this.controller;
+    const clock = controller.clockSync;
+    const serverNow = clock.serverNow() ?? Date.now();
+
+    // 1. 推进自我预测
+    controller.selfPredictor.advance(serverNow, controller.input.angle, controller.input.boosting);
+
+    // 2. 组装本帧蛇视图
+    const views: Array<SnakeRenderView> = [];
+    const renderTime = serverNow - controller.snapshotBuffer.interpolationDelay();
+    for (const remote of controller.snapshotBuffer.sampleRemoteSnakes(renderTime)) {
+      views.push({
+        id: remote.id,
+        nickname: remote.nickname,
+        body: remote.body,
+        angle: remote.angle,
+        radius: remote.radius,
+        boosting: remote.boosting,
+        invulnerable: remote.invulnerable,
+        isSelf: false,
+      });
+    }
+
+    const selfSnapshot = controller.latestSnapshot?.snakes.find(
+      (snake) => snake.id === controller.selfId,
+    );
+    const selfState = controller.selfPredictor.renderState(serverNow);
+    let selfHead: { x: number; y: number } | undefined;
+    if (selfState && selfSnapshot?.alive) {
+      const alpha = selfState.alpha;
+      const maxLength = Math.max(selfState.from.body.length, selfState.to.body.length);
+      const body: Array<{ x: number; y: number }> = new Array(maxLength);
+      for (let index = 0; index < maxLength; index += 1) {
+        const a = selfState.from.body[Math.min(index, selfState.from.body.length - 1)];
+        const b = selfState.to.body[Math.min(index, selfState.to.body.length - 1)];
+        body[index] = { x: a.x + (b.x - a.x) * alpha, y: a.y + (b.y - a.y) * alpha };
+      }
+      let angleDelta = selfState.to.angle - selfState.from.angle;
+      while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
+      while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
+      const radius = selfSnapshot.radius;
+      this.selfRadiusSmooth += (radius - this.selfRadiusSmooth) * 0.08;
+      views.push({
+        id: selfSnapshot.id,
+        nickname: selfSnapshot.nickname,
+        body,
+        angle: selfState.from.angle + angleDelta * alpha,
+        radius: this.selfRadiusSmooth,
+        boosting: selfSnapshot.boosting,
+        invulnerable: selfSnapshot.invulnerable,
+        isSelf: true,
+      });
+      selfHead = body[0];
+
+      // 加速拖尾
+      if (selfSnapshot.boosting) {
+        this.trailAccumulator += deltaMS;
+        const tail = body[body.length - 1];
+        while (this.trailAccumulator > 40 && tail) {
+          this.trailAccumulator -= 40;
+          this.fx.trail(tail.x, tail.y, skinForPlayer(selfSnapshot.id).light);
+        }
+      }
+    }
+
+    // 3. 相机
+    if (selfHead && selfSnapshot?.alive) {
+      this.camera.update(selfHead.x, selfHead.y, this.selfRadiusSmooth, deltaMS);
+    }
+    const { width, height } = this.app.screen;
+    this.world.scale.set(this.camera.zoom);
+    this.world.position.set(
+      width / 2 - this.camera.x * this.camera.zoom,
+      height / 2 - this.camera.y * this.camera.zoom,
+    );
+    this.arena.update(this.camera);
+
+    // 4. 图层同步
+    const viewBounds = this.camera.viewBounds(width, height);
+    const nowMs = performance.now();
+    if (controller.latestSnapshot) this.food.sync(controller.latestSnapshot.foods, viewBounds, nowMs);
+    this.snakes.update(views, viewBounds, this.settings.showNicknames, nowMs);
+    this.fx.update(deltaMS);
+
+    // 5. 加速音效状态
+    const boosting = Boolean(selfSnapshot?.alive && selfSnapshot.boosting);
+    if (boosting !== this.lastBoosting) {
+      this.lastBoosting = boosting;
+      controller.sfx.setBoosting(boosting);
+    }
+
+    // 6. 边界接近提示
+    if (selfHead && selfSnapshot?.alive) {
+      const limit = controller.descriptor.rules.arenaHalfSize;
+      const distanceToBorder = limit - Math.max(Math.abs(selfHead.x), Math.abs(selfHead.y));
+      controller.nearBoundary = distanceToBorder < 220;
+    } else {
+      controller.nearBoundary = false;
+    }
+  }
+
+  private selfHead(): { x: number; y: number } | undefined {
+    const snapshot = this.controller.latestSnapshot?.snakes.find(
+      (snake) => snake.id === this.controller.selfId,
+    );
+    return snapshot?.alive && snapshot.body.length > 0 ? snapshot.body[0] : undefined;
+  }
+}

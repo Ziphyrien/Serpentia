@@ -1,1 +1,70 @@
 @import "tailwindcss";
+
+@theme {
+  /* 蛇域夜空配色 */
+  --color-night-950: #0b1020;
+  --color-night-900: #101736;
+  --color-night-800: #151d3d;
+  --color-night-700: #1e2a52;
+  --color-panel: rgb(8 12 28 / 0.55);
+  --color-panel-border: rgb(255 255 255 / 0.08);
+
+  --font-sans:
+    "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  background: var(--color-night-950);
+  color: white;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+canvas {
+  display: block;
+  touch-action: none;
+}
+
+/* 数字与排行榜用等宽数字，跳动时不抖 */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes feed-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.feed-in {
+  animation: feed-in 0.18s ease-out;
+}
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgb(61 220 132 / 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 12px rgb(61 220 132 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(61 220 132 / 0);
+  }
+}
+
+.speaking-ring {
+  animation: pulse-ring 1.2s ease-out infinite;
+}
