@@ -4,6 +4,8 @@ declare global {
   interface Env {
     ACCESS_KEY_HASHES: string;
     SESSION_SIGNING_SECRET: string;
+    TURN_KEY_API_TOKEN: string;
+    TURN_KEY_ID: string;
   }
 
   namespace App {

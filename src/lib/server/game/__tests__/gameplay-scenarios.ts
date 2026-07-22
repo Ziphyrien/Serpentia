@@ -1,5 +1,11 @@
-import { generateAccessKey, hashAccessKey, identifyAccessKey, normalizeAccessKey } from "../../access/access-key";
+import {
+  generateAccessKey,
+  hashAccessKey,
+  identifyAccessKey,
+  normalizeAccessKey,
+} from "../../access/access-key";
 import { Effect } from "effect";
+import { decodeServerMessage, encodeServerMessage } from "../../../protocol/game";
 import { decodeClientMessage } from "../../protocol/client-message";
 import { GameEngine } from "../engine";
 import type { GameSnapshot, SnakeSnapshot } from "../model";
@@ -102,7 +108,14 @@ export const gameplayScenarios: ReadonlyArray<GameplayScenario> = [
     run: () => {
       const message = Effect.runSync(
         decodeClientMessage(
-          JSON.stringify({ _tag: "input", sequence: 4, angle: 1.2, boosting: true }),
+          JSON.stringify({
+            v: 1,
+            _tag: "input",
+            sequence: 4,
+            clientTick: 0,
+            angle: 1.2,
+            boosting: true,
+          }),
         ),
       );
       requireCondition(message._tag === "input", "input tag was not decoded");
@@ -114,11 +127,36 @@ export const gameplayScenarios: ReadonlyArray<GameplayScenario> = [
     run: () => {
       let rejected = false;
       try {
-        Effect.runSync(decodeClientMessage('{"_tag":"input","sequence":-1}'));
+        Effect.runSync(
+          decodeClientMessage(
+            '{"v":1,"_tag":"input","sequence":-1,"clientTick":0,"angle":0,"boosting":false}',
+          ),
+        );
       } catch {
         rejected = true;
       }
       requireCondition(rejected, "invalid input was accepted");
+    },
+  },
+  {
+    name: "authoritative snapshots decode through the shared frontend contract",
+    run: () => {
+      const engine = new GameEngine(gameConfig(), 1, false);
+      engine.addSnake("friend-a", "Alpha", { position: { x: 0, y: 0 }, angle: 0 });
+      const encoded = encodeServerMessage({
+        v: 1,
+        _tag: "snapshot",
+        serverTime: 1,
+        snapshot: engine.snapshot(),
+        events: [],
+      });
+      const decoded = Effect.runSync(decodeServerMessage(encoded));
+      requireCondition(decoded._tag === "snapshot", "snapshot changed message type");
+      requireCondition(decoded.snapshot.snakes.length === 1, "snapshot lost the snake");
+      requireCondition(
+        decoded.snapshot.snakes[0].respawnAtTick === null,
+        "wire snapshot omitted its nullable respawn field",
+      );
     },
   },
   {
@@ -131,8 +169,14 @@ export const gameplayScenarios: ReadonlyArray<GameplayScenario> = [
       const hash = await hashAccessKey(formatted);
       requireCondition(hash !== undefined && hash.length === 64, "key hash is invalid");
       const records = new Map([[hash, "friend-a"]]);
-      requireCondition((await identifyAccessKey(formatted.toLowerCase(), records)) === "friend-a", "key was not identified");
-      requireCondition((await identifyAccessKey("0000-0000-0000", records)) === undefined, "unknown key was accepted");
+      requireCondition(
+        (await identifyAccessKey(formatted.toLowerCase(), records)) === "friend-a",
+        "key was not identified",
+      );
+      requireCondition(
+        (await identifyAccessKey("0000-0000-0000", records)) === undefined,
+        "unknown key was accepted",
+      );
     },
   },
   {
@@ -193,9 +237,15 @@ export const gameplayScenarios: ReadonlyArray<GameplayScenario> = [
       engine.addSnake("victim", "Victim", { position: { x: 0, y: 0 }, angle: 0 });
       const events = engine.step();
       const snapshot = engine.snapshot();
-      requireCondition(events.deaths.some((event) => event.playerId === "victim"), "victim survived");
+      requireCondition(
+        events.deaths.some((event) => event.playerId === "victim"),
+        "victim survived",
+      );
       requireCondition(requireSnake(snapshot, "attacker").kills === 1, "kill was not awarded");
-      requireCondition(snapshot.foods.some((food) => food.kind === "remains"), "remains missing");
+      requireCondition(
+        snapshot.foods.some((food) => food.kind === "remains"),
+        "remains missing",
+      );
     },
   },
   {

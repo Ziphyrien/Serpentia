@@ -1,15 +1,20 @@
 import { Schema } from "effect";
+import { PlayerId } from "../../protocol/state";
 
 export const SESSION_COOKIE_NAME = "serpentia_session";
 export const SESSION_TTL_SECONDS = 12 * 60 * 60;
+export const MINIMUM_SESSION_SIGNING_SECRET_LENGTH = 32;
 
 export class SessionClaims extends Schema.Class<SessionClaims>("SessionClaims")({
-  playerId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  playerId: PlayerId,
   nickname: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(24)),
   expiresAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 }) {}
 
 export async function signSession(claims: SessionClaims, secret: string): Promise<string> {
+  if (!isSessionSigningSecretConfigured(secret)) {
+    throw new Error("Session signing secret must contain at least 32 characters");
+  }
   const payload = encodeBytes(new Uint8Array(utf8(JSON.stringify(claims))));
   const signature = new Uint8Array(
     await crypto.subtle.sign("HMAC", await importHmacKey(secret, ["sign"]), utf8(payload)),
@@ -22,6 +27,7 @@ export async function verifySession(
   secret: string,
   now = Date.now(),
 ): Promise<SessionClaims | undefined> {
+  if (!isSessionSigningSecretConfigured(secret)) return undefined;
   const separator = token.indexOf(".");
   if (separator <= 0 || separator === token.length - 1) return undefined;
 
@@ -43,6 +49,10 @@ export async function verifySession(
   } catch {
     return undefined;
   }
+}
+
+export function isSessionSigningSecretConfigured(secret: unknown): secret is string {
+  return typeof secret === "string" && secret.length >= MINIMUM_SESSION_SIGNING_SECRET_LENGTH;
 }
 
 function utf8(value: string): ArrayBuffer {

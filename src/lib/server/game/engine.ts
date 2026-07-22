@@ -79,7 +79,9 @@ export class GameEngine {
       lastInputSequence: -1,
     };
     this.snakes.set(playerId, snake);
-    const insertionIndex = this.orderedSnakes.findIndex((current) => current.id.localeCompare(playerId) > 0);
+    const insertionIndex = this.orderedSnakes.findIndex(
+      (current) => current.id.localeCompare(playerId) > 0,
+    );
     if (insertionIndex === -1) this.orderedSnakes.push(snake);
     else this.orderedSnakes.splice(insertionIndex, 0, snake);
     return true;
@@ -97,6 +99,13 @@ export class GameEngine {
     const snake = this.snakes.get(playerId);
     if (!snake) return false;
     snake.nickname = nickname;
+    return true;
+  }
+
+  suspendSnake(playerId: string): boolean {
+    const snake = this.snakes.get(playerId);
+    if (snake === undefined) return false;
+    snake.boosting = false;
     return true;
   }
 
@@ -148,13 +157,15 @@ export class GameEngine {
         nickname: snake.nickname,
         body: snake.body.map((point) => ({ x: point.x, y: point.y })),
         angle: snake.angle,
+        radius: snakeRadius(snake.length, this.config),
         length: snake.length,
         score: snake.score,
         kills: snake.kills,
         boosting: snake.boosting,
         alive: snake.alive,
         invulnerable: snake.alive && snake.invulnerableUntilTick >= this.currentTick,
-        respawnAtTick: snake.respawnAtTick,
+        respawnAtTick: snake.respawnAtTick ?? null,
+        lastInputSequence: snake.lastInputSequence,
       }));
 
     const leaderboard = snakes
@@ -322,7 +333,10 @@ export class GameEngine {
   private dropRemains(snake: SnakeState): void {
     const positions = this.sampleBody(snake.body, this.config.deathFoodSpacing);
     if (positions.length === 0) return;
-    const totalValue = Math.max(this.config.ambientFoodValue, snake.length * this.config.deathDropRatio);
+    const totalValue = Math.max(
+      this.config.ambientFoodValue,
+      snake.length * this.config.deathDropRatio,
+    );
     const value = totalValue / positions.length;
     for (const position of positions) this.addFood(position, value, "remains");
   }
@@ -366,7 +380,6 @@ export class GameEngine {
       snake.alive = true;
       snake.respawnAtTick = undefined;
       snake.invulnerableUntilTick = this.currentTick + this.config.respawnInvulnerabilityTicks;
-      snake.lastInputSequence = -1;
       respawned.push(snake.id);
     }
     return respawned;

@@ -10,10 +10,9 @@ export interface VoiceSessionAnswer {
   readonly sessionDescription: string;
 }
 
-export class VoiceMediaError extends Schema.TaggedErrorClass<VoiceMediaError>()(
-  "VoiceMediaError",
-  { message: Schema.String },
-) {}
+export class VoiceMediaError extends Schema.TaggedErrorClass<VoiceMediaError>()("VoiceMediaError", {
+  message: Schema.String,
+}) {}
 
 export class VoiceMediaProvider extends Context.Service<
   VoiceMediaProvider,

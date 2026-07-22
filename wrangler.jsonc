@@ -4,6 +4,10 @@
   "compatibility_date": "2026-07-21",
   "compatibility_flags": ["nodejs_compat"],
   "main": ".svelte-kit/cloudflare/_worker.js",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
   "durable_objects": {
     "bindings": [
       {

@@ -1,7 +1,6 @@
-export interface Point {
-  readonly x: number;
-  readonly y: number;
-}
+import type { Point } from "../../protocol/state";
+
+export type { Point } from "../../protocol/state";
 
 export function distanceSquared(left: Point, right: Point): number {
   const dx = left.x - right.x;
@@ -22,7 +21,7 @@ export function move(point: Point, angle: number, amount: number): Point {
 
 export function normalizeAngle(angle: number): number {
   const turn = Math.PI * 2;
-  const normalized = ((angle + Math.PI) % turn + turn) % turn - Math.PI;
+  const normalized = ((((angle + Math.PI) % turn) + turn) % turn) - Math.PI;
   return normalized === -Math.PI ? Math.PI : normalized;
 }
 
@@ -39,8 +38,7 @@ export function pointToSegmentDistanceSquared(point: Point, start: Point, end: P
   if (segmentLengthSquared === 0) return distanceSquared(point, start);
 
   const projection =
-    ((point.x - start.x) * segmentX + (point.y - start.y) * segmentY) /
-    segmentLengthSquared;
+    ((point.x - start.x) * segmentX + (point.y - start.y) * segmentY) / segmentLengthSquared;
   const t = Math.max(0, Math.min(1, projection));
   const closest = { x: start.x + segmentX * t, y: start.y + segmentY * t };
   return distanceSquared(point, closest);

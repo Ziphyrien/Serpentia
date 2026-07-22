@@ -1,8 +1,6 @@
-export interface VoiceParticipant {
-  readonly playerId: string;
-  readonly nickname: string;
-  readonly muted: boolean;
-}
+import type { VoiceParticipant } from "../../protocol/state";
+
+export type { VoiceParticipant } from "../../protocol/state";
 
 export class VoiceRoster {
   private readonly participants = new Map<string, VoiceParticipant>();
@@ -27,7 +25,13 @@ export class VoiceRoster {
     return true;
   }
 
+  has(playerId: string): boolean {
+    return this.participants.has(playerId);
+  }
+
   snapshot(): ReadonlyArray<VoiceParticipant> {
-    return [...this.participants.values()].sort((left, right) => left.playerId.localeCompare(right.playerId));
+    return [...this.participants.values()].sort((left, right) =>
+      left.playerId.localeCompare(right.playerId),
+    );
   }
 }

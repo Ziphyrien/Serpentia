@@ -1,9 +1,14 @@
 import { Effect, Schema } from "effect";
+import { PlayerId } from "../../protocol/state";
 import { identifyAccessKey } from "./access-key";
 
 const AccessKeyRecord = Schema.Struct({
-  playerId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
-  hash: Schema.String.check(Schema.isMinLength(64), Schema.isMaxLength(64)),
+  playerId: PlayerId,
+  hash: Schema.String.check(
+    Schema.isMinLength(64),
+    Schema.isMaxLength(64),
+    Schema.isPattern(/^[0-9a-fA-F]{64}$/u),
+  ),
 });
 const AccessKeyRecords = Schema.Array(AccessKeyRecord);
 
@@ -17,12 +22,26 @@ export const parseAccessKeyRegistry = Effect.fn("parseAccessKeyRegistry")(functi
 ) {
   const raw = yield* Effect.try({
     try: () => parseJson(serialized),
-    catch: () => new AccessRegistryError({ message: "Access key registry is not JSON" }),
+    catch: () => AccessRegistryError.make({ message: "Access key registry is not JSON" }),
   });
   const records = yield* Schema.decodeUnknownEffect(AccessKeyRecords)(raw).pipe(
-    Effect.mapError((error) => new AccessRegistryError({ message: error.message })),
+    Effect.mapError((error) => AccessRegistryError.make({ message: error.message })),
   );
-  return new Map(records.map((record) => [record.hash.toLowerCase(), record.playerId]));
+  const registry = new Map<string, string>();
+  const playerIds = new Set<string>();
+  for (const record of records) {
+    const hash = record.hash.toLowerCase();
+    if (registry.has(hash) || playerIds.has(record.playerId)) {
+      return yield* Effect.fail(
+        AccessRegistryError.make({
+          message: "Access key registry contains duplicate hashes or player IDs",
+        }),
+      );
+    }
+    registry.set(hash, record.playerId);
+    playerIds.add(record.playerId);
+  }
+  return registry;
 });
 
 export async function identifyPlayer(

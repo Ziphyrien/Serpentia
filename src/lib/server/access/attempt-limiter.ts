@@ -5,6 +5,7 @@ interface AttemptWindow {
 
 export class AccessAttemptLimiter {
   private readonly windows = new Map<string, AttemptWindow>();
+  private lastPrunedAt = 0;
 
   constructor(
     private readonly maximumAttempts = 5,
@@ -12,6 +13,7 @@ export class AccessAttemptLimiter {
   ) {}
 
   allow(key: string, now = Date.now()): boolean {
+    if (now - this.lastPrunedAt >= this.windowMilliseconds) this.prune(now);
     const current = this.windows.get(key);
     if (current === undefined || now - current.startedAt >= this.windowMilliseconds) {
       this.windows.set(key, { startedAt: now, count: 1 });
@@ -26,5 +28,6 @@ export class AccessAttemptLimiter {
     for (const [key, window] of this.windows) {
       if (now - window.startedAt >= this.windowMilliseconds) this.windows.delete(key);
     }
+    this.lastPrunedAt = now;
   }
 }

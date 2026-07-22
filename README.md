@@ -1,6 +1,8 @@
-# sv
+# Serpentia
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Cloudflare Workers、Durable Objects 和 PartyServer 驱动的朋友多人贪吃蛇。
+
+后端 HTTP/WebSocket 契约、P2P 语音信令和生产配置见 [`docs/backend-api.md`](docs/backend-api.md)。前端可直接复用 `src/lib/protocol/index.ts` 中的共享类型。
 
 ## Creating a project
 
