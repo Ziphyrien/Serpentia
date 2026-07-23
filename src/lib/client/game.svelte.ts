@@ -234,7 +234,13 @@ export class GameController {
     const selfSnake = snapshot.snakes.find((snake) => snake.id === this.selfId);
     if (selfSnake) {
       const wasAlive = this.self.alive;
-      this.predictor.reconcile(selfSnake, serverTime, serverNow);
+      this.predictor.reconcile(
+        selfSnake,
+        serverTime,
+        serverNow,
+        this.input.hasDirection ? this.input.angle : undefined,
+        this.input.boosting,
+      );
       // 保留 respawnIn/deathBy：它们分别由倒计时定时器和死亡/重生事件维护，
       // 不能随快照重建，否则 10Hz 快照会把倒计时打回 0、把击杀者名字抹掉
       this.self = {

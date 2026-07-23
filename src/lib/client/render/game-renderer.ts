@@ -127,7 +127,12 @@ export class GameRenderer {
     const serverNow = clock.serverNow() ?? Date.now();
 
     // 1. 推进自我预测
-    controller.selfPredictor.advance(serverNow, controller.input.angle, controller.input.boosting);
+    // 无方向输入时传 undefined，避免把出生朝向往 angle=0（正东）拽
+    controller.selfPredictor.advance(
+      serverNow,
+      controller.input.hasDirection ? controller.input.angle : undefined,
+      controller.input.boosting,
+    );
 
     // 2. 组装本帧蛇视图
     const views: Array<SnakeRenderView> = [];

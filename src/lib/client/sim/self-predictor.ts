@@ -9,6 +9,8 @@ interface PredictedStep {
   body: Array<Point>;
   angle: number;
   length: number;
+  /** 该步对应的服务端 tick 时刻（服务器时钟，毫秒）。 */
+  tickAt: number;
 }
 
 const TAU = Math.PI * 2;
@@ -53,8 +55,25 @@ export class SelfPredictor {
     return this.current?.length ?? 0;
   }
 
-  /** 快照到达：回滚到权威状态，并把传输延迟期间的 ticks 立即补模拟。 */
-  reconcile(snapshot: SnakeSnapshot, snapshotServerTime: number, serverNow: number): void {
+  /**
+   * 快照到达：回滚到权威状态，并用当前意图把传输延迟期间的 ticks 补模拟。
+   *
+   * 平滑的关键在 0 次补模拟的场景（低延迟下快照往返不足一个 tick，
+   * 是常态）：若把 previous/current 重置成同一份，渲染插值会一直停在
+   * 快照位置直到下一个 tick——每个快照周期都是「拽回→冻结→追赶」，
+   * 整条蛇 10Hz 前后抽搐。此时从本地预测历史里挑出正好落在上一 tick
+   * 的那一步作 previous，权威修正就能在一个 tick 的插值窗口内平滑收敛。
+   * （这也解释了抽搐为何时有时无：有效延迟 = 单程延迟 + 时钟偏移误差，
+   * 偏移随 ping 采样缓慢漂移，漂过 tick 边界时补模拟次数在 0/1 间切换，
+   * 两种表现随之交替。）
+   */
+  reconcile(
+    snapshot: SnakeSnapshot,
+    snapshotServerTime: number,
+    serverNow: number,
+    intentAngle?: number,
+    intentBoosting?: boolean,
+  ): void {
     this.alive = snapshot.alive;
     if (!snapshot.alive) {
       this.previous = undefined;
@@ -62,25 +81,44 @@ export class SelfPredictor {
       return;
     }
     this.boosting = snapshot.boosting;
+    const oldPrevious = this.previous;
+    const oldCurrent = this.current;
     const state: PredictedStep = {
       body: snapshot.body.map((point) => ({ x: point.x, y: point.y })),
       angle: snapshot.angle,
       length: snapshot.length,
+      tickAt: snapshotServerTime,
     };
     this.current = state;
-    this.previous = {
-      body: state.body.map((p) => ({ ...p })),
-      angle: state.angle,
-      length: state.length,
-    };
     this.nextTickAt = snapshotServerTime + this.tickMs;
-    // 补上 snapshot 生成到抵达之间流逝的 ticks（近似：使用当前意图）
+    // 补上 snapshot 生成到抵达之间流逝的 ticks（用当前意图回放；旧代码
+    // 用快照的旧角度，转弯时每次快照都把蛇头拽回旧轨迹）。
+    // 每次 step 都会自然把 previous 前移一格，≥1 次时无需特殊处理。
     let guard = 0;
     while (this.nextTickAt <= serverNow && guard < 12) {
-      this.step();
+      this.step(intentAngle, intentBoosting);
       guard += 1;
     }
     if (this.nextTickAt <= serverNow) this.nextTickAt = serverNow + this.tickMs;
+    if (guard === 0) {
+      const wanted = snapshotServerTime - this.tickMs;
+      const tolerance = this.tickMs * 0.5;
+      let previous: PredictedStep | undefined;
+      if (oldPrevious && Math.abs(oldPrevious.tickAt - wanted) <= tolerance) {
+        previous = oldPrevious;
+      } else if (oldCurrent && Math.abs(oldCurrent.tickAt - wanted) <= tolerance) {
+        previous = oldCurrent;
+      } else {
+        // 预测历史对不上（首次快照、时钟重同步等），退化为原地冻结一个 tick
+        previous = {
+          body: state.body.map((p) => ({ ...p })),
+          angle: state.angle,
+          length: state.length,
+          tickAt: wanted,
+        };
+      }
+      this.previous = previous;
+    }
   }
 
   /** 死亡后停止预测（等待重生快照）。 */
@@ -90,8 +128,8 @@ export class SelfPredictor {
     this.current = undefined;
   }
 
-  /** 按服务端钟推进模拟；intent 为当前输入意图。 */
-  advance(serverNow: number, intentAngle: number, intentBoosting: boolean): void {
+  /** 按服务端钟推进模拟；intent 为当前输入意图（无方向输入时 angle 传 undefined）。 */
+  advance(serverNow: number, intentAngle?: number, intentBoosting?: boolean): void {
     if (!this.alive || !this.current) return;
     let guard = 0;
     while (this.nextTickAt <= serverNow && guard < 8) {
@@ -142,7 +180,7 @@ export class SelfPredictor {
     trimBody(body, length);
 
     this.previous = current;
-    this.current = { body, angle, length };
+    this.current = { body, angle, length, tickAt: this.nextTickAt };
     this.nextTickAt += this.tickMs;
   }
 }
