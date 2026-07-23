@@ -1,7 +1,7 @@
 import type { ClientGameRules, SnakeSnapshot } from "$lib/protocol";
 import {
   advanceSnakeMotion,
-  normalizeAngle,
+  trimBody,
   type MotionPoint,
   type SnakeMotionState,
 } from "../../game/snake-motion";
@@ -21,41 +21,33 @@ export interface SelfRenderState {
   readonly boosting: boolean;
 }
 
-interface VisualCorrection {
-  readonly body: ReadonlyArray<MotionPoint>;
-  readonly angle: number;
-  readonly startedAt: number;
-}
-
-const MAX_REPLAY_TICKS = 32;
 const MAX_FRAME_CATCH_UP_TICKS = 8;
-const BODY_CORRECTION_DURATION_MS = 100;
-const ANGLE_CORRECTION_DURATION_MS = 35;
+const MAX_TICK_DRIFT = 40;
 
 /**
- * Tick-based client prediction for the controlled snake.
+ * Local prediction for the controlled snake.
  *
- * The simulation is rewound to the snapshot tick and replayed with the intent
- * that was used for each local tick. Rendering samples one fractional tick
- * forward from the latest completed state, so local turning does not inherit a
- * full server tick of input latency. Authoritative corrections are applied to
- * the simulation immediately and removed from the rendered pose smoothly.
+ * The controlled snake is intentionally rendered from a monotonic local clock.
+ * Normal snapshots update authoritative metadata but do not rewind its visible
+ * position: doing that makes network latency visible as a pull-back on every
+ * fast turn. The server remains authoritative for collision, death, and respawn;
+ * a large positional drift or a lifecycle transition reinitializes prediction.
  */
 export class SelfPredictor {
   private current: PredictedStep | undefined;
-  private nextTick = 0;
-  private nextTickAt = 0;
   private readonly tickMs: number;
-  private readonly intentByTick = new Map<number, InputIntent>();
+  private accumulatorMs = 0;
+  private lastLocalTime: number | undefined;
   private latestIntent: InputIntent = { boosting: false };
-  private correction: VisualCorrection | undefined;
   private alive = false;
+  private readonly rebaseDistance: number;
 
   constructor(
     private readonly rules: ClientGameRules,
     tickRate: number,
   ) {
     this.tickMs = 1000 / tickRate;
+    this.rebaseDistance = Math.max(80, rules.boostSpeed * 0.5);
   }
 
   get isAlive(): boolean {
@@ -66,50 +58,42 @@ export class SelfPredictor {
     return this.current?.length ?? 0;
   }
 
-  reconcile(
-    snapshot: SnakeSnapshot,
-    snapshotTick: number,
-    snapshotServerTime: number,
-    serverNow: number,
-    intentAngle: number | undefined,
-    intentBoosting: boolean,
-  ): void {
-    this.latestIntent = { angle: intentAngle, boosting: intentBoosting };
+  /**
+   * Incorporates an authoritative snapshot without rewinding normal movement.
+   * `localNow` is monotonic browser time, deliberately independent of network
+   * clock corrections used by remote-snake interpolation.
+   */
+  reconcile(snapshot: SnakeSnapshot, snapshotTick: number, localNow: number): void {
     if (!snapshot.alive) {
       this.reset();
       return;
     }
 
-    const before = this.sampleVisual(serverNow);
-    const authoritative = fromSnapshot(snapshot, snapshotTick);
-    const oldCurrent = this.current;
-    const oldNextTickAt = this.nextTickAt;
-    const canReplay =
-      oldCurrent !== undefined &&
-      snapshotTick <= oldCurrent.tick &&
-      oldCurrent.tick - snapshotTick <= MAX_REPLAY_TICKS;
-
-    this.alive = true;
-    if (canReplay) {
-      const horizonTick = oldCurrent.tick;
-      this.current = authoritative;
-      for (let tick = snapshotTick + 1; tick <= horizonTick; tick += 1) {
-        this.simulateTick(tick, this.intentByTick.get(tick));
-      }
-      this.nextTick = horizonTick + 1;
-      this.nextTickAt = oldNextTickAt;
-    } else {
-      this.current = authoritative;
-      this.nextTick = snapshotTick + 1;
-      this.nextTickAt = snapshotServerTime + this.tickMs;
+    if (!this.current || this.shouldRebase(snapshot, snapshotTick)) {
+      this.initialize(snapshot, snapshotTick, localNow);
+      return;
     }
 
-    this.advanceTo(serverNow);
-    this.pruneIntentHistory(snapshotTick);
+    // Keep local steering responsive. Before the player supplies a direction,
+    // the server's target is the only valid target to continue from.
+    if (this.latestIntent.angle === undefined) {
+      this.current.targetAngle = snapshot.targetAngle ?? snapshot.angle;
+    }
 
-    const after = this.sampleRaw(serverNow);
-    if (before && after) this.startCorrection(before, after, serverNow);
-    else this.correction = undefined;
+    // Food and boost drain affect body length but should not rewind the head.
+    if (Math.abs(this.current.length - snapshot.length) > 0.5) {
+      this.current.length = snapshot.length;
+      trimBody(this.current.body, this.current.length);
+    }
+  }
+
+  /** Reinitializes local prediction after a new/reconnected session. */
+  reset(): void {
+    this.current = undefined;
+    this.accumulatorMs = 0;
+    this.lastLocalTime = undefined;
+    this.latestIntent = { boosting: false };
+    this.alive = false;
   }
 
   /** Stops prediction until an alive authoritative snapshot initializes it again. */
@@ -117,156 +101,66 @@ export class SelfPredictor {
     this.reset();
   }
 
-  /** Advances fixed simulation ticks using the latest local intent. */
-  advance(serverNow: number, intentAngle: number | undefined, intentBoosting: boolean): void {
+  /** Advances fixed local ticks using the latest input intent. */
+  advance(localNow: number, intentAngle: number | undefined, intentBoosting: boolean): void {
     this.latestIntent = { angle: intentAngle, boosting: intentBoosting };
-    if (!this.alive || !this.current) return;
-    this.advanceTo(serverNow);
-  }
+    if (!this.alive || !this.current) {
+      this.lastLocalTime = localNow;
+      return;
+    }
 
-  /** Returns a forward-sampled pose with a short-lived reconciliation correction. */
-  renderState(serverNow: number): SelfRenderState | undefined {
-    return this.sampleVisual(serverNow);
-  }
+    if (this.lastLocalTime === undefined) this.lastLocalTime = localNow;
+    const elapsed = Math.min(250, Math.max(0, localNow - this.lastLocalTime));
+    this.lastLocalTime = localNow;
+    this.accumulatorMs += elapsed;
 
-  private advanceTo(serverNow: number): void {
     let processed = 0;
-    while (this.nextTickAt <= serverNow && processed < MAX_FRAME_CATCH_UP_TICKS) {
-      const intent = this.intentByTick.get(this.nextTick) ?? this.latestIntent;
-      this.intentByTick.set(this.nextTick, intent);
-      this.simulateTick(this.nextTick, intent);
-      this.nextTick += 1;
-      this.nextTickAt += this.tickMs;
+    while (this.accumulatorMs >= this.tickMs && processed < MAX_FRAME_CATCH_UP_TICKS) {
+      applyIntent(this.current, this.latestIntent);
+      advanceSnakeMotion(this.current, this.rules, this.tickMs / 1000);
+      this.current.tick += 1;
+      this.accumulatorMs -= this.tickMs;
       processed += 1;
     }
 
-    // A backgrounded tab may be many ticks behind. The next snapshot will
-    // rebuild the timeline instead of making the foreground frame fast-forward.
-    if (this.nextTickAt <= serverNow) this.nextTickAt = serverNow + this.tickMs;
+    // A backgrounded tab should rebase from the next authoritative snapshot,
+    // rather than fast-forwarding several hundred ticks when it returns.
+    if (this.accumulatorMs >= this.tickMs) this.accumulatorMs = 0;
   }
 
-  private simulateTick(tick: number, intent: InputIntent | undefined): void {
-    const current = this.current;
-    if (!current) return;
-
-    const next = cloneStep(current, tick);
-    applyIntent(next, intent);
-    advanceSnakeMotion(next, this.rules, this.tickMs / 1000);
-    this.current = next;
-  }
-
-  private sampleRaw(serverNow: number): SelfRenderState | undefined {
+  /** Samples one fractional local tick ahead for smooth 60fps rendering. */
+  renderState(): SelfRenderState | undefined {
     const current = this.current;
     if (!current) return undefined;
 
-    const alpha = Math.min(1, Math.max(0, 1 - (this.nextTickAt - serverNow) / this.tickMs));
-    const next = cloneStep(current, this.nextTick);
+    const next = cloneStep(current, current.tick + 1);
     applyIntent(next, this.latestIntent);
     advanceSnakeMotion(next, this.rules, this.tickMs / 1000);
+    const ratio = Math.min(1, Math.max(0, this.accumulatorMs / this.tickMs));
     return {
-      body: interpolateBody(current.body, next.body, alpha),
-      angle: interpolateAngle(current.angle, next.angle, alpha),
+      body: interpolateBody(current.body, next.body, ratio),
+      angle: interpolateAngle(current.angle, next.angle, ratio),
       boosting: next.boosting,
     };
   }
 
-  private sampleVisual(serverNow: number): SelfRenderState | undefined {
-    const raw = this.sampleRaw(serverNow);
-    if (!raw) return undefined;
-    const correction = this.correction;
-    if (!correction) return raw;
-
-    const bodyRemaining = decayRemaining(
-      serverNow,
-      correction.startedAt,
-      BODY_CORRECTION_DURATION_MS,
-    );
-    const angleRemaining = decayRemaining(
-      serverNow,
-      correction.startedAt,
-      ANGLE_CORRECTION_DURATION_MS,
-    );
-    if (bodyRemaining === 0 && angleRemaining === 0) {
-      this.correction = undefined;
-      return raw;
-    }
-
-    const body =
-      bodyRemaining === 0
-        ? raw.body
-        : raw.body.map((point, index) => {
-            const delta = correction.body[index] ?? correction.body[correction.body.length - 1];
-            if (!delta) return point;
-            return {
-              x: point.x + delta.x * bodyRemaining,
-              y: point.y + delta.y * bodyRemaining,
-            };
-          });
-    return {
-      body,
-      angle: normalizeAngle(raw.angle + correction.angle * angleRemaining),
-      boosting: raw.boosting,
-    };
+  private initialize(snapshot: SnakeSnapshot, snapshotTick: number, localNow: number): void {
+    this.current = fromSnapshot(snapshot, snapshotTick);
+    this.accumulatorMs = 0;
+    this.lastLocalTime = localNow;
+    this.alive = true;
   }
 
-  private startCorrection(
-    before: SelfRenderState,
-    after: SelfRenderState,
-    serverNow: number,
-  ): void {
-    const beforeHead = before.body[0];
-    const afterHead = after.body[0];
-    if (!beforeHead || !afterHead) {
-      this.correction = undefined;
-      return;
-    }
+  private shouldRebase(snapshot: SnakeSnapshot, snapshotTick: number): boolean {
+    const current = this.current;
+    if (!current) return true;
+    const currentHead = current.body[0];
+    const snapshotHead = snapshot.body[0];
+    if (!currentHead || !snapshotHead) return true;
 
-    const headError = Math.hypot(beforeHead.x - afterHead.x, beforeHead.y - afterHead.y);
-    const snapDistance = this.rules.boostSpeed * 0.75;
-    if (headError > snapDistance) {
-      this.correction = undefined;
-      return;
-    }
-
-    const pointCount = Math.max(before.body.length, after.body.length);
-    const body: Array<MotionPoint> = [];
-    let largestError = headError;
-    for (let index = 0; index < pointCount; index += 1) {
-      const oldPoint = before.body[Math.min(index, before.body.length - 1)];
-      const newPoint = after.body[Math.min(index, after.body.length - 1)];
-      let x = oldPoint.x - newPoint.x;
-      let y = oldPoint.y - newPoint.y;
-      const distance = Math.hypot(x, y);
-      largestError = Math.max(largestError, distance);
-      if (distance > snapDistance) {
-        const scale = snapDistance / distance;
-        x *= scale;
-        y *= scale;
-      }
-      body.push({ x, y });
-    }
-
-    const angle = normalizeAngle(before.angle - after.angle);
-    if (largestError < 0.001 && Math.abs(angle) < 0.0001) {
-      this.correction = undefined;
-      return;
-    }
-    this.correction = { body, angle, startedAt: serverNow };
-  }
-
-  private pruneIntentHistory(snapshotTick: number): void {
-    for (const tick of this.intentByTick.keys()) {
-      if (tick <= snapshotTick) this.intentByTick.delete(tick);
-    }
-  }
-
-  private reset(): void {
-    this.alive = false;
-    this.current = undefined;
-    this.nextTick = 0;
-    this.nextTickAt = 0;
-    this.intentByTick.clear();
-    this.correction = undefined;
+    const distance = Math.hypot(currentHead.x - snapshotHead.x, currentHead.y - snapshotHead.y);
+    const tickDrift = current.tick - snapshotTick;
+    return distance > this.rebaseDistance || tickDrift < -4 || tickDrift > MAX_TICK_DRIFT;
   }
 }
 
@@ -292,8 +186,7 @@ function cloneStep(state: PredictedStep, tick: number): PredictedStep {
   };
 }
 
-function applyIntent(state: PredictedStep, intent: InputIntent | undefined): void {
-  if (!intent) return;
+function applyIntent(state: PredictedStep, intent: InputIntent): void {
   if (intent.angle !== undefined) state.targetAngle = intent.angle;
   state.boosting = intent.boosting;
 }
@@ -317,10 +210,7 @@ function interpolateBody(
 }
 
 function interpolateAngle(from: number, to: number, ratio: number): number {
-  return normalizeAngle(from + normalizeAngle(to - from) * ratio);
-}
-
-function decayRemaining(now: number, startedAt: number, duration: number): number {
-  const progress = Math.min(1, Math.max(0, (now - startedAt) / duration));
-  return 1 - progress * progress * (3 - 2 * progress);
+  const difference =
+    ((((to - from + Math.PI) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)) - Math.PI;
+  return from + difference * ratio;
 }

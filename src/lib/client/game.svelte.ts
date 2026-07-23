@@ -221,6 +221,7 @@ export class GameController {
     this.nextSequence = message.resumed && selfSnake ? selfSnake.lastInputSequence + 1 : 0;
     this.status = "online";
     this.reconnectAttempts = 0;
+    this.predictor.reset();
     this.handleSnapshot(message.snapshot, message.serverTime, []);
     this.voice.updateRoster(message.voice);
     this.startLoops();
@@ -235,18 +236,10 @@ export class GameController {
     this.lastSnapshotTick = snapshot.tick;
     this.buffer.push(snapshot, serverTime);
 
-    const serverNow = this.clock.serverNow() ?? serverTime;
     const selfSnake = snapshot.snakes.find((snake) => snake.id === this.selfId);
     if (selfSnake) {
       const wasAlive = this.self.alive;
-      this.predictor.reconcile(
-        selfSnake,
-        snapshot.tick,
-        serverTime,
-        serverNow,
-        this.input.hasDirection ? this.input.angle : undefined,
-        this.input.boosting,
-      );
+      this.predictor.reconcile(selfSnake, snapshot.tick, performance.now());
       // 保留 respawnIn/deathBy：它们分别由倒计时定时器和死亡/重生事件维护，
       // 不能随快照重建，否则 10Hz 快照会把倒计时打回 0、把击杀者名字抹掉
       this.self = {

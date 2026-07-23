@@ -67,38 +67,35 @@ function head(state: { readonly body: ReadonlyArray<{ x: number; y: number }> })
   return point;
 }
 
-function expectSamePose(
-  left: { readonly body: ReadonlyArray<{ x: number; y: number }>; readonly angle: number },
-  right: { readonly body: ReadonlyArray<{ x: number; y: number }>; readonly angle: number },
+function expectSameHead(
+  left: { readonly body: ReadonlyArray<{ x: number; y: number }> },
+  right: { readonly body: ReadonlyArray<{ x: number; y: number }> },
 ): void {
   expect(head(right).x).toBeCloseTo(head(left).x, 8);
   expect(head(right).y).toBeCloseTo(head(left).y, 8);
-  expect(right.angle).toBeCloseTo(left.angle, 8);
 }
 
-describe("self prediction reconciliation", () => {
-  it("renders movement and steering immediately without waiting for the next tick", () => {
+describe("self prediction", () => {
+  it("renders movement and steering before the next server tick", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
-    const server = initialMotion();
-    predictor.reconcile(snapshotOf(server), 0, 0, 20, undefined, false);
+    predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
 
     predictor.advance(20, Math.PI / 2, false);
-    const rendered = predictor.renderState(20);
+    const rendered = predictor.renderState();
     expect(rendered).toBeDefined();
     expect(head(rendered!).x).toBeGreaterThan(0);
     expect(rendered!.angle).toBeGreaterThan(0);
   });
 
-  it("keeps forward-sampled turning and boost smooth across tick boundaries", () => {
+  it("keeps local turning and boost smooth across fixed ticks", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
-    const server = initialMotion();
-    predictor.reconcile(snapshotOf(server), 0, 0, 0, Math.PI / 2, true);
+    predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
 
-    let previous = predictor.renderState(0);
+    let previous = predictor.renderState();
     expect(previous).toBeDefined();
     for (let now = 5; now <= 200; now += 5) {
       predictor.advance(now, Math.PI / 2, true);
-      const current = predictor.renderState(now);
+      const current = predictor.renderState();
       expect(current).toBeDefined();
       const distance = Math.hypot(
         head(current!).x - head(previous!).x,
@@ -112,64 +109,43 @@ describe("self prediction reconciliation", () => {
     }
   });
 
-  it("keeps a low-latency straight-line snapshot visually continuous", () => {
+  it("does not pull the local pose back for normal network-sized drift", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     const server = initialMotion();
-    predictor.reconcile(snapshotOf(server), 0, 0, 20, 0, false);
-
-    predictor.advance(55, 0, false);
-    predictor.advance(105, 0, false);
-    const before = predictor.renderState(120);
+    predictor.reconcile(snapshotOf(server), 0, 0);
+    predictor.advance(120, Math.PI / 2, true);
+    const before = predictor.renderState();
     expect(before).toBeDefined();
 
+    // The server is one or two ticks behind the local intent, but not truly lost.
     stepMotion(server, 0, false);
-    stepMotion(server, 0, false);
-    predictor.reconcile(snapshotOf(server), 2, 100, 120, 0, false);
-    const after = predictor.renderState(120);
+    predictor.reconcile(snapshotOf(server), 1, 120);
+    const after = predictor.renderState();
     expect(after).toBeDefined();
-    expectSamePose(before!, after!);
+    expectSameHead(before!, after!);
   });
 
-  it("keeps repeated turn and boost corrections continuous", () => {
-    const predictor = new SelfPredictor(rules, TICK_RATE);
-    const server = initialMotion();
-    predictor.reconcile(snapshotOf(server), 0, 0, 20, Math.PI / 2, true);
-
-    // Local prediction responds immediately, while the server receives the input one tick later.
-    predictor.advance(55, Math.PI / 2, true);
-    predictor.advance(105, Math.PI / 2, true);
-    stepMotion(server, 0, false);
-    stepMotion(server, Math.PI / 2, true);
-
-    const beforeFirst = predictor.renderState(120);
-    expect(beforeFirst).toBeDefined();
-    predictor.reconcile(snapshotOf(server), 2, 100, 120, Math.PI / 2, true);
-    const afterFirst = predictor.renderState(120);
-    expect(afterFirst).toBeDefined();
-    expectSamePose(beforeFirst!, afterFirst!);
-
-    predictor.advance(155, Math.PI / 2, true);
-    predictor.advance(205, Math.PI / 2, true);
-    stepMotion(server, Math.PI / 2, true);
-    stepMotion(server, Math.PI / 2, true);
-
-    const beforeSecond = predictor.renderState(220);
-    expect(beforeSecond).toBeDefined();
-    predictor.reconcile(snapshotOf(server), 4, 200, 220, Math.PI / 2, true);
-    const afterSecond = predictor.renderState(220);
-    expect(afterSecond).toBeDefined();
-    expectSamePose(beforeSecond!, afterSecond!);
-  });
-
-  it("continues the authoritative steering target without a local direction", () => {
-    const predictor = new SelfPredictor(rules, TICK_RATE);
+  it("continues the authoritative target before local direction input exists", () => {
     const server = initialMotion();
     server.targetAngle = Math.PI / 2;
-    predictor.reconcile(snapshotOf(server), 0, 0, 20, undefined, false);
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(server), 0, 0);
 
     predictor.advance(55, undefined, false);
-    const rendered = predictor.renderState(100);
+    const rendered = predictor.renderState();
     expect(rendered).toBeDefined();
     expect(rendered!.angle).toBeGreaterThan(0);
+  });
+
+  it("rebases after a genuinely large positional drift", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
+    const farAway = initialMotion();
+    farAway.body = [
+      { x: 200, y: 0 },
+      { x: 100, y: 0 },
+    ];
+    predictor.reconcile(snapshotOf(farAway), 1, 50);
+    expect(head(predictor.renderState()!).x).toBe(200);
   });
 });

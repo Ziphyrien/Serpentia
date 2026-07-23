@@ -125,11 +125,12 @@ export class GameRenderer {
     const controller = this.controller;
     const clock = controller.clockSync;
     const serverNow = clock.serverNow() ?? Date.now();
+    const localNow = performance.now();
 
     // 1. 推进自我预测
     // 无方向输入时传 undefined，避免把出生朝向往 angle=0（正东）拽
     controller.selfPredictor.advance(
-      serverNow,
+      localNow,
       controller.input.hasDirection ? controller.input.angle : undefined,
       controller.input.boosting,
     );
@@ -153,7 +154,7 @@ export class GameRenderer {
     const selfSnapshot = controller.latestSnapshot?.snakes.find(
       (snake) => snake.id === controller.selfId,
     );
-    const selfState = controller.selfPredictor.renderState(serverNow);
+    const selfState = controller.selfPredictor.renderState();
     let selfHead: { x: number; y: number } | undefined;
     if (selfState && selfSnapshot?.alive) {
       const radius = selfSnapshot.radius;
