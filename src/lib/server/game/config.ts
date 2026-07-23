@@ -26,7 +26,7 @@ export interface GameConfig {
 
 export const defaultGameConfig: GameConfig = Object.freeze({
   tickRate: 20,
-  arenaHalfSize: 2_400,
+  arenaHalfSize: 1_000,
   baseSpeed: 132,
   boostSpeed: 218,
   turnRate: 3.8,
@@ -40,7 +40,7 @@ export const defaultGameConfig: GameConfig = Object.freeze({
   maximumRadius: 30,
   radiusGrowth: 2.8,
   foodRadius: 5,
-  ambientFoodTarget: 500,
+  ambientFoodTarget: 90,
   ambientFoodValue: 2,
   deathDropRatio: 0.72,
   deathFoodSpacing: 18,

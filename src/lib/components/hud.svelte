@@ -5,7 +5,6 @@
   import type { SettingsStore } from "$lib/client/stores/settings.svelte";
   import Leaderboard from "./leaderboard.svelte";
   import KillFeed from "./kill-feed.svelte";
-  import MinimapPanel from "./minimap-panel.svelte";
   import DeathOverlay from "./death-overlay.svelte";
   import VoicePanel from "./voice-panel.svelte";
   import SettingsDialog from "./settings-dialog.svelte";
@@ -38,12 +37,9 @@
     <div class="flex-1 pt-1">
       <KillFeed feed={controller.killFeed} />
     </div>
-    <div class="pointer-events-auto flex flex-col items-end gap-2">
-      <MinimapPanel {controller} />
-      <div class="flex gap-2">
-        <VoicePanel {controller} />
-        <SettingsDialog {settings} sfx={controller.sfx} {onLogout} />
-      </div>
+    <div class="pointer-events-auto flex gap-2">
+      <VoicePanel {controller} />
+      <SettingsDialog {settings} sfx={controller.sfx} {onLogout} />
     </div>
   </div>
 
