@@ -64,6 +64,8 @@ export const SnakeSnapshot = Schema.Struct({
   nickname: Nickname,
   body: Schema.Array(Point),
   angle: Schema.Finite,
+  /** The server-side steering target; optional for compatibility with older snapshots. */
+  targetAngle: Schema.optionalKey(Schema.Finite),
   radius: NonNegativeFinite,
   length: NonNegativeFinite,
   score: NonNegativeFinite,

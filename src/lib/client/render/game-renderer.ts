@@ -156,35 +156,24 @@ export class GameRenderer {
     const selfState = controller.selfPredictor.renderState(serverNow);
     let selfHead: { x: number; y: number } | undefined;
     if (selfState && selfSnapshot?.alive) {
-      const alpha = selfState.alpha;
-      const maxLength = Math.max(selfState.from.body.length, selfState.to.body.length);
-      const body: Array<{ x: number; y: number }> = [];
-      for (let index = 0; index < maxLength; index += 1) {
-        const a = selfState.from.body[Math.min(index, selfState.from.body.length - 1)];
-        const b = selfState.to.body[Math.min(index, selfState.to.body.length - 1)];
-        body.push({ x: a.x + (b.x - a.x) * alpha, y: a.y + (b.y - a.y) * alpha });
-      }
-      let angleDelta = selfState.to.angle - selfState.from.angle;
-      while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
-      while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
       const radius = selfSnapshot.radius;
       this.selfRadiusSmooth += (radius - this.selfRadiusSmooth) * 0.08;
       views.push({
         id: selfSnapshot.id,
         nickname: selfSnapshot.nickname,
-        body,
-        angle: selfState.from.angle + angleDelta * alpha,
+        body: selfState.body,
+        angle: selfState.angle,
         radius: this.selfRadiusSmooth,
-        boosting: selfSnapshot.boosting,
+        boosting: selfState.boosting,
         invulnerable: selfSnapshot.invulnerable,
         isSelf: true,
       });
-      selfHead = body[0];
+      selfHead = selfState.body[0];
 
       // 加速拖尾
-      if (selfSnapshot.boosting) {
+      if (selfState.boosting) {
         this.trailAccumulator += deltaMS;
-        const tail = body[body.length - 1];
+        const tail = selfState.body[selfState.body.length - 1];
         while (this.trailAccumulator > 40 && tail) {
           this.trailAccumulator -= 40;
           this.fx.trail(tail.x, tail.y, skinForPlayer(selfSnapshot.id).light);
@@ -213,7 +202,7 @@ export class GameRenderer {
     this.fx.update(deltaMS);
 
     // 5. 加速音效状态
-    const boosting = Boolean(selfSnapshot?.alive && selfSnapshot.boosting);
+    const boosting = Boolean(selfSnapshot?.alive && selfState?.boosting);
     if (boosting !== this.lastBoosting) {
       this.lastBoosting = boosting;
       controller.sfx.setBoosting(boosting);

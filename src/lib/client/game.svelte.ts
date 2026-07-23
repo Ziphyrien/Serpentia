@@ -236,6 +236,7 @@ export class GameController {
       const wasAlive = this.self.alive;
       this.predictor.reconcile(
         selfSnake,
+        snapshot.tick,
         serverTime,
         serverNow,
         this.input.hasDirection ? this.input.angle : undefined,

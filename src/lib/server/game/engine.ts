@@ -1,3 +1,4 @@
+import { advanceSnakeMotion } from "../../game/snake-motion";
 import { BodySpatialIndex } from "./body-spatial-index";
 import { defaultGameConfig, snakeRadius, type GameConfig } from "./config";
 import {
@@ -6,7 +7,6 @@ import {
   interpolate,
   move,
   pointToSegmentDistanceSquared,
-  turnTowards,
   type Point,
 } from "./geometry";
 import type {
@@ -157,6 +157,7 @@ export class GameEngine {
         nickname: snake.nickname,
         body: snake.body.map((point) => ({ x: point.x, y: point.y })),
         angle: snake.angle,
+        targetAngle: snake.targetAngle,
         radius: snakeRadius(snake.length, this.config),
         length: snake.length,
         score: snake.score,
@@ -188,28 +189,16 @@ export class GameEngine {
 
   private moveAliveSnakes(): void {
     const secondsPerTick = 1 / this.config.tickRate;
-    const maximumTurn = this.config.turnRate * secondsPerTick;
 
     for (const snake of this.sortedSnakes()) {
       if (!snake.alive) continue;
 
-      const canBoost = snake.boosting && snake.length > this.config.boostMinimumLength;
-      snake.angle = turnTowards(snake.angle, snake.targetAngle, maximumTurn);
-      const speed = canBoost ? this.config.boostSpeed : this.config.baseSpeed;
-      const head = move(snake.body[0], snake.angle, speed * secondsPerTick);
-      snake.body.unshift(head);
-
-      if (canBoost) this.drainBoost(snake, secondsPerTick);
-      this.trimBody(snake);
+      const drained = advanceSnakeMotion(snake, this.config, secondsPerTick);
+      if (drained > 0) this.releaseBoostFood(snake, drained);
     }
   }
 
-  private drainBoost(snake: SnakeState, secondsPerTick: number): void {
-    const drained = Math.min(
-      this.config.boostDrainPerSecond * secondsPerTick,
-      snake.length - this.config.minimumLength,
-    );
-    snake.length -= drained;
+  private releaseBoostFood(snake: SnakeState, drained: number): void {
     snake.boostShed += drained;
 
     while (snake.boostShed >= this.config.boostDropValue) {
@@ -218,25 +207,6 @@ export class GameEngine {
       const position = move(tail, scatterAngle, this.random.between(0, this.config.foodRadius * 2));
       this.addFood(position, this.config.boostDropValue, "boost");
       snake.boostShed -= this.config.boostDropValue;
-    }
-  }
-
-  private trimBody(snake: SnakeState): void {
-    let accumulated = 0;
-    for (let index = 1; index < snake.body.length; index += 1) {
-      const previous = snake.body[index - 1];
-      const current = snake.body[index];
-      const segmentLength = distance(previous, current);
-      if (accumulated + segmentLength < snake.length) {
-        accumulated += segmentLength;
-        continue;
-      }
-
-      const remaining = Math.max(0, snake.length - accumulated);
-      const ratio = segmentLength === 0 ? 0 : remaining / segmentLength;
-      snake.body[index] = interpolate(previous, current, ratio);
-      snake.body.splice(index + 1);
-      return;
     }
   }
 

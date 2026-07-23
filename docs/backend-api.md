@@ -154,6 +154,7 @@ wss://<host>/api/parties/game-room/friends
 - 客户端只提交意图；实际转向、速度和加速消耗由服务器决定
 - 每个连接最多 40 条输入消息/秒
 - `SnakeSnapshot.lastInputSequence` 是服务端确认序号，可用于客户端预测回滚；重连后新序号必须从该值继续递增
+- `SnakeSnapshot.targetAngle` 是服务端当前转向目标；客户端从权威快照回放时应以它为起点，不能只用当前 `angle` 猜测下一 tick
 
 心跳：
 

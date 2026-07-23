@@ -1,43 +1,54 @@
 import type { ClientGameRules, SnakeSnapshot } from "$lib/protocol";
+import {
+  advanceSnakeMotion,
+  normalizeAngle,
+  type MotionPoint,
+  type SnakeMotionState,
+} from "../../game/snake-motion";
 
-interface Point {
-  x: number;
-  y: number;
+interface InputIntent {
+  readonly angle?: number;
+  readonly boosting: boolean;
 }
 
-interface PredictedStep {
-  body: Array<Point>;
-  angle: number;
-  length: number;
-  /** 该步对应的服务端 tick 时刻（服务器时钟，毫秒）。 */
-  tickAt: number;
+interface PredictedStep extends SnakeMotionState {
+  tick: number;
 }
 
-const TAU = Math.PI * 2;
-
-function normalizeAngle(angle: number): number {
-  const normalized = ((((angle + Math.PI) % TAU) + TAU) % TAU) - Math.PI;
-  return normalized === -Math.PI ? Math.PI : normalized;
+export interface SelfRenderState {
+  readonly body: ReadonlyArray<MotionPoint>;
+  readonly angle: number;
+  readonly boosting: boolean;
 }
 
-function turnTowards(current: number, target: number, maximumTurn: number): number {
-  const difference = normalizeAngle(target - current);
-  if (Math.abs(difference) <= maximumTurn) return normalizeAngle(target);
-  return normalizeAngle(current + Math.sign(difference) * maximumTurn);
+interface VisualCorrection {
+  readonly body: ReadonlyArray<MotionPoint>;
+  readonly angle: number;
+  readonly startedAt: number;
 }
+
+const MAX_REPLAY_TICKS = 32;
+const MAX_FRAME_CATCH_UP_TICKS = 8;
+const CORRECTION_DURATION_MS = 120;
 
 /**
- * 自我蛇预测器：精确复刻服务端引擎的移动语义
- * （turnTowards + 匀速移动 + 按长度裁尾），
- * 在快照到达后回滚到权威状态并按服务端钟重放本地意图。
- * 渲染时在最近两个预测步之间插值，得到 60fps 的平滑手感。
+ * Local prediction for the controlled snake.
+ *
+ * Every simulated server tick records the intent used for that tick. A snapshot
+ * rewinds to its authoritative tick and replays those recorded intents to the
+ * existing prediction horizon. Rendering keeps a short-lived error offset so a
+ * correction changes the simulation immediately without moving the picture in
+ * the same frame.
  */
 export class SelfPredictor {
   private previous: PredictedStep | undefined;
   private current: PredictedStep | undefined;
+  private nextTick = 0;
   private nextTickAt = 0;
-  private tickMs: number;
-  private boosting = false;
+  private readonly tickMs: number;
+  private readonly intentByTick = new Map<number, InputIntent>();
+  private latestIntent: InputIntent = { boosting: false };
+  private correction: VisualCorrection | undefined;
   private alive = false;
 
   constructor(
@@ -55,154 +66,248 @@ export class SelfPredictor {
     return this.current?.length ?? 0;
   }
 
-  /**
-   * 快照到达：回滚到权威状态，并用当前意图把传输延迟期间的 ticks 补模拟。
-   *
-   * 平滑的关键在 0 次补模拟的场景（低延迟下快照往返不足一个 tick，
-   * 是常态）：若把 previous/current 重置成同一份，渲染插值会一直停在
-   * 快照位置直到下一个 tick——每个快照周期都是「拽回→冻结→追赶」，
-   * 整条蛇 10Hz 前后抽搐。此时从本地预测历史里挑出正好落在上一 tick
-   * 的那一步作 previous，权威修正就能在一个 tick 的插值窗口内平滑收敛。
-   * （这也解释了抽搐为何时有时无：有效延迟 = 单程延迟 + 时钟偏移误差，
-   * 偏移随 ping 采样缓慢漂移，漂过 tick 边界时补模拟次数在 0/1 间切换，
-   * 两种表现随之交替。）
-   */
   reconcile(
     snapshot: SnakeSnapshot,
+    snapshotTick: number,
     snapshotServerTime: number,
     serverNow: number,
-    intentAngle?: number,
-    intentBoosting?: boolean,
+    intentAngle: number | undefined,
+    intentBoosting: boolean,
   ): void {
-    this.alive = snapshot.alive;
+    this.latestIntent = { angle: intentAngle, boosting: intentBoosting };
     if (!snapshot.alive) {
-      this.previous = undefined;
-      this.current = undefined;
+      this.reset();
       return;
     }
-    this.boosting = snapshot.boosting;
-    const oldPrevious = this.previous;
+
+    const before = this.sampleVisual(serverNow);
+    const authoritative = fromSnapshot(snapshot, snapshotTick);
     const oldCurrent = this.current;
-    const state: PredictedStep = {
-      body: snapshot.body.map((point) => ({ x: point.x, y: point.y })),
-      angle: snapshot.angle,
-      length: snapshot.length,
-      tickAt: snapshotServerTime,
-    };
-    this.current = state;
-    this.nextTickAt = snapshotServerTime + this.tickMs;
-    // 补上 snapshot 生成到抵达之间流逝的 ticks（用当前意图回放；旧代码
-    // 用快照的旧角度，转弯时每次快照都把蛇头拽回旧轨迹）。
-    // 每次 step 都会自然把 previous 前移一格，≥1 次时无需特殊处理。
-    let guard = 0;
-    while (this.nextTickAt <= serverNow && guard < 12) {
-      this.step(intentAngle, intentBoosting);
-      guard += 1;
-    }
-    if (this.nextTickAt <= serverNow) this.nextTickAt = serverNow + this.tickMs;
-    if (guard === 0) {
-      const wanted = snapshotServerTime - this.tickMs;
-      const tolerance = this.tickMs * 0.5;
-      let previous: PredictedStep | undefined;
-      if (oldPrevious && Math.abs(oldPrevious.tickAt - wanted) <= tolerance) {
-        previous = oldPrevious;
-      } else if (oldCurrent && Math.abs(oldCurrent.tickAt - wanted) <= tolerance) {
-        previous = oldCurrent;
-      } else {
-        // 预测历史对不上（首次快照、时钟重同步等），退化为原地冻结一个 tick
-        previous = {
-          body: state.body.map((p) => ({ ...p })),
-          angle: state.angle,
-          length: state.length,
-          tickAt: wanted,
-        };
+    const oldPrevious = this.previous;
+    const oldNextTickAt = this.nextTickAt;
+    const canReplay =
+      oldCurrent !== undefined &&
+      oldPrevious !== undefined &&
+      snapshotTick <= oldCurrent.tick &&
+      oldCurrent.tick - snapshotTick <= MAX_REPLAY_TICKS;
+
+    this.alive = true;
+    if (canReplay) {
+      const horizonTick = oldCurrent.tick;
+      this.current = authoritative;
+      this.previous =
+        oldPrevious.tick === snapshotTick - 1
+          ? oldPrevious
+          : cloneStep(authoritative, snapshotTick - 1);
+
+      for (let tick = snapshotTick + 1; tick <= horizonTick; tick += 1) {
+        this.simulateTick(tick, this.intentByTick.get(tick));
       }
-      this.previous = previous;
+      this.nextTick = horizonTick + 1;
+      this.nextTickAt = oldNextTickAt;
+    } else {
+      this.previous = cloneStep(authoritative, snapshotTick - 1);
+      this.current = authoritative;
+      this.nextTick = snapshotTick + 1;
+      this.nextTickAt = snapshotServerTime + this.tickMs;
+    }
+
+    this.advanceTo(serverNow);
+    this.pruneIntentHistory(snapshotTick);
+
+    const after = this.sampleRaw(serverNow);
+    if (before && after) this.startCorrection(before, after, serverNow);
+    else this.correction = undefined;
+  }
+
+  /** Stops prediction until an alive authoritative snapshot initializes it again. */
+  markDead(): void {
+    this.reset();
+  }
+
+  /** Advances fixed simulation ticks using the latest local intent. */
+  advance(serverNow: number, intentAngle: number | undefined, intentBoosting: boolean): void {
+    this.latestIntent = { angle: intentAngle, boosting: intentBoosting };
+    if (!this.alive || !this.current) return;
+    this.advanceTo(serverNow);
+  }
+
+  /** Returns the interpolated pose, including short-lived reconciliation smoothing. */
+  renderState(serverNow: number): SelfRenderState | undefined {
+    return this.sampleVisual(serverNow);
+  }
+
+  private advanceTo(serverNow: number): void {
+    let processed = 0;
+    while (this.nextTickAt <= serverNow && processed < MAX_FRAME_CATCH_UP_TICKS) {
+      const intent = this.intentByTick.get(this.nextTick) ?? this.latestIntent;
+      this.intentByTick.set(this.nextTick, intent);
+      this.simulateTick(this.nextTick, intent);
+      this.nextTick += 1;
+      this.nextTickAt += this.tickMs;
+      processed += 1;
+    }
+
+    // A backgrounded tab may be many ticks behind. Keep the current frame stable;
+    // the next authoritative snapshot will rebuild the missing timeline.
+    if (this.nextTickAt <= serverNow) this.nextTickAt = serverNow + this.tickMs;
+  }
+
+  private simulateTick(tick: number, intent: InputIntent | undefined): void {
+    const current = this.current;
+    if (!current) return;
+
+    const next = cloneStep(current, tick);
+    if (intent?.angle !== undefined) next.targetAngle = intent.angle;
+    if (intent) next.boosting = intent.boosting;
+    advanceSnakeMotion(next, this.rules, this.tickMs / 1000);
+
+    this.previous = current;
+    this.current = next;
+  }
+
+  private sampleRaw(serverNow: number): SelfRenderState | undefined {
+    if (!this.current || !this.previous) return undefined;
+    const alpha = Math.min(1, Math.max(0, 1 - (this.nextTickAt - serverNow) / this.tickMs));
+    return {
+      body: interpolateBody(this.previous.body, this.current.body, alpha),
+      angle: interpolateAngle(this.previous.angle, this.current.angle, alpha),
+      boosting: this.current.boosting,
+    };
+  }
+
+  private sampleVisual(serverNow: number): SelfRenderState | undefined {
+    const raw = this.sampleRaw(serverNow);
+    if (!raw) return undefined;
+    const correction = this.correction;
+    if (!correction) return raw;
+
+    const progress = Math.min(
+      1,
+      Math.max(0, (serverNow - correction.startedAt) / CORRECTION_DURATION_MS),
+    );
+    if (progress >= 1) {
+      this.correction = undefined;
+      return raw;
+    }
+
+    const remaining = 1 - progress * progress * (3 - 2 * progress);
+    const lastCorrection = correction.body[correction.body.length - 1] ?? { x: 0, y: 0 };
+    return {
+      body: raw.body.map((point, index) => {
+        const delta = correction.body[index] ?? lastCorrection;
+        return {
+          x: point.x + delta.x * remaining,
+          y: point.y + delta.y * remaining,
+        };
+      }),
+      angle: normalizeAngle(raw.angle + correction.angle * remaining),
+      boosting: raw.boosting,
+    };
+  }
+
+  private startCorrection(
+    before: SelfRenderState,
+    after: SelfRenderState,
+    serverNow: number,
+  ): void {
+    const beforeHead = before.body[0];
+    const afterHead = after.body[0];
+    if (!beforeHead || !afterHead) {
+      this.correction = undefined;
+      return;
+    }
+
+    const headError = Math.hypot(beforeHead.x - afterHead.x, beforeHead.y - afterHead.y);
+    const snapDistance = this.rules.boostSpeed * 0.75;
+    if (headError > snapDistance) {
+      this.correction = undefined;
+      return;
+    }
+
+    const pointCount = Math.max(before.body.length, after.body.length);
+    const body: Array<MotionPoint> = [];
+    let largestError = headError;
+    for (let index = 0; index < pointCount; index += 1) {
+      const oldPoint = before.body[Math.min(index, before.body.length - 1)];
+      const newPoint = after.body[Math.min(index, after.body.length - 1)];
+      let x = oldPoint.x - newPoint.x;
+      let y = oldPoint.y - newPoint.y;
+      const distance = Math.hypot(x, y);
+      largestError = Math.max(largestError, distance);
+      if (distance > snapDistance) {
+        const scale = snapDistance / distance;
+        x *= scale;
+        y *= scale;
+      }
+      body.push({ x, y });
+    }
+
+    const angle = normalizeAngle(before.angle - after.angle);
+    if (largestError < 0.001 && Math.abs(angle) < 0.0001) {
+      this.correction = undefined;
+      return;
+    }
+    this.correction = { body, angle, startedAt: serverNow };
+  }
+
+  private pruneIntentHistory(snapshotTick: number): void {
+    for (const tick of this.intentByTick.keys()) {
+      if (tick <= snapshotTick) this.intentByTick.delete(tick);
     }
   }
 
-  /** 死亡后停止预测（等待重生快照）。 */
-  markDead(): void {
+  private reset(): void {
     this.alive = false;
     this.previous = undefined;
     this.current = undefined;
-  }
-
-  /** 按服务端钟推进模拟；intent 为当前输入意图（无方向输入时 angle 传 undefined）。 */
-  advance(serverNow: number, intentAngle?: number, intentBoosting?: boolean): void {
-    if (!this.alive || !this.current) return;
-    let guard = 0;
-    while (this.nextTickAt <= serverNow && guard < 8) {
-      this.step(intentAngle, intentBoosting);
-      guard += 1;
-    }
-  }
-
-  /** 渲染帧：返回 prev/current 之间的插值系数与两步状态。 */
-  renderState(
-    serverNow: number,
-  ): { from: PredictedStep; to: PredictedStep; alpha: number } | undefined {
-    if (!this.current || !this.previous) return undefined;
-    const alpha = Math.min(1, Math.max(0, 1 - (this.nextTickAt - serverNow) / this.tickMs));
-    return { from: this.previous, to: this.current, alpha };
-  }
-
-  private step(intentAngle?: number, intentBoosting?: boolean): void {
-    const current = this.current;
-    if (!current) return;
-    const secondsPerTick = this.tickMs / 1000;
-    const maximumTurn = this.rules.turnRate * secondsPerTick;
-
-    const angle =
-      intentAngle === undefined
-        ? current.angle
-        : turnTowards(current.angle, intentAngle, maximumTurn);
-    if (intentBoosting !== undefined) this.boosting = intentBoosting;
-
-    const canBoost = this.boosting && current.length > this.rules.boostMinimumLength;
-    const speed = canBoost ? this.rules.boostSpeed : this.rules.baseSpeed;
-
-    const head: Point = {
-      x: current.body[0].x + Math.cos(angle) * speed * secondsPerTick,
-      y: current.body[0].y + Math.sin(angle) * speed * secondsPerTick,
-    };
-
-    let length = current.length;
-    if (canBoost) {
-      const drained = Math.min(
-        this.rules.boostDrainPerSecond * secondsPerTick,
-        length - this.rules.minimumLength,
-      );
-      length -= drained;
-    }
-
-    const body = [head, ...current.body.map((point) => ({ x: point.x, y: point.y }))];
-    trimBody(body, length);
-
-    this.previous = current;
-    this.current = { body, angle, length, tickAt: this.nextTickAt };
-    this.nextTickAt += this.tickMs;
+    this.nextTick = 0;
+    this.nextTickAt = 0;
+    this.intentByTick.clear();
+    this.correction = undefined;
   }
 }
 
-/** 与服务端 trimBody 等价：把折线裁剪到指定长度。 */
-function trimBody(body: Array<Point>, length: number): void {
-  let accumulated = 0;
-  for (let index = 1; index < body.length; index += 1) {
-    const previous = body[index - 1];
-    const current = body[index];
-    const segmentLength = Math.hypot(current.x - previous.x, current.y - previous.y);
-    if (accumulated + segmentLength < length) {
-      accumulated += segmentLength;
-      continue;
-    }
-    const remaining = Math.max(0, length - accumulated);
-    const ratio = segmentLength === 0 ? 0 : remaining / segmentLength;
-    body[index] = {
-      x: previous.x + (current.x - previous.x) * ratio,
-      y: previous.y + (current.y - previous.y) * ratio,
-    };
-    body.splice(index + 1);
-    return;
+function fromSnapshot(snapshot: SnakeSnapshot, tick: number): PredictedStep {
+  return {
+    body: snapshot.body.map((point) => ({ x: point.x, y: point.y })),
+    angle: snapshot.angle,
+    targetAngle: snapshot.targetAngle ?? snapshot.angle,
+    length: snapshot.length,
+    boosting: snapshot.boosting,
+    tick,
+  };
+}
+
+function cloneStep(state: PredictedStep, tick: number): PredictedStep {
+  return {
+    body: state.body.map((point) => ({ ...point })),
+    angle: state.angle,
+    targetAngle: state.targetAngle,
+    length: state.length,
+    boosting: state.boosting,
+    tick,
+  };
+}
+
+function interpolateBody(
+  from: ReadonlyArray<MotionPoint>,
+  to: ReadonlyArray<MotionPoint>,
+  ratio: number,
+): Array<MotionPoint> {
+  const pointCount = Math.max(from.length, to.length);
+  const body: Array<MotionPoint> = [];
+  for (let index = 0; index < pointCount; index += 1) {
+    const before = from[Math.min(index, from.length - 1)];
+    const after = to[Math.min(index, to.length - 1)];
+    body.push({
+      x: before.x + (after.x - before.x) * ratio,
+      y: before.y + (after.y - before.y) * ratio,
+    });
   }
+  return body;
+}
+
+function interpolateAngle(from: number, to: number, ratio: number): number {
+  return normalizeAngle(from + normalizeAngle(to - from) * ratio);
 }

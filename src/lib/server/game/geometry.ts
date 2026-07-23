@@ -1,5 +1,6 @@
 import type { Point } from "../../protocol/state";
 
+export { normalizeAngle, turnTowards } from "../../game/snake-motion";
 export type { Point } from "../../protocol/state";
 
 export function distanceSquared(left: Point, right: Point): number {
@@ -17,18 +18,6 @@ export function move(point: Point, angle: number, amount: number): Point {
     x: point.x + Math.cos(angle) * amount,
     y: point.y + Math.sin(angle) * amount,
   };
-}
-
-export function normalizeAngle(angle: number): number {
-  const turn = Math.PI * 2;
-  const normalized = ((((angle + Math.PI) % turn) + turn) % turn) - Math.PI;
-  return normalized === -Math.PI ? Math.PI : normalized;
-}
-
-export function turnTowards(current: number, target: number, maximumTurn: number): number {
-  const difference = normalizeAngle(target - current);
-  if (Math.abs(difference) <= maximumTurn) return normalizeAngle(target);
-  return normalizeAngle(current + Math.sign(difference) * maximumTurn);
 }
 
 export function pointToSegmentDistanceSquared(point: Point, start: Point, end: Point): number {

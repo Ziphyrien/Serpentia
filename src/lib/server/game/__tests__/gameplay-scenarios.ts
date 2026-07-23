@@ -157,6 +157,10 @@ export const gameplayScenarios: ReadonlyArray<GameplayScenario> = [
         decoded.snapshot.snakes[0].respawnAtTick === null,
         "wire snapshot omitted its nullable respawn field",
       );
+      requireCondition(
+        decoded.snapshot.snakes[0].targetAngle === 0,
+        "wire snapshot omitted its steering target",
+      );
     },
   },
   {
