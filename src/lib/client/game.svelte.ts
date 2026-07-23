@@ -16,6 +16,7 @@ import { InputState } from "./input/input-state";
 import { PointerInput } from "./input/pointer-input";
 import { JoystickInput } from "./input/joystick-input";
 import { Sfx } from "./audio/sfx";
+import { normalizeAngle } from "../game/snake-motion";
 import { VoiceManager, type VoicePeerView } from "./voice/voice-manager";
 import type { SettingsStore } from "./stores/settings.svelte";
 
@@ -76,7 +77,7 @@ export class GameController {
   private destroyed = false;
   private nextSequence = 0;
   private lastSnapshotTick = 0;
-  private lastSentAngle = Number.NaN;
+  private lastSentAngle: number | undefined;
   private lastSentBoosting = false;
   private sendTimer: ReturnType<typeof setInterval> | undefined;
   private pingTimer: ReturnType<typeof setInterval> | undefined;
@@ -380,10 +381,13 @@ export class GameController {
     if (this.sendTimer) clearInterval(this.sendTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
 
-    this.lastSentAngle = Number.NaN;
+    this.lastSentAngle = undefined;
+    this.lastSentBoosting = false;
     this.sendTimer = setInterval(() => {
       if (!this.client?.connected || !this.input.hasDirection) return;
-      const angleChanged = Math.abs(this.input.angle - this.lastSentAngle) > INPUT.angleEpsilon;
+      const angleChanged =
+        this.lastSentAngle === undefined ||
+        Math.abs(normalizeAngle(this.input.angle - this.lastSentAngle)) > INPUT.angleEpsilon;
       const boostChanged = this.input.boosting !== this.lastSentBoosting;
       if (!angleChanged && !boostChanged) return;
       this.lastSentAngle = this.input.angle;
