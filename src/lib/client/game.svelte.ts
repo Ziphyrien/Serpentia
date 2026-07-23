@@ -235,15 +235,21 @@ export class GameController {
     if (selfSnake) {
       const wasAlive = this.self.alive;
       this.predictor.reconcile(selfSnake, serverTime, serverNow);
+      // 保留 respawnIn/deathBy：它们分别由倒计时定时器和死亡/重生事件维护，
+      // 不能随快照重建，否则 10Hz 快照会把倒计时打回 0、把击杀者名字抹掉
       this.self = {
+        ...this.self,
         length: Math.round(selfSnake.length),
         kills: selfSnake.kills,
         score: Math.round(selfSnake.score),
         alive: selfSnake.alive,
-        respawnIn: 0,
       };
       if (selfSnake.alive && !wasAlive) this.sfx.respawn();
       if (selfSnake.alive && selfSnake.respawnAtTick === null) this.clearRespawnCountdown();
+      if (!selfSnake.alive && selfSnake.respawnAtTick != null && !this.respawnTimer) {
+        // 重连等场景漏掉死亡事件时，从快照补齐倒计时
+        this.startRespawnCountdown(selfSnake.respawnAtTick, snapshot.tick);
+      }
     }
     this.leaderboard = snapshot.leaderboard.slice(0, 10).map((entry) => ({
       playerId: entry.playerId,
