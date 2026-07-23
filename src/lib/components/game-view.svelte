@@ -42,7 +42,7 @@
 
   <!-- 连接状态横幅 -->
   {#if controller.status === "connecting" || controller.status === "reconnecting"}
-    <div class="absolute inset-x-0 top-0 z-30 flex justify-center pt-20">
+    <div class="absolute inset-x-0 top-0 z-30 flex justify-center pt-20 landscape-short:pt-12">
       <div class="rounded-full bg-panel px-6 py-2 text-sm font-bold text-white/90 backdrop-blur-sm">
         {controller.status === "connecting" ? "正在进入蛇域…" : "连接断了，正在重连…"}
       </div>

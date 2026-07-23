@@ -28,6 +28,7 @@ export class GameRenderer {
   private trailAccumulator = 0;
   private selfRadiusSmooth = 11;
   private lastBoosting = false;
+  private readonly handleResize = (): void => this.resize();
 
   constructor(
     private readonly controller: GameController,
@@ -51,6 +52,8 @@ export class GameRenderer {
       return;
     }
     this.app = app;
+    // resizeTo 只负责画布尺寸，星空背景要跟着屏幕旋转/缩放联动
+    app.renderer.on("resize", this.handleResize);
     host.appendChild(app.canvas);
 
     this.textures = await loadGameTextures();
@@ -113,6 +116,7 @@ export class GameRenderer {
 
   destroy(): void {
     this.destroyed = true;
+    this.app?.renderer.off("resize", this.handleResize);
     this.snakes?.destroy();
     this.food?.destroy();
     this.fx?.destroy();

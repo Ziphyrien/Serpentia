@@ -31,7 +31,7 @@
   });
 </script>
 
-<div class="pointer-events-none absolute inset-0 z-10 flex flex-col p-3 sm:p-4" data-ui>
+<div class="pointer-events-none absolute inset-0 z-10 flex flex-col p-hud" data-ui>
   <!-- 顶部行：排行榜 / 击杀播报 / 小地图与按钮 -->
   <div class="flex items-start justify-between gap-3">
     <Leaderboard entries={controller.leaderboard} selfId={controller.selfId} />

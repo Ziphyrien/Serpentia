@@ -12,7 +12,9 @@
   const RANK_COLORS = ["text-amber-300", "text-slate-300", "text-orange-400"];
 </script>
 
-<div class="w-44 rounded-2xl border border-panel-border bg-panel p-3 backdrop-blur-sm sm:w-52">
+<div
+  class="w-44 rounded-2xl border border-panel-border bg-panel p-3 backdrop-blur-sm sm:w-52 landscape-short:max-h-[42dvh] landscape-short:overflow-y-auto"
+>
   <div class="mb-2 flex items-center gap-1.5 text-white/85">
     <Trophy size={15} class="text-amber-300" />
     <span class="text-sm font-black tracking-wide">排行榜</span>

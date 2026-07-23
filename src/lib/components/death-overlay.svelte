@@ -10,7 +10,9 @@
 </script>
 
 <div class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-night-950/45">
-  <div class="feed-in flex w-72 flex-col items-center rounded-3xl border border-panel-border bg-panel p-6 backdrop-blur-md">
+  <div
+    class="feed-in flex max-h-[calc(100dvh-2rem)] w-72 flex-col items-center overflow-y-auto rounded-3xl border border-panel-border bg-panel p-6 backdrop-blur-md"
+  >
     <span class="mb-2 flex size-14 items-center justify-center rounded-full bg-red-500/20 text-red-400">
       <Skull size={30} />
     </span>

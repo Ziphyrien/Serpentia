@@ -42,7 +42,7 @@
   <Dialog.Portal>
     <Dialog.Overlay class="fixed inset-0 z-40 bg-night-950/70 backdrop-blur-sm" />
     <Dialog.Content
-      class="fixed top-1/2 left-1/2 z-50 w-[min(92vw,22rem)] -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-panel-border bg-night-900 p-6 shadow-2xl"
+      class="fixed top-1/2 left-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(92vw,22rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-panel-border bg-night-900 p-6 shadow-2xl"
     >
       <div class="mb-5 flex items-center justify-between">
         <Dialog.Title class="text-lg font-black tracking-wide">设置</Dialog.Title>

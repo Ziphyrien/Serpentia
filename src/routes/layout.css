@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* 手机横持（矮屏横屏）：压缩 HUD 体积 */
+@custom-variant landscape-short (@media (orientation: landscape) and (max-height: 30rem));
+
 @theme {
   /* 蛇域夜空配色 */
   --color-night-950: #0b1020;
@@ -31,6 +34,30 @@ body {
 canvas {
   display: block;
   touch-action: none;
+}
+
+/* HUD 安全区内边距：避开刘海 / 灵动岛 / Home 指示条 */
+@utility p-hud {
+  padding: 0.75rem;
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+  padding-right: max(0.75rem, env(safe-area-inset-right));
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  padding-left: max(0.75rem, env(safe-area-inset-left));
+}
+
+/* 虚拟摇杆皮肤：半透明底盘 + 白色旋钮（nipplejs 内联样式需 !important 覆盖） */
+.joystick > .back {
+  box-sizing: border-box;
+  background: rgb(255 255 255 / 0.08) !important;
+  border: 2px solid rgb(255 255 255 / 0.35);
+}
+
+.joystick > .front {
+  box-sizing: border-box;
+  background: rgb(255 255 255 / 0.85) !important;
+  border: 1px solid rgb(255 255 255 / 0.6);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
+  opacity: 1 !important;
 }
 
 /* 数字与排行榜用等宽数字，跳动时不抖 */
