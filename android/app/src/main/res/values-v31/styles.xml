@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <style name="Theme.Serpentia" parent="android:style/Theme.Material.NoActionBar">
+    <item name="android:windowNoTitle">true</item>
+    <item name="android:windowFullscreen">true</item>
+    <item name="android:windowActionModeOverlay">true</item>
+    <item name="android:windowBackground">@color/serpentia_background</item>
+    <item name="android:statusBarColor">@android:color/transparent</item>
+    <item name="android:navigationBarColor">@android:color/transparent</item>
+    <item name="android:windowLightStatusBar">false</item>
+    <item name="android:windowLightNavigationBar">false</item>
+    <item name="android:fontFamily">sans</item>
+    <item name="android:colorAccent">@color/serpentia_accent</item>
+    <item name="android:windowSplashScreenBackground">@color/serpentia_background</item>
+    <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+  </style>
+</resources>

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<merge xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <WebView
+    android:id="@+id/game_web_view"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/serpentia_background"
+    android:importantForAutofill="noExcludeDescendants" />
+
+  <ProgressBar
+    android:id="@+id/loading_progress"
+    style="@android:style/Widget.Material.ProgressBar.Horizontal"
+    android:layout_width="match_parent"
+    android:layout_height="3dp"
+    android:layout_gravity="top"
+    android:indeterminate="false"
+    android:max="100"
+    android:progressTint="@color/serpentia_accent" />
+
+  <LinearLayout
+    android:id="@+id/error_panel"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F207111F"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="32dp"
+    android:visibility="gone">
+
+    <TextView
+      android:id="@+id/error_title"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:gravity="center"
+      android:textColor="@color/serpentia_text"
+      android:textSize="22sp"
+      android:textStyle="bold" />
+
+    <TextView
+      android:id="@+id/error_message"
+      android:layout_width="match_parent"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="12dp"
+      android:gravity="center"
+      android:maxWidth="480dp"
+      android:textColor="@color/serpentia_text_muted"
+      android:textSize="15sp" />
+
+    <Button
+      android:id="@+id/retry_button"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="24dp"
+      android:backgroundTint="@color/serpentia_accent"
+      android:minWidth="128dp"
+      android:text="@string/retry"
+      android:textAllCaps="false"
+      android:textColor="@color/serpentia_background" />
+  </LinearLayout>
+</merge>

@@ -13,6 +13,8 @@ Bun.serve (HTTP / WebSocket / TLS)
 
 前端由 SvelteKit `adapter-static` 构建为 SPA；Bun 同一进程供应静态资源、HTTP API 和 WebSocket。后端协议定义位于 `src/lib/protocol`，接口说明见 [`docs/backend-api.md`](docs/backend-api.md)。
 
+Kotlin 沉浸式 Android 客户端位于 [`android/`](android/README.md)。其 JDK、Android SDK、Gradle 和依赖缓存均可安装在 D 盘。
+
 ## 本地运行
 
 ```bash

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">蛇域</string>
+  <string name="retry">重新连接</string>
+  <string name="load_error_title">无法连接蛇域</string>
+  <string name="load_error_message">请确认服务器和网络可用，然后重试。\n\n%1$s</string>
+  <string name="configuration_error_title">尚未配置服务器</string>
+  <string name="configuration_error_message">发布版必须通过 SERPENTIA_APP_URL 指定 HTTPS 游戏地址。构建说明见 android/README.md。</string>
+  <string name="external_link_error_title">无法打开外部链接</string>
+  <string name="external_link_error_message">设备上没有可以处理此链接的应用。</string>
+</resources>
