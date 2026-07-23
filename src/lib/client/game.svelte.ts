@@ -79,7 +79,9 @@ export class GameController {
   private lastSnapshotTick = 0;
   private lastSentAngle: number | undefined;
   private lastSentBoosting = false;
-  private sendTimer: ReturnType<typeof setInterval> | undefined;
+  private inputSendTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastInputSentAt = Number.NEGATIVE_INFINITY;
+  private readonly unsubscribeInput: () => void;
   private pingTimer: ReturnType<typeof setInterval> | undefined;
   private pingNonce = 0;
   private pingSentAt = new Map<string, number>();
@@ -115,6 +117,7 @@ export class GameController {
     });
     this.sfx.setVolume(settings.sfxVolume);
     this.sfx.setMuted(settings.sfxMuted);
+    this.unsubscribeInput = this.input.subscribe(() => this.scheduleInputSend());
     this.connect();
   }
 
@@ -158,8 +161,9 @@ export class GameController {
 
   destroy(): void {
     this.destroyed = true;
-    if (this.sendTimer) clearInterval(this.sendTimer);
+    if (this.inputSendTimer) clearTimeout(this.inputSendTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
+    this.unsubscribeInput();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.respawnTimer) clearInterval(this.respawnTimer);
     this.client?.close();
@@ -377,28 +381,50 @@ export class GameController {
     this.reconnectTimer = setTimeout(() => this.connect(), delay);
   }
 
+  private scheduleInputSend(): void {
+    if (this.destroyed || !this.client?.connected || !this.input.hasDirection) return;
+    if (this.inputSendTimer) return;
+
+    const elapsed = performance.now() - this.lastInputSentAt;
+    const delay = Math.max(0, INPUT.sendIntervalMs - elapsed);
+    if (delay === 0) {
+      this.flushInput();
+      return;
+    }
+    this.inputSendTimer = setTimeout(() => {
+      this.inputSendTimer = undefined;
+      this.flushInput();
+    }, delay);
+  }
+
+  private flushInput(): void {
+    if (!this.client?.connected || !this.input.hasDirection) return;
+    const angleChanged =
+      this.lastSentAngle === undefined ||
+      Math.abs(normalizeAngle(this.input.angle - this.lastSentAngle)) > INPUT.angleEpsilon;
+    const boostChanged = this.input.boosting !== this.lastSentBoosting;
+    if (!angleChanged && !boostChanged) return;
+
+    this.lastSentAngle = this.input.angle;
+    this.lastSentBoosting = this.input.boosting;
+    this.lastInputSentAt = performance.now();
+    this.client.sendInput(
+      this.nextSequence++,
+      this.lastSnapshotTick,
+      this.input.angle,
+      this.input.boosting,
+    );
+  }
+
   private startLoops(): void {
-    if (this.sendTimer) clearInterval(this.sendTimer);
+    if (this.inputSendTimer) clearTimeout(this.inputSendTimer);
+    this.inputSendTimer = undefined;
     if (this.pingTimer) clearInterval(this.pingTimer);
 
     this.lastSentAngle = undefined;
     this.lastSentBoosting = false;
-    this.sendTimer = setInterval(() => {
-      if (!this.client?.connected || !this.input.hasDirection) return;
-      const angleChanged =
-        this.lastSentAngle === undefined ||
-        Math.abs(normalizeAngle(this.input.angle - this.lastSentAngle)) > INPUT.angleEpsilon;
-      const boostChanged = this.input.boosting !== this.lastSentBoosting;
-      if (!angleChanged && !boostChanged) return;
-      this.lastSentAngle = this.input.angle;
-      this.lastSentBoosting = this.input.boosting;
-      this.client.sendInput(
-        this.nextSequence++,
-        this.lastSnapshotTick,
-        this.input.angle,
-        this.input.boosting,
-      );
-    }, INPUT.sendIntervalMs);
+    this.lastInputSentAt = Number.NEGATIVE_INFINITY;
+    this.scheduleInputSend();
 
     const sendPing = (): void => {
       if (!this.client?.connected) return;

@@ -1,11 +1,53 @@
+export type InputStateListener = () => void;
+
 /**
- * 输入意图模型：所有输入设备（鼠标/键盘/摇杆）
- * 都只往这里写意图，网络发送与本地预测从这里读取。
- * 设备层与消费层互不知晓，保证低耦合。
+ * Shared input intent for pointer, keyboard, and joystick controls.
+ * Consumers can subscribe to changes so the first input is sent immediately;
+ * network throttling remains the controller's responsibility.
  */
 export class InputState {
-  angle = 0;
-  boosting = false;
-  /** 是否有任何设备给出过方向（未给出时保持服务器默认方向）。 */
-  hasDirection = false;
+  private currentAngle = 0;
+  private currentBoosting = false;
+  private directionAvailable = false;
+  private readonly listeners = new Set<InputStateListener>();
+
+  get angle(): number {
+    return this.currentAngle;
+  }
+
+  set angle(value: number) {
+    if (Object.is(this.currentAngle, value)) return;
+    this.currentAngle = value;
+    this.notify();
+  }
+
+  get boosting(): boolean {
+    return this.currentBoosting;
+  }
+
+  set boosting(value: boolean) {
+    if (this.currentBoosting === value) return;
+    this.currentBoosting = value;
+    this.notify();
+  }
+
+  /** Whether any device has supplied a direction yet. */
+  get hasDirection(): boolean {
+    return this.directionAvailable;
+  }
+
+  set hasDirection(value: boolean) {
+    if (this.directionAvailable === value) return;
+    this.directionAvailable = value;
+    this.notify();
+  }
+
+  subscribe(listener: InputStateListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify(): void {
+    for (const listener of this.listeners) listener();
+  }
 }
