@@ -2,12 +2,15 @@ import { Effect } from "effect";
 import {
   GAME_PROTOCOL_VERSION,
   MAX_CLIENT_MESSAGE_BYTES,
+  SnapshotStreamEncoder,
   decodeClientMessage,
   encodeServerMessage,
   type ClientMessage,
   type RoomMetadata,
   type ServerErrorCode,
   type ServerMessage,
+  type SnapshotMessage,
+  type ServerWireMessage,
   type TickEventBatch,
   type VoiceSignal,
 } from "../../protocol";
@@ -18,6 +21,7 @@ import type { ConnectionIdentity } from "./connection-identity";
 import { ConnectionTrafficGuard, type MessageCategory } from "./connection-traffic-guard";
 import { RoomController } from "./room-controller";
 import { RECONNECT_GRACE_TICKS, ROOM_METADATA, SNAPSHOT_RATE } from "./room-settings";
+import { SnapshotDeliveryState } from "./snapshot-delivery-state";
 
 const MAX_CATCH_UP_TICKS = 5;
 
@@ -25,7 +29,7 @@ const MAX_CATCH_UP_TICKS = 5;
 export interface GameRoomConnection {
   readonly id: string;
   readonly identity: ConnectionIdentity;
-  send(message: string): void;
+  send(message: ServerWireMessage): number;
   close(code: number, reason: string): void;
 }
 
@@ -40,10 +44,13 @@ export class GameRoom {
   );
   private readonly voiceRoster = new VoiceRoster();
   private readonly trafficGuard = new ConnectionTrafficGuard();
+  private readonly snapshotStream = new SnapshotStreamEncoder();
+  private readonly snapshotDelivery = new SnapshotDeliveryState();
   private readonly connections = new Map<string, GameRoomConnection>();
   private readonly pendingEvents: Array<TickEventBatch> = [];
   private timer: ReturnType<typeof setTimeout> | undefined;
   private nextTickAt = 0;
+  private latestSnapshotMessage: SnapshotMessage | undefined;
 
   constructor(private readonly metadata: RoomMetadata = ROOM_METADATA) {}
 
@@ -55,6 +62,9 @@ export class GameRoom {
       return;
     }
 
+    this.snapshotStream.reset();
+    this.snapshotDelivery.forget(connection.id);
+    this.latestSnapshotMessage = undefined;
     const result = this.controller.join(connection.id, identity);
     if (result._tag === "Rejected") {
       this.sendError(connection, result.reason, false);
@@ -128,6 +138,9 @@ export class GameRoom {
     const connection = this.connections.get(connectionId);
     if (connection === undefined) return;
     this.connections.delete(connectionId);
+    this.snapshotStream.reset();
+    this.snapshotDelivery.forget(connectionId);
+    this.latestSnapshotMessage = undefined;
     this.trafficGuard.forget(connectionId);
 
     const left = this.controller.leave(connectionId);
@@ -136,6 +149,19 @@ export class GameRoom {
       this.broadcastVoiceRoster();
     }
     if (!this.controller.shouldRun) this.stopLoop();
+  }
+
+  drain(connectionId: string): void {
+    const connection = this.connections.get(connectionId);
+    if (connection === undefined) {
+      this.snapshotDelivery.forget(connectionId);
+      return;
+    }
+    if (!this.snapshotDelivery.drain(connectionId)) return;
+    const latest = this.latestSnapshotMessage;
+    if (latest !== undefined) {
+      this.sendEncoded(connection, this.snapshotStream.keyframe(latest));
+    }
   }
 
   reportError(connectionId: string, error: unknown): void {
@@ -152,7 +178,10 @@ export class GameRoom {
 
   dispose(): void {
     this.stopLoop();
+    this.snapshotStream.reset();
+    this.latestSnapshotMessage = undefined;
     for (const connection of this.connections.values()) {
+      this.snapshotDelivery.forget(connection.id);
       connection.close(1001, "Server shutting down");
     }
     this.connections.clear();
@@ -283,7 +312,7 @@ export class GameRoom {
       result.events.respawnedPlayerIds.length > 0 ||
       result.expiredPlayerIds.length > 0;
     if (urgent || this.controller.currentTick % snapshotInterval === 0) {
-      this.broadcast({
+      this.broadcastSnapshot({
         v: GAME_PROTOCOL_VERSION,
         _tag: "snapshot",
         serverTime: Date.now(),
@@ -318,15 +347,32 @@ export class GameRoom {
     );
   }
 
+  private broadcastSnapshot(message: SnapshotMessage): void {
+    const encoded = this.snapshotStream.encode(message);
+    this.latestSnapshotMessage = message;
+    for (const connection of this.connections.values()) {
+      if (!this.snapshotDelivery.shouldSendSnapshot(connection.id)) continue;
+      this.sendEncoded(connection, encoded);
+    }
+  }
+
   private broadcast(message: ServerMessage, withoutConnectionId?: string): void {
-    const encoded = encodeServerMessage(message);
+    this.broadcastEncoded(encodeServerMessage(message), withoutConnectionId);
+  }
+
+  private broadcastEncoded(encoded: ServerWireMessage, withoutConnectionId?: string): void {
     for (const connection of this.connections.values()) {
       if (connection.id === withoutConnectionId) continue;
-      try {
-        connection.send(encoded);
-      } catch (error) {
-        this.reportError(connection.id, error);
-      }
+      this.sendEncoded(connection, encoded);
+    }
+  }
+
+  private sendEncoded(connection: GameRoomConnection, encoded: ServerWireMessage): void {
+    try {
+      const status = connection.send(encoded);
+      this.snapshotDelivery.recordSend(connection.id, status);
+    } catch (error) {
+      this.reportError(connection.id, error);
     }
   }
 
@@ -344,11 +390,7 @@ export class GameRoom {
   }
 
   private send(connection: GameRoomConnection, message: ServerMessage): void {
-    try {
-      connection.send(encodeServerMessage(message));
-    } catch (error) {
-      this.reportError(connection.id, error);
-    }
+    this.sendEncoded(connection, encodeServerMessage(message));
   }
 }
 

@@ -9,6 +9,7 @@
         "effect": "^4.0.0-beta.101",
         "howler": "^2.2.4",
         "lucide-svelte": "^1.0.1",
+        "msgpackr": "^2.0.4",
         "nipplejs": "^1.0.4",
         "pixi.js": "^8.19.0",
       },
