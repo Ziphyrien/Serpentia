@@ -8,6 +8,16 @@
   let zone = $state<HTMLDivElement>();
   let boosting = $state(false);
 
+  // 长度不够时加速无效：按钮变暗提示，按下也不显示生效样式
+  const canBoost = $derived(controller.self.length > controller.descriptor.rules.boostMinimumLength);
+  const buttonClass = $derived(
+    boosting
+      ? canBoost
+        ? "scale-95 border-amber-200 bg-amber-400 text-night-950 shadow-[0_0_30px_rgba(251,191,36,0.6)]"
+        : "scale-95 border-white/15 bg-white/10 text-white/50"
+      : "border-white/25 bg-amber-300/90 text-night-950",
+  );
+
   onMount(() => {
     if (zone) controller.joystick.attach(zone);
     return () => controller.joystick.detach();
@@ -24,9 +34,9 @@
 
 <!-- 加速按钮：右下大圆钮 -->
 <button
-  class="absolute right-6 bottom-10 z-10 flex size-24 touch-none items-center justify-center rounded-full border-4 font-black text-night-950 transition select-none {boosting
-    ? 'scale-95 border-amber-200 bg-amber-400 shadow-[0_0_30px_rgba(251,191,36,0.6)]'
-    : 'border-white/25 bg-amber-300/90'}"
+  class="absolute right-[max(1.5rem,env(safe-area-inset-right))] bottom-[max(2.5rem,env(safe-area-inset-bottom))] z-10 flex size-24 touch-none items-center justify-center rounded-full border-4 font-black transition select-none landscape-short:size-20 {buttonClass} {canBoost
+    ? ''
+    : 'opacity-50'}"
   style="text-shadow: none;"
   ontouchstart={(e) => {
     e.preventDefault();

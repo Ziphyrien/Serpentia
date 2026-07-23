@@ -140,6 +140,8 @@ export class GameRenderer {
     );
 
     // 2. 组装本帧蛇视图
+    // 加速意图不等于加速生效：长度低于阈值时速度不变，不该显示加速光晕
+    const minBoostLength = controller.descriptor.rules.boostMinimumLength;
     const views: Array<SnakeRenderView> = [];
     const renderTime = serverNow - controller.snapshotBuffer.interpolationDelay();
     for (const remote of controller.snapshotBuffer.sampleRemoteSnakes(renderTime)) {
@@ -149,7 +151,7 @@ export class GameRenderer {
         body: remote.body,
         angle: remote.angle,
         radius: remote.radius,
-        boosting: remote.boosting,
+        boosting: remote.boosting && remote.length > minBoostLength,
         invulnerable: remote.invulnerable,
         isSelf: false,
       });
@@ -160,23 +162,25 @@ export class GameRenderer {
     );
     const selfState = controller.selfPredictor.renderState();
     let selfHead: { x: number; y: number } | undefined;
+    let selfBoosting = false;
     if (selfState && selfSnapshot?.alive) {
       const radius = selfSnapshot.radius;
       this.selfRadiusSmooth += (radius - this.selfRadiusSmooth) * 0.08;
+      selfBoosting = selfState.boosting && controller.selfPredictor.currentLength > minBoostLength;
       views.push({
         id: selfSnapshot.id,
         nickname: selfSnapshot.nickname,
         body: selfState.body,
         angle: selfState.angle,
         radius: this.selfRadiusSmooth,
-        boosting: selfState.boosting,
+        boosting: selfBoosting,
         invulnerable: selfSnapshot.invulnerable,
         isSelf: true,
       });
       selfHead = selfState.body[0];
 
       // 加速拖尾
-      if (selfState.boosting) {
+      if (selfBoosting) {
         this.trailAccumulator += deltaMS;
         const tail = selfState.body[selfState.body.length - 1];
         while (this.trailAccumulator > 40 && tail) {
@@ -206,8 +210,8 @@ export class GameRenderer {
     this.snakes.update(views, viewBounds, this.settings.showNicknames, nowMs);
     this.fx.update(deltaMS);
 
-    // 5. 加速音效状态
-    const boosting = Boolean(selfSnapshot?.alive && selfState?.boosting);
+    // 5. 加速音效状态（同样以生效为准，长度不足时不发声）
+    const boosting = Boolean(selfSnapshot?.alive && selfBoosting);
     if (boosting !== this.lastBoosting) {
       this.lastBoosting = boosting;
       controller.sfx.setBoosting(boosting);
