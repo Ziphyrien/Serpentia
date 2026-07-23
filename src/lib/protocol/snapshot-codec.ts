@@ -1023,7 +1023,7 @@ function encodeFoodsDelta(
       changed.push(food);
     }
   }
-  if (changed.length === 0) return new Uint8Array(0);
+  if (foods.length === previous.length && changed.length === 0) return new Uint8Array(0);
   for (const byte of bitmap) delta.push(byte);
   for (const food of changed) writeFoodRecord(delta, food);
   const deltaEncoded = Uint8Array.from(delta);
