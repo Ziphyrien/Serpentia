@@ -18,10 +18,12 @@ export class ClockSync {
     const now = Date.now();
     const rtt = Math.max(0, now - nonceSentAt);
     const offset = serverTime - (nonceSentAt + rtt / 2);
-    if (this.offsetMs === undefined) {
+    if (this.offsetMs === undefined || this.bestRttMs === Number.POSITIVE_INFINITY) {
+      // seed 假定单程延迟为 0；首个完整 RTT 样本应立即替换粗略值，
+      // 否则按 20% 慢慢收敛会让刚进入时的预测 tick 相位持续漂移。
       this.offsetMs = offset;
     } else if (rtt <= this.bestRttMs * 1.5 + 20) {
-      // 只在 RTT 不劣化时平滑收敛，避免抖动污染
+      // 后续只在 RTT 不劣化时平滑收敛，避免抖动污染
       this.offsetMs = this.offsetMs * 0.8 + offset * 0.2;
     }
     this.bestRttMs = Math.min(this.bestRttMs, rtt);

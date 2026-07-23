@@ -396,11 +396,13 @@ export class GameController {
       );
     }, INPUT.sendIntervalMs);
 
-    this.pingTimer = setInterval(() => {
+    const sendPing = (): void => {
       if (!this.client?.connected) return;
       const nonce = `p${++this.pingNonce}`;
       this.pingSentAt.set(nonce, Date.now());
       this.client.sendPing(nonce);
-    }, INPUT.pingIntervalMs);
+    };
+    sendPing();
+    this.pingTimer = setInterval(sendPing, INPUT.pingIntervalMs);
   }
 }

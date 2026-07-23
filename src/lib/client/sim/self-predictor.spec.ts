@@ -77,6 +77,41 @@ function expectSamePose(
 }
 
 describe("self prediction reconciliation", () => {
+  it("renders movement and steering immediately without waiting for the next tick", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    const server = initialMotion();
+    predictor.reconcile(snapshotOf(server), 0, 0, 20, undefined, false);
+
+    predictor.advance(20, Math.PI / 2, false);
+    const rendered = predictor.renderState(20);
+    expect(rendered).toBeDefined();
+    expect(head(rendered!).x).toBeGreaterThan(0);
+    expect(rendered!.angle).toBeGreaterThan(0);
+  });
+
+  it("keeps forward-sampled turning and boost smooth across tick boundaries", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    const server = initialMotion();
+    predictor.reconcile(snapshotOf(server), 0, 0, 0, Math.PI / 2, true);
+
+    let previous = predictor.renderState(0);
+    expect(previous).toBeDefined();
+    for (let now = 5; now <= 200; now += 5) {
+      predictor.advance(now, Math.PI / 2, true);
+      const current = predictor.renderState(now);
+      expect(current).toBeDefined();
+      const distance = Math.hypot(
+        head(current!).x - head(previous!).x,
+        head(current!).y - head(previous!).y,
+      );
+      expect(distance).toBeGreaterThan(0.9);
+      expect(distance).toBeLessThan(1.1);
+      expect(current!.angle).toBeGreaterThan(previous!.angle);
+      expect(current!.angle - previous!.angle).toBeLessThanOrEqual(0.021);
+      previous = current;
+    }
+  });
+
   it("keeps a low-latency straight-line snapshot visually continuous", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     const server = initialMotion();
