@@ -86,7 +86,7 @@ const server = Bun.serve<WebSocketData>({
         id: socket.data.connectionId,
         identity: socket.data.identity,
         send(message) {
-          socket.send(message);
+          return socket.send(message);
         },
         close(code, reason) {
           socket.close(code, reason);
@@ -97,6 +97,10 @@ const server = Bun.serve<WebSocketData>({
 
     message(socket, message) {
       services.gameRoom.receive(socket.data.connectionId, message);
+    },
+
+    drain(socket) {
+      services.gameRoom.drain(socket.data.connectionId);
     },
 
     close(socket) {

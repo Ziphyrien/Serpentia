@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import {
   decodeServerMessage,
   GAME_PROTOCOL_VERSION,
+  SnapshotStreamDecoder,
   type ClientMessage,
   type ServerMessage,
   type VoiceSignal,
@@ -21,6 +22,7 @@ export interface GameClientEvents {
  */
 export class GameClient {
   private socket: WebSocket | undefined;
+  private readonly snapshotStream = new SnapshotStreamDecoder();
 
   constructor(
     private readonly url: string,
@@ -28,7 +30,9 @@ export class GameClient {
   ) {}
 
   connect(): void {
+    this.snapshotStream.reset();
     const socket = new WebSocket(this.url);
+    socket.binaryType = "arraybuffer";
     this.socket = socket;
     socket.onopen = () => this.events.onOpen();
     socket.onclose = (event) => this.events.onClose(event.code, event.reason);
@@ -36,9 +40,13 @@ export class GameClient {
       // onclose 会随后触发，统一在那里处理
     };
     socket.onmessage = (event) => {
-      if (typeof event.data !== "string") return;
+      if (typeof event.data !== "string" && !(event.data instanceof ArrayBuffer)) return;
       try {
-        this.events.onMessage(Effect.runSync(decodeServerMessage(event.data)));
+        const message = Effect.runSync(decodeServerMessage(event.data, this.snapshotStream));
+        if (message._tag === "welcome") {
+          this.snapshotStream.seed(message.snapshot, message.serverTime);
+        }
+        this.events.onMessage(message);
       } catch {
         // 无法解码的消息直接丢弃（协议演进/异常流量）
       }

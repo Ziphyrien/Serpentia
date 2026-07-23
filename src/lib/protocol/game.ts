@@ -1,5 +1,12 @@
 import { Effect, Schema } from "effect";
+import {
+  decodeSnapshotMessage,
+  encodeSnapshotMessage,
+  type SnapshotStreamDecoder,
+} from "./snapshot-codec";
 import { GameSnapshot, PlayerId, TickEventBatch, VoiceParticipant } from "./state";
+
+export { SnapshotStreamDecoder, SnapshotStreamEncoder } from "./snapshot-codec";
 
 export const GAME_PROTOCOL_VERSION = 1;
 export const MAX_CLIENT_MESSAGE_BYTES = 65_536;
@@ -224,15 +231,29 @@ export const ServerMessage = Schema.Union([
 ]);
 export type ServerMessage = typeof ServerMessage.Type;
 
-export const decodeServerMessage = Effect.fn("decodeServerMessage")(function* (text: string) {
-  const payload = yield* parseProtocolJson(text);
+export type ServerWireMessage = string | Uint8Array | ArrayBuffer;
+
+export const decodeServerMessage = Effect.fn("decodeServerMessage")(function* (
+  wire: ServerWireMessage,
+  snapshotStream?: SnapshotStreamDecoder,
+) {
+  if (typeof wire !== "string") {
+    return yield* Effect.try({
+      try: () => {
+        const bytes = wire instanceof Uint8Array ? wire : new Uint8Array(wire);
+        return snapshotStream?.decode(bytes) ?? decodeSnapshotMessage(bytes);
+      },
+      catch: () => ProtocolError.make({ message: "Message is not valid compact snapshot data" }),
+    });
+  }
+  const payload = yield* parseProtocolJson(wire);
   return yield* Schema.decodeUnknownEffect(ServerMessage)(payload).pipe(
     Effect.mapError((error) => ProtocolError.make({ message: error.message })),
   );
 });
 
-export function encodeServerMessage(message: ServerMessage): string {
-  return JSON.stringify(message);
+export function encodeServerMessage(message: ServerMessage): ServerWireMessage {
+  return message._tag === "snapshot" ? encodeSnapshotMessage(message) : JSON.stringify(message);
 }
 
 const parseProtocolJson = Effect.fn("parseProtocolJson")(function* (text: string) {
