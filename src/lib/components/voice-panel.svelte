@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Dialog } from "bits-ui";
+  import { Dialog, mergeProps } from "bits-ui";
   import Mic from "lucide-svelte/icons/mic";
   import MicOff from "lucide-svelte/icons/mic-off";
   import PhoneOff from "lucide-svelte/icons/phone-off";
@@ -20,11 +20,10 @@
   <Dialog.Trigger>
     {#snippet child({ props })}
       <Button
-        {...props}
+        {...mergeProps(props, { onclick: () => controller.sfx.click() })}
         intent="ghost"
         size="icon"
         aria-label="语音"
-        onclick={() => controller.sfx.click()}
         class={controller.voiceJoined && !controller.voiceMuted ? "text-lime-300" : ""}
       >
         {#if controller.voiceJoined && !controller.voiceMuted}

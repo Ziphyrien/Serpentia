@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Dialog } from "bits-ui";
+  import { Dialog, mergeProps } from "bits-ui";
   import Settings from "lucide-svelte/icons/settings";
   import LogOut from "lucide-svelte/icons/log-out";
   import X from "lucide-svelte/icons/x";
@@ -29,7 +29,12 @@
 <Dialog.Root bind:open>
   <Dialog.Trigger>
     {#snippet child({ props })}
-      <Button {...props} intent="ghost" size="icon" aria-label="设置" onclick={() => sfx.click()}>
+      <Button
+        {...mergeProps(props, { onclick: () => sfx.click() })}
+        intent="ghost"
+        size="icon"
+        aria-label="设置"
+      >
         <Settings size={19} />
       </Button>
     {/snippet}
