@@ -55,20 +55,32 @@
         <div class="flex items-center justify-between gap-4">
           <span class="text-sm font-bold text-white/85">音效音量</span>
           <div class="w-32">
-            <Slider bind:value={settings.sfxVolume} onValueChange={() => sfx.click()} />
+            <Slider
+              value={settings.sfxVolume}
+              onValueChange={(value) => {
+                settings.setSfxVolume(value);
+                sfx.click();
+              }}
+            />
           </div>
         </div>
         <div class="flex items-center justify-between">
           <span class="text-sm font-bold text-white/85">静音</span>
-          <Switch bind:checked={settings.sfxMuted} />
+          <Switch checked={settings.sfxMuted} onCheckedChange={(value) => settings.setSfxMuted(value)} />
         </div>
         <div class="flex items-center justify-between">
           <span class="text-sm font-bold text-white/85">显示昵称</span>
-          <Switch bind:checked={settings.showNicknames} />
+          <Switch
+            checked={settings.showNicknames}
+            onCheckedChange={(value) => settings.setShowNicknames(value)}
+          />
         </div>
         <div class="flex items-center justify-between">
           <span class="text-sm font-bold text-white/85">高清画质</span>
-          <Switch bind:checked={settings.highQuality} />
+          <Switch
+            checked={settings.highQuality}
+            onCheckedChange={(value) => settings.setHighQuality(value)}
+          />
         </div>
       </div>
 

@@ -14,65 +14,98 @@ export interface InterpolatedSnake {
   readonly invulnerable: boolean;
 }
 
+interface BufferedSnapshot {
+  readonly snapshot: GameSnapshot;
+  readonly serverTime: number;
+}
+
+const MAX_BUFFERED_SNAPSHOTS = 8;
+const INTERVAL_SAMPLE_COUNT = 5;
+
 /**
- * 快照环形缓冲：保留最近两帧权威快照，
- * 按「服务端时间 - 插值延迟」采样出平滑的远端世界视图。
+ * Time-ordered authoritative snapshot buffer for remote players.
+ *
+ * The interpolation delay can exceed one snapshot interval, so retaining only
+ * the latest pair is insufficient: replacing that pair moves the lower bound
+ * forward and causes a visible jump. This buffer keeps enough history to select
+ * the two frames that actually bracket the requested render time.
  */
 export class SnapshotBuffer {
-  private previous: GameSnapshot | undefined;
-  private latest: GameSnapshot | undefined;
-  private previousAt = 0;
-  private latestAt = 0;
+  private readonly frames: Array<BufferedSnapshot> = [];
 
   constructor(private readonly selfId: () => string | undefined) {}
 
   push(snapshot: GameSnapshot, serverTime: number): void {
-    this.previous = this.latest;
-    this.previousAt = this.latestAt;
-    this.latest = snapshot;
-    this.latestAt = serverTime;
+    const latest = this.frames[this.frames.length - 1];
+    if (latest && serverTime < latest.serverTime) return;
+    if (latest?.serverTime === serverTime) {
+      this.frames[this.frames.length - 1] = { snapshot, serverTime };
+      return;
+    }
+    this.frames.push({ snapshot, serverTime });
+    if (this.frames.length > MAX_BUFFERED_SNAPSHOTS) this.frames.shift();
+  }
+
+  reset(): void {
+    this.frames.length = 0;
   }
 
   get latestSnapshot(): GameSnapshot | undefined {
-    return this.latest;
+    return this.frames[this.frames.length - 1]?.snapshot;
   }
 
-  /** 估算当前应使用的插值延迟（自适应快照间隔）。 */
+  /** Uses the median recent interval so an urgent snapshot does not collapse the delay. */
   interpolationDelay(): number {
-    const interval = this.latestAt - this.previousAt;
-    if (interval <= 0 || interval > 1000) return RENDER.minInterpolationDelayMs;
+    if (this.frames.length < 2) return RENDER.minInterpolationDelayMs;
+    const intervals: Array<number> = [];
+    const start = Math.max(1, this.frames.length - INTERVAL_SAMPLE_COUNT);
+    for (let index = start; index < this.frames.length; index += 1) {
+      const interval = this.frames[index].serverTime - this.frames[index - 1].serverTime;
+      if (interval > 0 && interval <= 1000) intervals.push(interval);
+    }
+    if (intervals.length === 0) return RENDER.minInterpolationDelayMs;
+    intervals.sort((left, right) => left - right);
+    const middle = Math.floor(intervals.length / 2);
+    const interval =
+      intervals.length % 2 === 0
+        ? (intervals[middle - 1] + intervals[middle]) / 2
+        : intervals[middle];
     return Math.min(
       RENDER.maxInterpolationDelayMs,
       Math.max(RENDER.minInterpolationDelayMs, interval * RENDER.interpolationDelayFactor),
     );
   }
 
-  /**
-   * 采样 renderServerTime 时刻的远端蛇（不含自己，自己走预测通道）。
-   */
+  /** Samples remote snakes at a server timestamp, excluding the locally predicted snake. */
   sampleRemoteSnakes(renderServerTime: number): Array<InterpolatedSnake> {
-    const latest = this.latest;
-    if (!latest) return [];
-    const selfId = this.selfId();
-    const previous = this.previous;
-    const span = this.latestAt - this.previousAt;
-    const ratio =
-      previous && span > 0
-        ? Math.min(1.25, Math.max(0, (renderServerTime - this.previousAt) / span))
-        : 1;
+    if (this.frames.length === 0) return [];
 
+    let upperIndex = this.frames.findIndex((frame) => frame.serverTime >= renderServerTime);
+    if (upperIndex === 0) return this.viewsFrom(this.frames[0].snapshot);
+    if (upperIndex === -1) return this.viewsFrom(this.frames[this.frames.length - 1].snapshot);
+
+    const before = this.frames[upperIndex - 1];
+    const after = this.frames[upperIndex];
+    const span = after.serverTime - before.serverTime;
+    if (span <= 0) return this.viewsFrom(after.snapshot);
+    const ratio = Math.min(1, Math.max(0, (renderServerTime - before.serverTime) / span));
+    const beforeById = new Map(before.snapshot.snakes.map((snake) => [snake.id, snake]));
+    const selfId = this.selfId();
     const result: Array<InterpolatedSnake> = [];
-    for (const snake of latest.snakes) {
-      if (snake.id === selfId) continue;
-      if (!snake.alive) continue;
-      const before = previous?.snakes.find((candidate) => candidate.id === snake.id);
-      if (!before || !before.alive || ratio >= 1) {
-        result.push(toView(snake));
-        continue;
-      }
-      result.push(lerpSnake(before, snake, ratio));
+
+    for (const snake of after.snapshot.snakes) {
+      if (snake.id === selfId || !snake.alive) continue;
+      const previous = beforeById.get(snake.id);
+      result.push(previous?.alive ? lerpSnake(previous, snake, ratio) : toView(snake));
     }
     return result;
+  }
+
+  private viewsFrom(snapshot: GameSnapshot): Array<InterpolatedSnake> {
+    const selfId = this.selfId();
+    return snapshot.snakes
+      .filter((snake) => snake.id !== selfId && snake.alive)
+      .map((snake) => toView(snake));
   }
 }
 

@@ -27,13 +27,17 @@ export class GameRenderer {
   private destroyed = false;
   private trailAccumulator = 0;
   private selfRadiusSmooth = 11;
+  private lastSelfAlive = false;
   private lastBoosting = false;
   private readonly handleResize = (): void => this.resize();
+  private readonly unsubscribeSettings: () => void;
 
   constructor(
     private readonly controller: GameController,
     private readonly settings: SettingsStore,
-  ) {}
+  ) {
+    this.unsubscribeSettings = settings.subscribe(() => this.applyRenderSettings());
+  }
 
   async init(host: HTMLElement): Promise<void> {
     const app = new Application();
@@ -42,9 +46,7 @@ export class GameRenderer {
       antialias: true,
       resizeTo: host,
       background: 0x0b1020,
-      resolution: this.settings.highQuality
-        ? Math.min(RENDER.maxDevicePixelRatio, window.devicePixelRatio || 1)
-        : 1,
+      resolution: this.renderResolution(),
       autoDensity: true,
     });
     if (this.destroyed) {
@@ -79,6 +81,11 @@ export class GameRenderer {
     if (this.started || !this.app) return;
     this.started = true;
     this.app.ticker.add(({ deltaMS }) => this.frame(deltaMS));
+  }
+
+  /** 保持本地蛇头的屏幕位置，同时让权威世界坐标完成校正。 */
+  compensateSelfPosition(x: number, y: number): void {
+    this.camera.compensatePositionCorrection(x, y);
   }
 
   /** 食物被吃：闪光 + 就近音效（由控制器在事件到达时调用）。 */
@@ -116,12 +123,27 @@ export class GameRenderer {
 
   destroy(): void {
     this.destroyed = true;
+    this.unsubscribeSettings();
     this.app?.renderer.off("resize", this.handleResize);
     this.snakes?.destroy();
     this.food?.destroy();
     this.fx?.destroy();
     this.app?.destroy(true);
     this.app = undefined;
+  }
+
+  private renderResolution(): number {
+    return this.settings.highQuality
+      ? Math.min(RENDER.maxDevicePixelRatio, window.devicePixelRatio || 1)
+      : 1;
+  }
+
+  private applyRenderSettings(): void {
+    const app = this.app;
+    if (!app) return;
+    const resolution = this.renderResolution();
+    if (app.renderer.resolution === resolution) return;
+    app.renderer.resize(app.screen.width, app.screen.height, resolution);
   }
 
   private frame(deltaMS: number): void {
@@ -161,6 +183,14 @@ export class GameRenderer {
       (snake) => snake.id === controller.selfId,
     );
     const selfState = controller.selfPredictor.renderState();
+    const selfAlive = Boolean(selfState && selfSnapshot?.alive);
+    if (selfAlive && !this.lastSelfAlive && selfSnapshot) {
+      this.camera.reset();
+      this.selfRadiusSmooth = selfSnapshot.radius;
+      this.trailAccumulator = 0;
+    }
+    this.lastSelfAlive = selfAlive;
+
     let selfHead: { x: number; y: number } | undefined;
     let selfBoosting = false;
     if (selfState && selfSnapshot?.alive) {

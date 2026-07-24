@@ -41,15 +41,20 @@ export class GameClient {
     };
     socket.onmessage = (event) => {
       if (typeof event.data !== "string" && !(event.data instanceof ArrayBuffer)) return;
+      let message: ServerMessage;
       try {
-        const message = Effect.runSync(decodeServerMessage(event.data, this.snapshotStream));
-        if (message._tag === "welcome") {
-          this.snapshotStream.seed(message.snapshot, message.serverTime);
-        }
-        this.events.onMessage(message);
+        message = Effect.runSync(decodeServerMessage(event.data, this.snapshotStream));
       } catch {
-        // 无法解码的消息直接丢弃（协议演进/异常流量）
+        // Delta frames depend on the immediately previous base. Once decoding
+        // fails, reconnect for a keyframe instead of applying future deltas to
+        // stale state.
+        socket.close(4002, "protocol decode failed");
+        return;
       }
+      if (message._tag === "welcome") {
+        this.snapshotStream.seed(message.snapshot, message.serverTime);
+      }
+      this.events.onMessage(message);
     };
   }
 
@@ -72,8 +77,8 @@ export class GameClient {
     this.send({ v: GAME_PROTOCOL_VERSION, _tag: "ping", nonce });
   }
 
-  sendVoiceState(muted: boolean): void {
-    this.send({ v: GAME_PROTOCOL_VERSION, _tag: "voice-state", muted });
+  sendVoiceState(joined: boolean, muted: boolean): void {
+    this.send({ v: GAME_PROTOCOL_VERSION, _tag: "voice-state", joined, muted });
   }
 
   sendVoiceSignal(targetPlayerId: PlayerId, signal: VoiceSignal): void {

@@ -14,28 +14,32 @@ function requireCondition(condition: boolean, message: string): asserts conditio
 
 export const voiceScenarios: ReadonlyArray<VoiceScenario> = [
   {
-    name: "voice roster follows authenticated room membership and mute state",
+    name: "voice roster contains active members and their mute state only",
     run: () => {
       const roster = new VoiceRoster();
-      roster.join("friend-b", "Beta");
-      roster.join("friend-a", "Alpha");
-      requireCondition(
-        roster.snapshot().every((participant) => participant.muted),
-        "microphone was not private by default",
-      );
-      requireCondition(roster.setMuted("friend-a", false), "member could not unmute");
-      requireCondition(!roster.setMuted("intruder", false), "unknown player changed voice state");
+      requireCondition(roster.snapshot().length === 0, "ordinary room members entered voice");
+      roster.join("friend-b", "Beta", true);
+      roster.join("friend-a", "Alpha", false);
       const snapshot = roster.snapshot();
       requireCondition(
         snapshot[0].playerId === "friend-a" && !snapshot[0].muted,
         "voice roster was inconsistent",
       );
       requireCondition(roster.leave("friend-a"), "leaving member remained in voice roster");
+      requireCondition(!roster.has("friend-a"), "inactive member remained signal-authorized");
     },
   },
   {
-    name: "versioned P2P offer answer and ICE messages cross the schema boundary",
+    name: "versioned voice membership and P2P signals cross the schema boundary",
     run: () => {
+      const state = Effect.runSync(
+        decodeClientMessage(
+          JSON.stringify({ v: 1, _tag: "voice-state", joined: false, muted: true }),
+        ),
+      );
+      requireCondition(state._tag === "voice-state", "voice state was not decoded");
+      requireCondition(state.joined === false && state.muted, "voice membership changed");
+
       const offer = Effect.runSync(
         decodeClientMessage(
           JSON.stringify({

@@ -4,7 +4,6 @@ import type {
   ServerMessage,
   SessionInfo,
   TickEventBatch,
-  VoiceSignal,
 } from "$lib/protocol";
 import type { PlayerId } from "$lib/protocol/state";
 import { INPUT } from "./config";
@@ -15,8 +14,8 @@ import { SelfPredictor } from "./sim/self-predictor";
 import { InputState } from "./input/input-state";
 import { PointerInput } from "./input/pointer-input";
 import { JoystickInput } from "./input/joystick-input";
+import { nextNetworkInput, type NetworkInputCommand } from "./input/network-input";
 import { Sfx } from "./audio/sfx";
-import { normalizeAngle } from "../game/snake-motion";
 import { VoiceManager, type VoicePeerView } from "./voice/voice-manager";
 import type { SettingsStore } from "./stores/settings.svelte";
 
@@ -79,6 +78,7 @@ export class GameController {
   private destroyed = false;
   private nextSequence = 0;
   private lastSnapshotTick = 0;
+  private authoritativeInputAngle: number | undefined;
   private lastSentAngle: number | undefined;
   private lastSentBoosting = false;
   private inputSendTimer: ReturnType<typeof setTimeout> | undefined;
@@ -90,10 +90,10 @@ export class GameController {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private killFeedCounter = 0;
+  private readonly killFeedTimers = new Set<ReturnType<typeof setTimeout>>();
+  private voiceErrorTimer: ReturnType<typeof setTimeout> | undefined;
   private respawnTimer: ReturnType<typeof setInterval> | undefined;
   private respawnAtMs = 0;
-  private lastFoodCount = 0;
-  private lastWarnAt = 0;
 
   constructor(
     readonly descriptor: BackendDescriptor,
@@ -104,29 +104,32 @@ export class GameController {
     this.predictor = new SelfPredictor(descriptor.rules, descriptor.tickRate);
     this.pointer = new PointerInput(this.input);
     this.joystick = new JoystickInput(this.input);
-    this.voice = new VoiceManager(() => this.selfId ?? session.playerId, {
-      onPeersChanged: (peers) => (this.voicePeers = peers),
-      onJoinedChanged: (joined, muted) => {
-        this.voiceJoined = joined;
-        this.voiceMuted = muted;
+    this.voice = new VoiceManager(
+      () => this.selfId ?? session.playerId,
+      {
+        onPeersChanged: (peers) => (this.voicePeers = peers),
+        onJoinedChanged: (joined, muted) => {
+          this.voiceJoined = joined;
+          this.voiceMuted = muted;
+        },
+        onLocalLevel: (level) => (this.voiceLevel = level),
+        onError: (message) => {
+          this.voiceError = message;
+          if (this.voiceErrorTimer) clearTimeout(this.voiceErrorTimer);
+          this.voiceErrorTimer = setTimeout(() => {
+            this.voiceError = undefined;
+            this.voiceErrorTimer = undefined;
+          }, 4000);
+        },
+        sendVoiceSignal: (target, signal) => this.client?.sendVoiceSignal(target, signal),
+        sendVoiceState: (joined, muted) => this.client?.sendVoiceState(joined, muted),
       },
-      onLocalLevel: (level) => (this.voiceLevel = level),
-      onError: (message) => {
-        this.voiceError = message;
-        window.setTimeout(() => (this.voiceError = undefined), 4000);
-      },
-      sendVoiceSignal: (target, signal) => this.client?.sendVoiceSignal(target, signal),
-      sendVoiceState: (muted) => this.client?.sendVoiceState(muted),
-    });
+      descriptor.turnCredentialsPath,
+    );
     this.sfx.setVolume(settings.sfxVolume);
     this.sfx.setMuted(settings.sfxMuted);
     this.unsubscribeInput = this.input.subscribe(() => this.scheduleInputSend());
     this.connect();
-  }
-
-  /** 供 HUD 查询当前语音成员（含自己）。 */
-  get voiceManager(): VoiceManager {
-    return this.voice;
   }
 
   get snapshotBuffer(): SnapshotBuffer {
@@ -150,7 +153,7 @@ export class GameController {
   }
 
   toggleVoice(): void {
-    if (this.voiceJoined) this.voice.leave();
+    if (this.voice.isJoined || this.voice.isJoining) this.voice.leave();
     else void this.voice.join();
   }
 
@@ -163,16 +166,19 @@ export class GameController {
   }
 
   destroy(): void {
+    if (this.destroyed) return;
     this.destroyed = true;
-    if (this.inputSendTimer) clearTimeout(this.inputSendTimer);
-    if (this.pingTimer) clearInterval(this.pingTimer);
+    this.stopConnectionLoops();
     this.unsubscribeInput();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.respawnTimer) clearInterval(this.respawnTimer);
+    if (this.voiceErrorTimer) clearTimeout(this.voiceErrorTimer);
+    for (const timer of this.killFeedTimers) clearTimeout(timer);
+    this.killFeedTimers.clear();
+    this.voice.dispose();
     this.client?.close();
     this.pointer.dispose();
     this.joystick.detach();
-    this.voice.dispose();
     this.sfx.dispose();
     this.renderer?.destroy();
   }
@@ -209,7 +215,7 @@ export class GameController {
         this.voice.updateRoster(message.voice);
         break;
       case "voice-signal":
-        void this.voice.handleSignal(message.fromPlayerId, message.signal as VoiceSignal);
+        void this.voice.handleSignal(message.fromPlayerId, message.signal);
         break;
       case "error":
         this.handleServerError(message.code, message.retryable);
@@ -225,8 +231,10 @@ export class GameController {
     this.status = "online";
     this.reconnectAttempts = 0;
     this.predictor.reset();
+    this.buffer.reset();
+    this.pingSentAt.clear();
     this.handleSnapshot(message.snapshot, message.serverTime, []);
-    this.voice.updateRoster(message.voice);
+    this.voice.handleSignalingReconnect(message.voice);
     this.startLoops();
   }
 
@@ -242,7 +250,13 @@ export class GameController {
     const selfSnake = snapshot.snakes.find((snake) => snake.id === this.selfId);
     if (selfSnake) {
       const wasAlive = this.self.alive;
-      this.predictor.reconcile(selfSnake, snapshot.tick, performance.now());
+      this.authoritativeInputAngle = selfSnake.targetAngle ?? selfSnake.angle;
+      const correction = this.predictor.reconcile(selfSnake, snapshot.tick, performance.now());
+      if (correction) this.renderer?.compensateSelfPosition(correction.x, correction.y);
+      const becameAlive = selfSnake.alive && !wasAlive;
+      const respawnReported = events.some((batch) =>
+        batch.respawnedPlayerIds.includes(selfSnake.id),
+      );
       // 保留 respawnIn/deathBy：它们分别由倒计时定时器和死亡/重生事件维护，
       // 不能随快照重建，否则 10Hz 快照会把倒计时打回 0、把击杀者名字抹掉
       this.self = {
@@ -252,7 +266,8 @@ export class GameController {
         score: Math.round(selfSnake.score),
         alive: selfSnake.alive,
       };
-      if (selfSnake.alive && !wasAlive) this.sfx.respawn();
+      if (becameAlive) this.sfx.respawn();
+      if (becameAlive || respawnReported) this.forceInputResend();
       if (selfSnake.alive && selfSnake.respawnAtTick === null) this.clearRespawnCountdown();
       if (!selfSnake.alive && selfSnake.respawnAtTick != null && !this.respawnTimer) {
         // 重连等场景漏掉死亡事件时，从快照补齐倒计时
@@ -267,12 +282,6 @@ export class GameController {
     }));
 
     this.processEvents(snapshot, events);
-
-    // 进食音效：自己附近的食物消失才播
-    if (snapshot.foods.length < this.lastFoodCount && selfSnake?.alive) {
-      // 事件里有具体 id，这里只是兜底音量控制
-    }
-    this.lastFoodCount = snapshot.foods.length;
   }
 
   private processEvents(snapshot: GameSnapshot, batches: ReadonlyArray<TickEventBatch>): void {
@@ -285,17 +294,17 @@ export class GameController {
       }
       for (const death of batch.deaths) {
         const victim = nickOf(death.playerId);
-        const killer = death.cause._tag === "Snake" ? nickOf(death.cause.killerId) : undefined;
+        const killerId = death.cause._tag === "Snake" ? death.cause.killerId : undefined;
+        const killer = killerId === undefined ? undefined : nickOf(killerId);
         this.pushKillFeed(killer ? `${killer} 击杀了 ${victim}` : `${victim} 撞到了边界`);
         if (death.playerId === this.selfId) {
-          this.predictor.markDead();
           this.sfx.death();
-          this.self = { ...this.self, alive: false, deathBy: killer };
+          this.self = { ...this.self, deathBy: killer };
           const selfSnake = snapshot.snakes.find((snake) => snake.id === this.selfId);
           if (selfSnake?.respawnAtTick != null) {
             this.startRespawnCountdown(selfSnake.respawnAtTick, snapshot.tick);
           }
-        } else if (killer === this.selfId) {
+        } else if (killerId === this.selfId) {
           this.sfx.kill();
           this.pushKillFeed("漂亮的击杀！", true);
         }
@@ -304,7 +313,7 @@ export class GameController {
       for (const playerId of batch.respawnedPlayerIds) {
         if (playerId === this.selfId) {
           this.clearRespawnCountdown();
-          this.self = { ...this.self, alive: true, deathBy: undefined };
+          this.self = { ...this.self, deathBy: undefined };
         }
       }
     }
@@ -313,12 +322,14 @@ export class GameController {
   private pushKillFeed(text: string, important = false): void {
     const entry = { id: ++this.killFeedCounter, text };
     this.killFeed = [...this.killFeed.slice(-4), entry];
-    window.setTimeout(
+    const timer = setTimeout(
       () => {
+        this.killFeedTimers.delete(timer);
         this.killFeed = this.killFeed.filter((item) => item.id !== entry.id);
       },
       important ? 4000 : 3200,
     );
+    this.killFeedTimers.add(timer);
   }
 
   private startRespawnCountdown(respawnAtTick: number, currentTick: number): void {
@@ -356,17 +367,39 @@ export class GameController {
 
   private handleClose(code: number, reason: string): void {
     if (this.destroyed) return;
+    this.stopConnectionLoops();
+    if (code === 4401) {
+      this.notice = "登录已过期，请重新登录";
+      this.destroy();
+      this.onSessionExpired();
+      return;
+    }
     if (code === 4001) {
-      this.status = "closed";
-      this.notice = "此账号已在其他窗口登录";
+      this.enterTerminalState("此账号已在其他窗口登录");
       return;
     }
     if (code === 4409) {
-      this.status = "closed";
-      this.notice = reason || "昵称被占用";
+      this.enterTerminalState(reason || "昵称被占用");
       return;
     }
+    this.voice.handleSignalingDisconnect();
     this.scheduleReconnect(code === 4429 ? 10_000 : undefined);
+  }
+
+  private enterTerminalState(notice: string): void {
+    this.voice.leave();
+    this.sfx.setBoosting(false);
+    this.clearRespawnCountdown();
+    this.status = "closed";
+    this.notice = notice;
+  }
+
+  private stopConnectionLoops(): void {
+    if (this.inputSendTimer) clearTimeout(this.inputSendTimer);
+    this.inputSendTimer = undefined;
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    this.pingTimer = undefined;
+    this.pingSentAt.clear();
   }
 
   private scheduleReconnect(forcedDelay?: number): void {
@@ -378,7 +411,14 @@ export class GameController {
   }
 
   private scheduleInputSend(): void {
-    if (this.destroyed || !this.client?.connected || !this.input.hasDirection) return;
+    if (
+      this.destroyed ||
+      !this.client?.connected ||
+      !this.self.alive ||
+      this.pendingInputCommand() === undefined
+    ) {
+      return;
+    }
     if (this.inputSendTimer) return;
 
     const elapsed = performance.now() - this.lastInputSentAt;
@@ -394,33 +434,43 @@ export class GameController {
   }
 
   private flushInput(): void {
-    if (!this.client?.connected || !this.input.hasDirection) return;
-    const angleChanged =
-      this.lastSentAngle === undefined ||
-      Math.abs(normalizeAngle(this.input.angle - this.lastSentAngle)) > INPUT.angleEpsilon;
-    const boostChanged = this.input.boosting !== this.lastSentBoosting;
-    if (!angleChanged && !boostChanged) return;
+    if (!this.client?.connected || !this.self.alive) return;
+    const command = this.pendingInputCommand();
+    if (!command) return;
 
-    this.lastSentAngle = this.input.angle;
-    this.lastSentBoosting = this.input.boosting;
+    this.lastSentAngle = command.angle;
+    this.lastSentBoosting = command.boosting;
     this.lastInputSentAt = performance.now();
     this.client.sendInput(
       this.nextSequence++,
       this.lastSnapshotTick,
-      this.input.angle,
-      this.input.boosting,
+      command.angle,
+      command.boosting,
     );
   }
 
-  private startLoops(): void {
+  private pendingInputCommand(): NetworkInputCommand | undefined {
+    return nextNetworkInput(
+      this.input,
+      this.authoritativeInputAngle,
+      { angle: this.lastSentAngle, boosting: this.lastSentBoosting },
+      INPUT.angleEpsilon,
+    );
+  }
+
+  /** 死亡期间服务端拒绝输入；重生后必须重发仍按住的方向。 */
+  private forceInputResend(): void {
     if (this.inputSendTimer) clearTimeout(this.inputSendTimer);
     this.inputSendTimer = undefined;
-    if (this.pingTimer) clearInterval(this.pingTimer);
-
     this.lastSentAngle = undefined;
     this.lastSentBoosting = false;
     this.lastInputSentAt = Number.NEGATIVE_INFINITY;
     this.scheduleInputSend();
+  }
+
+  private startLoops(): void {
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    this.forceInputResend();
 
     const sendPing = (): void => {
       if (!this.client?.connected) return;

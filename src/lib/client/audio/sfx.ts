@@ -12,6 +12,12 @@ export class Sfx {
   private eatChainAt = 0;
   private eatChainCount = 0;
   private unlocked = false;
+  private readonly unlock = (): void => {
+    if (this.unlocked) return;
+    this.unlocked = true;
+    this.removeUnlockListeners();
+    void Howler.ctx?.resume?.();
+  };
 
   constructor() {
     const make = (name: SfxName, options: { loop?: boolean; volume?: number } = {}) =>
@@ -33,13 +39,8 @@ export class Sfx {
       warn: make("warn", { volume: 0.4 }),
     };
 
-    const unlock = (): void => {
-      if (this.unlocked) return;
-      this.unlocked = true;
-      void Howler.ctx?.resume?.();
-    };
-    window.addEventListener("pointerdown", unlock, { once: true });
-    window.addEventListener("keydown", unlock, { once: true });
+    window.addEventListener("pointerdown", this.unlock);
+    window.addEventListener("keydown", this.unlock);
   }
 
   setVolume(volume: number): void {
@@ -96,6 +97,12 @@ export class Sfx {
   }
 
   dispose(): void {
+    this.removeUnlockListeners();
     for (const sound of Object.values(this.sounds)) sound.unload();
+  }
+
+  private removeUnlockListeners(): void {
+    window.removeEventListener("pointerdown", this.unlock);
+    window.removeEventListener("keydown", this.unlock);
   }
 }

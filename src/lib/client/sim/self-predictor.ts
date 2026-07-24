@@ -21,17 +21,24 @@ export interface SelfRenderState {
   readonly boosting: boolean;
 }
 
+export interface SelfPositionCorrection {
+  readonly x: number;
+  readonly y: number;
+}
+
 const MAX_FRAME_CATCH_UP_TICKS = 8;
-const MAX_TICK_DRIFT = 40;
+const POSITION_HISTORY_TICKS = 64;
+const MINIMUM_CORRECTION_SQUARED = 1e-8;
 
 /**
  * Local prediction for the controlled snake.
  *
- * The controlled snake is intentionally rendered from a monotonic local clock.
- * Normal snapshots update authoritative metadata but do not rewind its visible
- * position: doing that makes network latency visible as a pull-back on every
- * fast turn. The server remains authoritative for collision, death, and respawn;
- * a large positional drift or a lifecycle transition reinitializes prediction.
+ * Movement and steering advance from a monotonic local clock. Recent predicted
+ * heads are retained by server tick so an authoritative snapshot can correct
+ * the same point in time. Reconciliation translates the predicted body without
+ * replacing its local angle; the renderer applies the same translation to the
+ * camera, keeping steering visually continuous while restoring the authoritative
+ * head-to-food coordinate relationship.
  */
 export class SelfPredictor {
   private current: PredictedStep | undefined;
@@ -40,14 +47,13 @@ export class SelfPredictor {
   private lastLocalTime: number | undefined;
   private latestIntent: InputIntent = { boosting: false };
   private alive = false;
-  private readonly rebaseDistance: number;
+  private readonly headByTick = new Map<number, MotionPoint>();
 
   constructor(
     private readonly rules: ClientGameRules,
     tickRate: number,
   ) {
     this.tickMs = 1000 / tickRate;
-    this.rebaseDistance = Math.max(80, rules.boostSpeed * 0.5);
   }
 
   get isAlive(): boolean {
@@ -59,32 +65,69 @@ export class SelfPredictor {
   }
 
   /**
-   * Incorporates an authoritative snapshot without rewinding normal movement.
-   * `localNow` is monotonic browser time, deliberately independent of network
-   * clock corrections used by remote-snake interpolation.
+   * Aligns local position with the authoritative state at the same server tick.
+   * The returned translation must also be applied to the camera in the same
+   * turn, otherwise a correct reconciliation would look like a head snap.
    */
-  reconcile(snapshot: SnakeSnapshot, snapshotTick: number, localNow: number): void {
-    if (!snapshot.alive) {
+  reconcile(
+    snapshot: SnakeSnapshot,
+    snapshotTick: number,
+    localNow: number,
+  ): SelfPositionCorrection | undefined {
+    const snapshotHead = snapshot.body[0];
+    if (!snapshot.alive || !snapshotHead) {
       this.reset();
-      return;
+      return undefined;
     }
 
-    if (!this.current || this.shouldRebase(snapshot, snapshotTick)) {
+    const current = this.current;
+    if (!current) {
       this.initialize(snapshot, snapshotTick, localNow);
-      return;
+      return undefined;
     }
 
-    // Keep local steering responsive. Before the player supplies a direction,
-    // the server's target is the only valid target to continue from.
+    const predictedAtSnapshot = this.headByTick.get(snapshotTick);
+    let correction: SelfPositionCorrection | undefined;
+
+    if (predictedAtSnapshot) {
+      correction = {
+        x: snapshotHead.x - predictedAtSnapshot.x,
+        y: snapshotHead.y - predictedAtSnapshot.y,
+      };
+      this.translatePrediction(correction, snapshotTick);
+      this.headByTick.set(snapshotTick, { x: snapshotHead.x, y: snapshotHead.y });
+    } else {
+      // A suspended tab or a long snapshot gap can move the authoritative tick
+      // outside retained history. Rebuild position/body, but preserve an active
+      // local steering angle so recovery does not jerk the head backwards.
+      const oldHead = current.body[0];
+      const localAngle = current.angle;
+      const localTargetAngle = current.targetAngle;
+      this.initialize(snapshot, snapshotTick, localNow);
+      if (this.latestIntent.angle !== undefined && this.current) {
+        this.current.angle = localAngle;
+        this.current.targetAngle = localTargetAngle;
+      }
+      correction = oldHead
+        ? { x: snapshotHead.x - oldHead.x, y: snapshotHead.y - oldHead.y }
+        : undefined;
+    }
+
+    const reconciled = this.current;
+    if (!reconciled) return meaningfulCorrection(correction);
+
     if (this.latestIntent.angle === undefined) {
-      this.current.targetAngle = snapshot.targetAngle ?? snapshot.angle;
+      reconciled.targetAngle = snapshot.targetAngle ?? snapshot.angle;
     }
 
-    // Food and boost drain affect body length but should not rewind the head.
-    if (Math.abs(this.current.length - snapshot.length) > 0.5) {
-      this.current.length = snapshot.length;
-      trimBody(this.current.body, this.current.length);
+    // Length changes only trim or extend the future path. They never move the
+    // head; positional authority is handled explicitly above.
+    if (Math.abs(reconciled.length - snapshot.length) > 0.5) {
+      reconciled.length = snapshot.length;
+      trimBody(reconciled.body, reconciled.length);
     }
+
+    return meaningfulCorrection(correction);
   }
 
   /** Reinitializes local prediction after a new/reconnected session. */
@@ -94,11 +137,7 @@ export class SelfPredictor {
     this.lastLocalTime = undefined;
     this.latestIntent = { boosting: false };
     this.alive = false;
-  }
-
-  /** Stops prediction until an alive authoritative snapshot initializes it again. */
-  markDead(): void {
-    this.reset();
+    this.headByTick.clear();
   }
 
   /** Advances fixed local ticks using the latest input intent. */
@@ -119,16 +158,17 @@ export class SelfPredictor {
       applyIntent(this.current, this.latestIntent);
       advanceSnakeMotion(this.current, this.rules, this.tickMs / 1000);
       this.current.tick += 1;
+      this.recordCurrentHead();
       this.accumulatorMs -= this.tickMs;
       processed += 1;
     }
 
-    // A backgrounded tab should rebase from the next authoritative snapshot,
+    // A backgrounded tab should rebuild from the next authoritative snapshot,
     // rather than fast-forwarding several hundred ticks when it returns.
     if (this.accumulatorMs >= this.tickMs) this.accumulatorMs = 0;
   }
 
-  /** Samples one fractional local tick ahead for smooth 60fps rendering. */
+  /** Samples one fractional local tick ahead for smooth rendering. */
   renderState(): SelfRenderState | undefined {
     const current = this.current;
     if (!current) return undefined;
@@ -149,19 +189,44 @@ export class SelfPredictor {
     this.accumulatorMs = 0;
     this.lastLocalTime = localNow;
     this.alive = true;
+    this.headByTick.clear();
+    this.recordCurrentHead();
   }
 
-  private shouldRebase(snapshot: SnakeSnapshot, snapshotTick: number): boolean {
+  private recordCurrentHead(): void {
     const current = this.current;
-    if (!current) return true;
-    const currentHead = current.body[0];
-    const snapshotHead = snapshot.body[0];
-    if (!currentHead || !snapshotHead) return true;
-
-    const distance = Math.hypot(currentHead.x - snapshotHead.x, currentHead.y - snapshotHead.y);
-    const tickDrift = current.tick - snapshotTick;
-    return distance > this.rebaseDistance || tickDrift < -4 || tickDrift > MAX_TICK_DRIFT;
+    const head = current?.body[0];
+    if (!current || !head) return;
+    this.headByTick.set(current.tick, { x: head.x, y: head.y });
+    const minimumTick = current.tick - POSITION_HISTORY_TICKS;
+    for (const tick of this.headByTick.keys()) {
+      if (tick >= minimumTick) break;
+      this.headByTick.delete(tick);
+    }
   }
+
+  private translatePrediction(correction: SelfPositionCorrection, fromTick: number): void {
+    const current = this.current;
+    if (!current) return;
+    for (const point of current.body) {
+      point.x += correction.x;
+      point.y += correction.y;
+    }
+    for (const [tick, head] of this.headByTick) {
+      if (tick < fromTick) continue;
+      head.x += correction.x;
+      head.y += correction.y;
+    }
+  }
+}
+
+function meaningfulCorrection(
+  correction: SelfPositionCorrection | undefined,
+): SelfPositionCorrection | undefined {
+  if (!correction) return undefined;
+  return correction.x * correction.x + correction.y * correction.y > MINIMUM_CORRECTION_SQUARED
+    ? correction
+    : undefined;
 }
 
 function fromSnapshot(snapshot: SnakeSnapshot, tick: number): PredictedStep {

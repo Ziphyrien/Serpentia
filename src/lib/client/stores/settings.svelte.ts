@@ -1,11 +1,16 @@
+import { Schema } from "effect";
+
 const STORAGE_KEY = "serpentia.settings.v1";
 
-interface SettingsData {
-  sfxVolume: number;
-  sfxMuted: boolean;
-  showNicknames: boolean;
-  highQuality: boolean;
-}
+const SettingsData = Schema.Struct({
+  sfxVolume: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  sfxMuted: Schema.Boolean,
+  showNicknames: Schema.Boolean,
+  highQuality: Schema.Boolean,
+});
+type SettingsData = typeof SettingsData.Type;
+
+const decodeSettings = Schema.decodeUnknownSync(SettingsData);
 
 const DEFAULTS: SettingsData = {
   sfxVolume: 0.8,
@@ -14,61 +19,76 @@ const DEFAULTS: SettingsData = {
   highQuality: true,
 };
 
-/** 本地设置：localStorage 持久化，响应式供 UI 与音效/渲染读取。 */
+export type SettingsListener = () => void;
+
+/** Local settings with validated persistence and an explicit change boundary. */
 export class SettingsStore {
   sfxVolume = $state(DEFAULTS.sfxVolume);
   sfxMuted = $state(DEFAULTS.sfxMuted);
   showNicknames = $state(DEFAULTS.showNicknames);
   highQuality = $state(DEFAULTS.highQuality);
 
+  private readonly listeners = new Set<SettingsListener>();
+
   constructor() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = { ...DEFAULTS, ...(JSON.parse(raw) as Partial<SettingsData>) };
-        this.sfxVolume = parsed.sfxVolume;
-        this.sfxMuted = parsed.sfxMuted;
-        this.showNicknames = parsed.showNicknames;
-        this.highQuality = parsed.highQuality;
-      }
+      if (raw) this.assign(decodeSettings(JSON.parse(raw)));
     } catch {
-      // 隐私模式等场景下静默使用默认值
+      // Corrupt storage and privacy-mode failures both fall back to defaults.
     }
   }
 
-  private persist(): void {
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          sfxVolume: this.sfxVolume,
-          sfxMuted: this.sfxMuted,
-          showNicknames: this.showNicknames,
-          highQuality: this.highQuality,
-        } satisfies SettingsData),
-      );
-    } catch {
-      // 忽略持久化失败
-    }
+  subscribe(listener: SettingsListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   setSfxVolume(volume: number): void {
-    this.sfxVolume = volume;
-    this.persist();
+    if (!Number.isFinite(volume)) return;
+    const clamped = Math.min(1, Math.max(0, volume));
+    if (Object.is(this.sfxVolume, clamped)) return;
+    this.sfxVolume = clamped;
+    this.commit();
   }
 
   setSfxMuted(muted: boolean): void {
+    if (this.sfxMuted === muted) return;
     this.sfxMuted = muted;
-    this.persist();
+    this.commit();
   }
 
   setShowNicknames(show: boolean): void {
+    if (this.showNicknames === show) return;
     this.showNicknames = show;
-    this.persist();
+    this.commit();
   }
 
   setHighQuality(high: boolean): void {
+    if (this.highQuality === high) return;
     this.highQuality = high;
-    this.persist();
+    this.commit();
+  }
+
+  private assign(settings: SettingsData): void {
+    this.sfxVolume = settings.sfxVolume;
+    this.sfxMuted = settings.sfxMuted;
+    this.showNicknames = settings.showNicknames;
+    this.highQuality = settings.highQuality;
+  }
+
+  private commit(): void {
+    const settings: SettingsData = {
+      sfxVolume: this.sfxVolume,
+      sfxMuted: this.sfxMuted,
+      showNicknames: this.showNicknames,
+      highQuality: this.highQuality,
+    };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    } catch {
+      // Runtime settings still apply when persistence is unavailable.
+    }
+    for (const listener of this.listeners) listener();
   }
 }

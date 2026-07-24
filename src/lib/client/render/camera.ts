@@ -28,6 +28,13 @@ export class Camera {
     this.initialized = false;
   }
 
+  /** 与蛇头同步平移，避免权威位置校正表现为屏幕上的蛇头拉回。 */
+  compensatePositionCorrection(x: number, y: number): void {
+    if (!this.initialized) return;
+    this.x += x;
+    this.y += y;
+  }
+
   /** 当前视野的世界坐标范围（含边距），供视口裁剪。 */
   viewBounds(
     screenWidth: number,

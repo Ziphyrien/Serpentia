@@ -109,7 +109,7 @@ describe("self prediction", () => {
     }
   });
 
-  it("does not pull the local pose back for normal network-sized drift", () => {
+  it("corrects authoritative position without changing the local steering angle", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     const server = initialMotion();
     predictor.reconcile(snapshotOf(server), 0, 0);
@@ -117,12 +117,64 @@ describe("self prediction", () => {
     const before = predictor.renderState();
     expect(before).toBeDefined();
 
-    // The server is one or two ticks behind the local intent, but not truly lost.
+    // The server has not applied the local turn yet. Correct the matching tick's
+    // position while preserving the responsive local angle.
     stepMotion(server, 0, false);
-    predictor.reconcile(snapshotOf(server), 1, 120);
+    const correction = predictor.reconcile(snapshotOf(server), 1, 120);
     const after = predictor.renderState();
+    expect(correction).toBeDefined();
     expect(after).toBeDefined();
-    expectSameHead(before!, after!);
+    expect(after!.angle).toBeCloseTo(before!.angle, 8);
+    expect(head(after!).x - head(before!).x).toBeCloseTo(correction!.x, 8);
+    expect(head(after!).y - head(before!).y).toBeCloseTo(correction!.y, 8);
+  });
+
+  it("keeps repeated authoritative corrections from changing a continuous turn", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    const server = initialMotion();
+    predictor.reconcile(snapshotOf(server), 0, 0);
+
+    for (let now = 10; now <= 600; now += 10) {
+      if (now % TICK_MS === 0) {
+        stepMotion(server, now === TICK_MS ? 0 : Math.PI / 2, false);
+      }
+      predictor.advance(now, Math.PI / 2, false);
+      if (now % (TICK_MS * 2) !== 0) continue;
+
+      const before = predictor.renderState();
+      const correction = predictor.reconcile(snapshotOf(server), now / TICK_MS, now);
+      const after = predictor.renderState();
+      expect(before).toBeDefined();
+      expect(after).toBeDefined();
+      expect(after!.angle).toBeCloseTo(before!.angle, 8);
+      if (correction) {
+        expect(head(after!).x - head(before!).x).toBeCloseTo(correction.x, 8);
+        expect(head(after!).y - head(before!).y).toBeCloseTo(correction.y, 8);
+      }
+    }
+  });
+
+  it("keeps food distance aligned with the authoritative head under delayed steering", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    const server = initialMotion();
+    predictor.reconcile(snapshotOf(server), 0, 0);
+
+    // Local steering starts immediately, while the server continues straight for
+    // two ticks. This is the divergence that previously made visible food miss.
+    predictor.advance(100, Math.PI / 2, false);
+    stepMotion(server, 0, false);
+    stepMotion(server, 0, false);
+    const correction = predictor.reconcile(snapshotOf(server), 2, 100);
+    const rendered = predictor.renderState();
+    expect(correction).toBeDefined();
+    expect(rendered).toBeDefined();
+    expectSameHead(server, rendered!);
+    expect(rendered!.angle).toBeGreaterThan(server.angle);
+
+    const food = { x: head(server).x + 12, y: head(server).y - 4 };
+    const serverDistance = Math.hypot(food.x - head(server).x, food.y - head(server).y);
+    const renderedDistance = Math.hypot(food.x - head(rendered!).x, food.y - head(rendered!).y);
+    expect(renderedDistance).toBeCloseTo(serverDistance, 8);
   });
 
   it("continues the authoritative target before local direction input exists", () => {
@@ -147,5 +199,24 @@ describe("self prediction", () => {
     ];
     predictor.reconcile(snapshotOf(farAway), 1, 50);
     expect(head(predictor.renderState()!).x).toBe(200);
+  });
+
+  it("initializes a respawn from its new authoritative pose", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    const original = initialMotion();
+    predictor.reconcile(snapshotOf(original), 0, 0);
+    predictor.advance(100, Math.PI / 2, true);
+
+    predictor.reconcile({ ...snapshotOf(original), alive: false }, 2, 100);
+    predictor.advance(150, Math.PI / 2, false);
+    expect(predictor.renderState()).toBeUndefined();
+
+    const respawned = initialMotion();
+    respawned.body = [
+      { x: 400, y: 300 },
+      { x: 300, y: 300 },
+    ];
+    predictor.reconcile(snapshotOf(respawned), 3, 150);
+    expectSameHead(respawned, predictor.renderState()!);
   });
 });

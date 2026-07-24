@@ -73,7 +73,9 @@ export class GameRoom {
     }
 
     this.connections.set(connection.id, connection);
-    this.voiceRoster.join(identity.playerId, identity.nickname);
+    // Voice membership belongs to a concrete signaling connection. A new or
+    // replacement connection must explicitly rejoin after welcome.
+    this.voiceRoster.leave(identity.playerId);
     if (result.replacedConnectionId !== undefined) {
       this.connections.get(result.replacedConnectionId)?.close(4001, "Reconnected elsewhere");
     }
@@ -198,7 +200,7 @@ export class GameRoom {
         });
         return;
       case "voice-state":
-        this.handleVoiceState(connection, message.muted);
+        this.handleVoiceState(connection, message.joined ?? true, message.muted);
         return;
       case "voice-signal":
         this.forwardVoiceSignal(connection, message.targetPlayerId, message.signal);
@@ -215,15 +217,14 @@ export class GameRoom {
     }
   }
 
-  private handleVoiceState(connection: GameRoomConnection, muted: boolean): void {
+  private handleVoiceState(connection: GameRoomConnection, joined: boolean, muted: boolean): void {
     const identity = connection.identity;
-    if (
-      !this.controller.isCurrentConnection(connection.id, identity.playerId) ||
-      !this.voiceRoster.setMuted(identity.playerId, muted)
-    ) {
+    if (!this.controller.isCurrentConnection(connection.id, identity.playerId)) {
       this.sendError(connection, "VOICE_NOT_AUTHORIZED", false);
       return;
     }
+    if (joined) this.voiceRoster.join(identity.playerId, identity.nickname, muted);
+    else this.voiceRoster.leave(identity.playerId);
     this.broadcastVoiceRoster();
   }
 

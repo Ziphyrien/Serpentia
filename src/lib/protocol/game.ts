@@ -43,6 +43,8 @@ export class PingMessage extends Schema.TaggedClass<PingMessage>()("ping", {
 
 export class VoiceStateMessage extends Schema.TaggedClass<VoiceStateMessage>()("voice-state", {
   v: ProtocolVersion,
+  /** Optional only for compatibility with already-loaded v1 clients. */
+  joined: Schema.optionalKey(Schema.Boolean),
   muted: Schema.Boolean,
 }) {}
 
