@@ -95,3 +95,17 @@ canvas {
 .speaking-ring {
   animation: pulse-ring 1.2s ease-out infinite;
 }
+
+/* 麦克风按钮上的实时音量环：--level（0-1）驱动圆弧填充 */
+.mic-level-ring {
+  pointer-events: none;
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  background: conic-gradient(
+    rgb(163 230 53 / 0.95) calc(var(--level, 0) * 360deg),
+    rgb(163 230 53 / 0.15) 0deg
+  );
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
+}

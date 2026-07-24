@@ -57,6 +57,8 @@ export class GameController {
   voicePeers = $state<Array<VoicePeerView>>([]);
   voiceJoined = $state(false);
   voiceMuted = $state(false);
+  /** 本地麦克风实时电平（0-1），供 HUD 麦克风按钮显示。 */
+  voiceLevel = $state(0);
   voiceError = $state<string | undefined>(undefined);
   notice = $state<string | undefined>(undefined);
   /** 蛇头接近场地边界（渲染层每帧更新，HUD 显示红晕警告）。 */
@@ -108,6 +110,7 @@ export class GameController {
         this.voiceJoined = joined;
         this.voiceMuted = muted;
       },
+      onLocalLevel: (level) => (this.voiceLevel = level),
       onError: (message) => {
         this.voiceError = message;
         window.setTimeout(() => (this.voiceError = undefined), 4000);

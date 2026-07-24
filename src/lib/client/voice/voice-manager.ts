@@ -24,6 +24,8 @@ export interface VoicePeerView {
 export interface VoiceManagerEvents {
   onPeersChanged(peers: Array<VoicePeerView>): void;
   onJoinedChanged(joined: boolean, muted: boolean): void;
+  /** 本地麦克风实时电平（0-1），约每 100ms 有变化时回调。 */
+  onLocalLevel(level: number): void;
   onError(message: string): void;
   sendVoiceSignal(targetPlayerId: PlayerId, signal: VoiceSignal): void;
   sendVoiceState(muted: boolean): void;
@@ -43,6 +45,10 @@ export class VoiceManager {
   private credentials: TurnCredentialsResponse | undefined;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private levels = new Map<PlayerId, { analyser: AnalyserNode; data: Uint8Array<ArrayBuffer> }>();
+  private localMeter:
+    | { source: MediaStreamAudioSourceNode; analyser: AnalyserNode; data: Uint8Array<ArrayBuffer> }
+    | undefined;
+  private lastLocalLevel = 0;
   private audioContext: AudioContext | undefined;
   private levelTimer: ReturnType<typeof setInterval> | undefined;
   private volumes = new Map<PlayerId, number>();
@@ -85,6 +91,7 @@ export class VoiceManager {
     for (const participant of this.roster.values()) {
       if (participant.playerId !== this.selfId()) this.ensurePeer(participant);
     }
+    this.attachLocalMeter();
     this.startLevelMeter();
     this.events.onJoinedChanged(true, this.muted);
     this.emitPeers();
@@ -100,6 +107,10 @@ export class VoiceManager {
     if (this.levelTimer) clearInterval(this.levelTimer);
     this.levelTimer = undefined;
     this.levels.clear();
+    this.localMeter?.source.disconnect();
+    this.localMeter = undefined;
+    this.lastLocalLevel = 0;
+    this.events.onLocalLevel(0);
     void this.audioContext?.close().catch(() => undefined);
     this.audioContext = undefined;
     this.events.onJoinedChanged(false, this.muted);
@@ -266,6 +277,22 @@ export class VoiceManager {
     }
   }
 
+  /** 给本地麦克风挂分析器，用于按钮上的音量指示（不送扬声器，避免回授）。 */
+  private attachLocalMeter(): void {
+    if (!this.localStream) return;
+    try {
+      this.audioContext ??= new AudioContext();
+      const source = this.audioContext.createMediaStreamSource(this.localStream);
+      const analyser = this.audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      const data: Uint8Array<ArrayBuffer> = new Uint8Array(analyser.frequencyBinCount);
+      this.localMeter = { source, analyser, data };
+    } catch {
+      // 电平指示只是增强，失败不影响通话
+    }
+  }
+
   private attachLevelMeter(playerId: PlayerId, stream: MediaStream): void {
     try {
       this.audioContext ??= new AudioContext();
@@ -285,10 +312,7 @@ export class VoiceManager {
     this.levelTimer = setInterval(() => {
       let changed = false;
       for (const [playerId, meter] of this.levels) {
-        meter.analyser.getByteTimeDomainData(meter.data);
-        let sum = 0;
-        for (const value of meter.data) sum += (value - 128) ** 2;
-        const rms = Math.sqrt(sum / meter.data.length);
+        const rms = VoiceManager.rms(meter);
         const isSpeaking = rms > 8;
         if (this.speaking.has(playerId) !== isSpeaking) {
           if (isSpeaking) this.speaking.add(playerId);
@@ -297,7 +321,29 @@ export class VoiceManager {
         }
       }
       if (changed) this.emitPeers();
-    }, 200);
+      this.sampleLocalLevel();
+    }, 100);
+  }
+
+  private static rms(meter: { analyser: AnalyserNode; data: Uint8Array<ArrayBuffer> }): number {
+    meter.analyser.getByteTimeDomainData(meter.data);
+    let sum = 0;
+    for (const value of meter.data) sum += (value - 128) ** 2;
+    return Math.sqrt(sum / meter.data.length);
+  }
+
+  /** 采样本地麦克风电平并归一化到 0-1；静音时恒为 0。 */
+  private sampleLocalLevel(): void {
+    let level = 0;
+    if (this.localMeter && !this.muted) {
+      const rms = VoiceManager.rms(this.localMeter);
+      level = Math.min(1, rms / 40);
+    }
+    const rounded = Math.round(level * 100) / 100;
+    if (rounded !== this.lastLocalLevel) {
+      this.lastLocalLevel = rounded;
+      this.events.onLocalLevel(rounded);
+    }
   }
 
   private emitPeers(): void {

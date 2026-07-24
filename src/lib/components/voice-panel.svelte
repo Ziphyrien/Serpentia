@@ -24,9 +24,10 @@
         intent="ghost"
         size="icon"
         aria-label="语音"
-        class={controller.voiceJoined && !controller.voiceMuted ? "text-lime-300" : ""}
+        class="relative {controller.voiceJoined && !controller.voiceMuted ? 'text-lime-300' : ''}"
       >
         {#if controller.voiceJoined && !controller.voiceMuted}
+          <span class="mic-level-ring" style:--level={controller.voiceLevel}></span>
           <Mic size={19} />
         {:else}
           <MicOff size={19} />
