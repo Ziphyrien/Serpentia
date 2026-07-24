@@ -8,4 +8,11 @@
   <string name="configuration_error_message">发布版必须通过 SERPENTIA_APP_URL 指定 HTTPS 游戏地址。构建说明见 android/README.md。</string>
   <string name="external_link_error_title">无法打开外部链接</string>
   <string name="external_link_error_message">设备上没有可以处理此链接的应用。</string>
+  <string name="microphone_permission_title">需要麦克风权限</string>
+  <string name="microphone_permission_rationale">语音聊天需要使用麦克风。蛇域只会在你主动加入语音后采集声音。</string>
+  <string name="microphone_permission_retry">再次授权</string>
+  <string name="microphone_permission_not_now">暂不使用</string>
+  <string name="microphone_settings_title">麦克风权限已被关闭</string>
+  <string name="microphone_settings_message">Android 已不再显示授权弹窗。请前往应用设置，在“权限”中允许蛇域使用麦克风。</string>
+  <string name="microphone_settings_open">前往设置</string>
 </resources>

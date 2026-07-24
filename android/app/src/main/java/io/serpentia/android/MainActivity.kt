@@ -3,6 +3,7 @@ package io.serpentia.android
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,6 +12,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -35,9 +37,15 @@ class MainActivity : Activity() {
   private lateinit var errorMessage: TextView
   private lateinit var retryButton: Button
 
+  private val permissionPreferences by lazy {
+    getSharedPreferences(PERMISSION_PREFERENCES, MODE_PRIVATE)
+  }
+
   private var appUri: Uri? = null
   private var pageFailed = false
   private var pendingAudioRequest: PermissionRequest? = null
+  private var audioPermissionDialog: AlertDialog? = null
+  private var awaitingAudioSettings = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -134,7 +142,11 @@ class MainActivity : Activity() {
 
       override fun onPermissionRequestCanceled(request: PermissionRequest) {
         runOnUiThread {
-          if (pendingAudioRequest === request) pendingAudioRequest = null
+          if (pendingAudioRequest === request) {
+            pendingAudioRequest = null
+            awaitingAudioSettings = false
+            dismissAudioPermissionDialog()
+          }
         }
       }
     }
@@ -202,13 +214,107 @@ class MainActivity : Activity() {
       request.deny()
       return
     }
-    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+    if (hasAudioPermission()) {
       request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
       return
     }
-    pendingAudioRequest?.deny()
+
+    denyPendingAudioRequest()
     pendingAudioRequest = request
+    when {
+      isAudioPermissionPermanentlyDenied() -> showAudioSettingsDialog()
+      shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO) ->
+        showAudioRationaleDialog()
+      else -> requestAudioPermission()
+    }
+  }
+
+  private fun hasAudioPermission(): Boolean =
+    checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+  private fun isAudioPermissionPermanentlyDenied(): Boolean =
+    !hasAudioPermission() &&
+      permissionPreferences.getBoolean(AUDIO_PERMISSION_REQUESTED, false) &&
+      !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
+
+  private fun requestAudioPermission() {
+    if (pendingAudioRequest == null) return
+    dismissAudioPermissionDialog()
+    permissionPreferences.edit().putBoolean(AUDIO_PERMISSION_REQUESTED, true).apply()
     requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), RECORD_AUDIO_REQUEST)
+  }
+
+  private fun showAudioRationaleDialog() {
+    if (pendingAudioRequest == null || isFinishing || isDestroyed) return
+    dismissAudioPermissionDialog()
+    audioPermissionDialog = AlertDialog.Builder(this)
+      .setTitle(R.string.microphone_permission_title)
+      .setMessage(R.string.microphone_permission_rationale)
+      .setPositiveButton(R.string.microphone_permission_retry) { _, _ ->
+        requestAudioPermission()
+      }
+      .setNegativeButton(R.string.microphone_permission_not_now) { _, _ ->
+        denyPendingAudioRequest()
+      }
+      .setOnCancelListener { denyPendingAudioRequest() }
+      .show()
+  }
+
+  private fun showAudioSettingsDialog() {
+    if (pendingAudioRequest == null || isFinishing || isDestroyed) return
+    dismissAudioPermissionDialog()
+    audioPermissionDialog = AlertDialog.Builder(this)
+      .setTitle(R.string.microphone_settings_title)
+      .setMessage(R.string.microphone_settings_message)
+      .setPositiveButton(R.string.microphone_settings_open) { _, _ ->
+        openApplicationSettings()
+      }
+      .setNegativeButton(R.string.microphone_permission_not_now) { _, _ ->
+        denyPendingAudioRequest()
+      }
+      .setOnCancelListener { denyPendingAudioRequest() }
+      .show()
+  }
+
+  private fun openApplicationSettings() {
+    if (pendingAudioRequest == null) return
+    dismissAudioPermissionDialog()
+    awaitingAudioSettings = true
+    val applicationDetails = Intent(
+      Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+      Uri.fromParts("package", packageName, null),
+    )
+    try {
+      startActivity(applicationDetails)
+    } catch (_: ActivityNotFoundException) {
+      try {
+        startActivity(Intent(Settings.ACTION_SETTINGS))
+      } catch (_: ActivityNotFoundException) {
+        awaitingAudioSettings = false
+        denyPendingAudioRequest()
+      }
+    }
+  }
+
+  private fun grantPendingAudioRequest() {
+    val request = pendingAudioRequest ?: return
+    pendingAudioRequest = null
+    awaitingAudioSettings = false
+    dismissAudioPermissionDialog()
+    request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
+  }
+
+  private fun denyPendingAudioRequest() {
+    val request = pendingAudioRequest
+    pendingAudioRequest = null
+    awaitingAudioSettings = false
+    dismissAudioPermissionDialog()
+    request?.deny()
+  }
+
+  private fun dismissAudioPermissionDialog() {
+    audioPermissionDialog?.dismiss()
+    audioPermissionDialog = null
   }
 
   override fun onRequestPermissionsResult(
@@ -217,13 +323,13 @@ class MainActivity : Activity() {
     grantResults: IntArray,
   ) {
     super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-    if (requestCode != RECORD_AUDIO_REQUEST) return
-    val request = pendingAudioRequest ?: return
-    pendingAudioRequest = null
+    if (requestCode != RECORD_AUDIO_REQUEST || pendingAudioRequest == null) return
     if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-      request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
+      grantPendingAudioRequest()
+    } else if (isAudioPermissionPermanentlyDenied()) {
+      showAudioSettingsDialog()
     } else {
-      request.deny()
+      showAudioRationaleDialog()
     }
   }
 
@@ -273,6 +379,10 @@ class MainActivity : Activity() {
   override fun onResume() {
     super.onResume()
     webView.onResume()
+    if (awaitingAudioSettings) {
+      awaitingAudioSettings = false
+      if (hasAudioPermission()) grantPendingAudioRequest() else denyPendingAudioRequest()
+    }
     hideSystemBars()
   }
 
@@ -287,8 +397,8 @@ class MainActivity : Activity() {
   }
 
   override fun onDestroy() {
-    pendingAudioRequest?.deny()
-    pendingAudioRequest = null
+    denyPendingAudioRequest()
+    dismissAudioPermissionDialog()
     webView.stopLoading()
     webView.webChromeClient = null
     webView.destroy()
@@ -297,5 +407,7 @@ class MainActivity : Activity() {
 
   companion object {
     private const val RECORD_AUDIO_REQUEST = 1001
+    private const val PERMISSION_PREFERENCES = "permission-state"
+    private const val AUDIO_PERMISSION_REQUESTED = "audio-permission-requested"
   }
 }
