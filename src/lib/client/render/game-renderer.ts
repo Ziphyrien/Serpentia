@@ -92,7 +92,7 @@ export class GameRenderer {
       this.camera.reset();
       return;
     }
-    this.selfCorrection.preserveAfterTranslation(correction.x, correction.y);
+    this.selfCorrection.preserveAfterTranslation(correction.x, correction.y, performance.now());
   }
 
   /** 食物被吃：闪光 + 就近音效（由控制器在事件到达时调用）。 */
@@ -156,10 +156,10 @@ export class GameRenderer {
   private frame(deltaMS: number): void {
     if (!this.app || !this.arena || !this.food || !this.snakes || !this.fx) return;
     const controller = this.controller;
-    this.selfCorrection.advance(deltaMS);
     const clock = controller.clockSync;
     const serverNow = clock.serverNow() ?? Date.now();
     const localNow = performance.now();
+    this.selfCorrection.sample(localNow);
 
     // 1. 推进自我预测
     // 无方向输入时传 undefined，避免把出生朝向往 angle=0（正东）拽
@@ -210,30 +210,30 @@ export class GameRenderer {
       this.selfRadiusSmooth += (radius - this.selfRadiusSmooth) * 0.08;
       selfBoosting = selfState.boosting && controller.selfPredictor.currentLength > minBoostLength;
       const { offsetX, offsetY } = this.selfCorrection;
-      const visualBody =
-        offsetX === 0 && offsetY === 0
-          ? selfState.body
-          : selfState.body.map((point) => ({ x: point.x + offsetX, y: point.y + offsetY }));
       views.push({
         id: selfSnapshot.id,
         nickname: selfSnapshot.nickname,
-        body: visualBody,
+        body: selfState.body,
         angle: selfState.angle,
         radius: this.selfRadiusSmooth,
         boosting: selfBoosting,
         invulnerable: selfSnapshot.invulnerable,
         isSelf: true,
+        offsetX,
+        offsetY,
       });
-      selfHead = visualBody[0];
       simulationHead = selfState.body[0];
+      selfHead = simulationHead
+        ? { x: simulationHead.x + offsetX, y: simulationHead.y + offsetY }
+        : undefined;
 
       // 加速拖尾
       if (selfBoosting) {
         this.trailAccumulator += deltaMS;
-        const tail = visualBody[visualBody.length - 1];
+        const tail = selfState.body[selfState.body.length - 1];
         while (this.trailAccumulator > 40 && tail) {
           this.trailAccumulator -= 40;
-          this.fx.trail(tail.x, tail.y, skinForPlayer(selfSnapshot.id).light);
+          this.fx.trail(tail.x + offsetX, tail.y + offsetY, skinForPlayer(selfSnapshot.id).light);
         }
       }
     }

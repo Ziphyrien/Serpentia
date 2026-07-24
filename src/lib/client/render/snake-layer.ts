@@ -16,6 +16,8 @@ export interface SnakeRenderView {
   boosting: boolean;
   invulnerable: boolean;
   isSelf: boolean;
+  offsetX?: number;
+  offsetY?: number;
 }
 
 interface ViewBounds {
@@ -48,7 +50,13 @@ export class SnakeLayer {
   /** 供死亡特效读取蛇最后的外形。 */
   lastBodyOf(id: string): { body: ReadonlyArray<Point>; skin: SkinDefinition } | undefined {
     const nodes = this.snakes.get(id);
-    return nodes ? { body: nodes.lastBody, skin: nodes.skin } : undefined;
+    if (!nodes) return undefined;
+    const { x, y } = nodes.root.position;
+    const body =
+      x === 0 && y === 0
+        ? nodes.lastBody
+        : nodes.lastBody.map((point) => ({ x: point.x + x, y: point.y + y }));
+    return { body, skin: nodes.skin };
   }
 
   update(
@@ -134,6 +142,9 @@ export class SnakeLayer {
       return;
     }
     nodes.lastBody = body;
+    const offsetX = snake.offsetX ?? 0;
+    const offsetY = snake.offsetY ?? 0;
+    nodes.root.position.set(offsetX, offsetY);
 
     // 视口粗裁剪：整条蛇包围盒
     let minX = Infinity;
@@ -148,10 +159,10 @@ export class SnakeLayer {
     }
     const radius = snake.radius;
     if (
-      maxX < view.left - radius ||
-      minX > view.right + radius ||
-      maxY < view.top - radius ||
-      minY > view.bottom + radius
+      maxX + offsetX < view.left - radius ||
+      minX + offsetX > view.right + radius ||
+      maxY + offsetY < view.top - radius ||
+      minY + offsetY > view.bottom + radius
     ) {
       nodes.root.visible = false;
       return;
@@ -166,11 +177,13 @@ export class SnakeLayer {
     const margin = radius * 3;
     const points: Array<Point> = [];
     for (const point of body) {
+      const worldX = point.x + offsetX;
+      const worldY = point.y + offsetY;
       if (
-        point.x > view.left - margin &&
-        point.x < view.right + margin &&
-        point.y > view.top - margin &&
-        point.y < view.bottom + margin
+        worldX > view.left - margin &&
+        worldX < view.right + margin &&
+        worldY > view.top - margin &&
+        worldY < view.bottom + margin
       ) {
         points.push(point);
       }
