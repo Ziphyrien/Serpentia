@@ -26,8 +26,10 @@ export class FoodSpeculation {
   private readonly hidden = new Map<number, HiddenFood>();
   private readonly blockedUntilExit = new Set<number>();
   private readonly hiddenIds = new Set<number>();
+  private readonly newlyHiddenFoodIds: Array<number> = [];
 
   update(frame: FoodSpeculationFrame): ReadonlySet<number> {
+    this.newlyHiddenFoodIds.length = 0;
     const foodsById = new Map(frame.foods.map((food) => [food.id, food]));
     const collisionDistance = frame.snakeRadius + frame.foodRadius;
     for (const [foodId, prediction] of this.hidden) {
@@ -62,20 +64,29 @@ export class FoodSpeculation {
       }
       if (this.hidden.has(food.id) || this.blockedUntilExit.has(food.id)) continue;
       this.hidden.set(food.id, { collisionTick: frame.predictedTick });
+      this.newlyHiddenFoodIds.push(food.id);
     }
     return this.refreshHiddenIds();
   }
 
-  confirm(foodId: number): void {
-    this.hidden.delete(foodId);
+  takeNewlyHiddenFoodIds(): ReadonlyArray<number> {
+    const foodIds = this.newlyHiddenFoodIds.slice();
+    this.newlyHiddenFoodIds.length = 0;
+    return foodIds;
+  }
+
+  confirm(foodId: number): boolean {
+    const wasHidden = this.hidden.delete(foodId);
     this.blockedUntilExit.delete(foodId);
     this.hiddenIds.delete(foodId);
+    return wasHidden;
   }
 
   reset(): void {
     this.hidden.clear();
     this.blockedUntilExit.clear();
     this.hiddenIds.clear();
+    this.newlyHiddenFoodIds.length = 0;
   }
 
   private refreshHiddenIds(): ReadonlySet<number> {

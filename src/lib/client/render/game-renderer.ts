@@ -1,4 +1,5 @@
 import { Application, Container } from "pixi.js";
+import type { FoodState } from "$lib/protocol";
 import type { GameController } from "../game.svelte";
 import type { SettingsStore } from "../stores/settings.svelte";
 import { RENDER, skinForPlayer } from "../config";
@@ -87,18 +88,9 @@ export class GameRenderer {
 
   /** 食物被吃：闪光 + 就近音效（由控制器在事件到达时调用）。 */
   foodConsumed(foodId: number): void {
-    this.foodSpeculation.confirm(foodId);
+    const alreadyPresented = this.foodSpeculation.confirm(foodId);
     const position = this.food?.positionOf(foodId);
-    if (!position) return;
-    const selfHead = this.selfHead();
-    const distance = selfHead
-      ? Math.hypot(position.x - selfHead.x, position.y - selfHead.y)
-      : Infinity;
-    if (distance < 720) {
-      const color = position.kind === "boost" ? 0xffd75e : 0xfff3f8;
-      this.fx?.burst(position.x, position.y, color, position.kind === "ambient" ? 8 : 14, 200, 3.5);
-      if (distance < 400) this.controller.sfx.eat(position.kind !== "ambient");
-    }
+    if (position && !alreadyPresented) this.playFoodFeedback(position, this.selfHead());
     this.food?.remove(foodId);
   }
 
@@ -249,6 +241,15 @@ export class GameRenderer {
         foodRadius: controller.descriptor.rules.foodRadius,
         alive: selfAlive,
       });
+      for (const foodId of this.foodSpeculation.takeNewlyHiddenFoodIds()) {
+        const consumed = latestSnapshot.foods.find((food) => food.id === foodId);
+        if (consumed) {
+          this.playFoodFeedback(
+            { x: consumed.position.x, y: consumed.position.y, kind: consumed.kind },
+            selfHead,
+          );
+        }
+      }
       this.food.sync(latestSnapshot.foods, viewBounds, nowMs, hiddenFoods);
     } else {
       this.foodSpeculation.reset();
@@ -271,6 +272,19 @@ export class GameRenderer {
     } else {
       controller.nearBoundary = false;
     }
+  }
+
+  private playFoodFeedback(
+    position: { readonly x: number; readonly y: number; readonly kind: FoodState["kind"] },
+    selfHead: { readonly x: number; readonly y: number } | undefined,
+  ): void {
+    const distance = selfHead
+      ? Math.hypot(position.x - selfHead.x, position.y - selfHead.y)
+      : Infinity;
+    if (distance >= 720) return;
+    const color = position.kind === "boost" ? 0xffd75e : 0xfff3f8;
+    this.fx?.burst(position.x, position.y, color, position.kind === "ambient" ? 8 : 14, 200, 3.5);
+    if (distance < 400) this.controller.sfx.eat(position.kind !== "ambient");
   }
 
   private selfHead(): { x: number; y: number } | undefined {

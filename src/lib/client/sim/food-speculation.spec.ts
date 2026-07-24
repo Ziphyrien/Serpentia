@@ -27,6 +27,18 @@ describe("food speculation", () => {
     expect(outside.update(frame({ head: { x: 15.001, y: 0 } })).has(1)).toBe(false);
   });
 
+  it("reports immediate feedback once and suppresses duplicate confirmation", () => {
+    const speculation = new FoodSpeculation();
+    speculation.update(frame());
+    expect(speculation.takeNewlyHiddenFoodIds()).toEqual([1]);
+    expect(speculation.takeNewlyHiddenFoodIds()).toEqual([]);
+
+    speculation.update(frame({ authoritativeTick: 11 }));
+    expect(speculation.takeNewlyHiddenFoodIds()).toEqual([]);
+    expect(speculation.confirm(1)).toBe(true);
+    expect(speculation.confirm(1)).toBe(false);
+  });
+
   it("uses the authoritative tick endpoint instead of an interpolated crossing", () => {
     const speculation = new FoodSpeculation();
     expect(
@@ -54,6 +66,7 @@ describe("food speculation", () => {
         )
         .has(1),
     ).toBe(false);
+    expect(speculation.confirm(1)).toBe(false);
   });
 
   it("keeps food hidden until authority reaches the predicted collision tick", () => {
