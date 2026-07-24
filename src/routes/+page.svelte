@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { installTouchFullscreen } from "$lib/client/fullscreen";
   import { SessionStore } from "$lib/client/stores/session.svelte";
   import { SettingsStore } from "$lib/client/stores/settings.svelte";
   import LoginForm from "$lib/components/login-form.svelte";
@@ -9,7 +10,9 @@
   const settings = new SettingsStore();
 
   onMount(() => {
+    const disposeFullscreen = installTouchFullscreen();
     void session.bootstrap();
+    return disposeFullscreen;
   });
 </script>
 

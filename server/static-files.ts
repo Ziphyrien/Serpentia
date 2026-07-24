@@ -80,6 +80,13 @@ export class StaticFileServer {
 
 function cacheControl(pathname: string): string {
   if (pathname.startsWith("/_app/immutable/")) return "public, max-age=31536000, immutable";
-  if (pathname === "/index.html" || pathname === "/") return "no-cache";
+  if (
+    pathname === "/index.html" ||
+    pathname === "/" ||
+    pathname === "/service-worker.js" ||
+    pathname === "/manifest.webmanifest"
+  ) {
+    return "no-cache";
+  }
   return "public, max-age=86400";
 }

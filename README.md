@@ -15,6 +15,8 @@ Bun.serve (HTTP / WebSocket / TLS)
 
 Kotlin 沉浸式 Android 客户端位于 [`android/`](android/README.md)。其 JDK、Android SDK、Gradle 和依赖缓存均可安装在 D 盘。
 
+Web 客户端同时提供 SvelteKit 原生 PWA：应用壳、图标、贴图和音效可离线加载，安装后以全屏模式启动；普通移动浏览器标签页会在用户首次及后续触摸时请求全屏。登录、多人游戏、语音和实时状态仍必须连接服务器。
+
 ## 本地运行
 
 ```bash
