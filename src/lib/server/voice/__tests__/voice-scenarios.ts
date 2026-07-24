@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { decodeClientMessage } from "../../../protocol/game";
+import { decodeClientMessage, GAME_PROTOCOL_VERSION } from "../../../protocol/game";
 import { createCoturnCredentials } from "../coturn";
 import { VoiceRoster } from "../voice-roster";
 
@@ -34,7 +34,12 @@ export const voiceScenarios: ReadonlyArray<VoiceScenario> = [
     run: () => {
       const state = Effect.runSync(
         decodeClientMessage(
-          JSON.stringify({ v: 1, _tag: "voice-state", joined: false, muted: true }),
+          JSON.stringify({
+            v: GAME_PROTOCOL_VERSION,
+            _tag: "voice-state",
+            joined: false,
+            muted: true,
+          }),
         ),
       );
       requireCondition(state._tag === "voice-state", "voice state was not decoded");
@@ -43,7 +48,7 @@ export const voiceScenarios: ReadonlyArray<VoiceScenario> = [
       const offer = Effect.runSync(
         decodeClientMessage(
           JSON.stringify({
-            v: 1,
+            v: GAME_PROTOCOL_VERSION,
             _tag: "voice-signal",
             targetPlayerId: "friend-b",
             signal: { _tag: "offer", sdp: "v=0\r\n" },
@@ -57,7 +62,7 @@ export const voiceScenarios: ReadonlyArray<VoiceScenario> = [
       const ice = Effect.runSync(
         decodeClientMessage(
           JSON.stringify({
-            v: 1,
+            v: GAME_PROTOCOL_VERSION,
             _tag: "voice-signal",
             targetPlayerId: "friend-b",
             signal: {

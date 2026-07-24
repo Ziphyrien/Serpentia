@@ -18,6 +18,7 @@ function snake(id: string, x: number, alive = true): SnakeSnapshot {
     invulnerable: false,
     respawnAtTick: null,
     lastInputSequence: -1,
+    lastInputAppliedTick: 0,
   };
 }
 

@@ -10,7 +10,21 @@ export interface PlayerIdentity {
 }
 
 export interface RoomPlayerInput extends Omit<PlayerInput, "playerId"> {
-  readonly clientTick: number;
+  readonly targetTick: number;
+}
+
+export interface InputAcceptance {
+  readonly sequence: number;
+  readonly targetTick: number;
+  readonly appliedTick: number;
+}
+
+export interface AppliedInputAck extends InputAcceptance {
+  readonly playerId: string;
+}
+
+interface PendingInput extends AppliedInputAck {
+  readonly input: PlayerInput;
 }
 
 export interface JoinAccepted {
@@ -30,6 +44,7 @@ export type JoinResult = JoinAccepted | JoinRejected;
 export interface RoomTickResult {
   readonly events: TickEvents;
   readonly expiredPlayerIds: ReadonlyArray<string>;
+  readonly appliedInputs: ReadonlyArray<AppliedInputAck>;
 }
 
 export class RoomController {
@@ -37,6 +52,8 @@ export class RoomController {
   private readonly connectionByPlayer = new Map<string, string>();
   private readonly nicknameByPlayer = new Map<string, string>();
   private readonly disconnectDeadlineByPlayer = new Map<string, number>();
+  private readonly pendingInputs = new Map<string, Map<number, Array<PendingInput>>>();
+  private readonly lastQueuedSequence = new Map<string, number>();
   readonly reconnectGraceTicks: number;
 
   constructor(
@@ -73,15 +90,20 @@ export class RoomController {
     this.connectionByPlayer.set(identity.playerId, connectionId);
     this.nicknameByPlayer.set(identity.playerId, identity.nickname);
     this.disconnectDeadlineByPlayer.delete(identity.playerId);
+    this.pendingInputs.delete(identity.playerId);
+    this.lastQueuedSequence.delete(identity.playerId);
 
     const added = this.engine.addSnake(identity.playerId, identity.nickname);
     if (!added) this.engine.renameSnake(identity.playerId, identity.nickname);
 
+    const snapshot = this.engine.snapshot();
+    const snake = snapshot.snakes.find((candidate) => candidate.id === identity.playerId);
+    this.lastQueuedSequence.set(identity.playerId, snake?.lastInputSequence ?? -1);
     return {
       _tag: "Accepted",
       replacedConnectionId,
       resumed: !added,
-      snapshot: this.engine.snapshot(),
+      snapshot,
     };
   }
 
@@ -92,30 +114,56 @@ export class RoomController {
 
     if (this.connectionByPlayer.get(playerId) !== connectionId) return false;
     this.connectionByPlayer.delete(playerId);
+    this.pendingInputs.delete(playerId);
+    this.lastQueuedSequence.delete(playerId);
     this.engine.suspendSnake(playerId);
     this.disconnectDeadlineByPlayer.set(playerId, this.engine.tick + this.reconnectGraceTicks);
     return true;
   }
 
-  applyInput(connectionId: string, input: RoomPlayerInput): boolean {
+  applyInput(connectionId: string, input: RoomPlayerInput): InputAcceptance | false {
     const playerId = this.playerByConnection.get(connectionId);
     if (playerId === undefined || this.connectionByPlayer.get(playerId) !== connectionId) {
       return false;
     }
     const maximumLag = this.engine.config.tickRate * INPUT_LAG_TOLERANCE_SECONDS;
     const maximumLead = this.engine.config.tickRate * INPUT_LEAD_TOLERANCE_SECONDS;
+    const requestedTick = input.targetTick;
     if (
-      input.clientTick < Math.max(0, this.engine.tick - maximumLag) ||
-      input.clientTick > this.engine.tick + maximumLead
+      requestedTick < Math.max(0, this.engine.tick - maximumLag) ||
+      requestedTick > this.engine.tick + maximumLead
     ) {
       return false;
     }
-    return this.engine.applyInput({
+
+    const lastQueued = this.lastQueuedSequence.get(playerId) ?? -1;
+    if (input.sequence <= lastQueued) return false;
+
+    const targetTick = requestedTick;
+    const appliedTick = Math.max(this.engine.tick + 1, targetTick);
+    let queue = this.pendingInputs.get(playerId);
+    if (queue === undefined) {
+      queue = new Map();
+      this.pendingInputs.set(playerId, queue);
+    }
+    const accepted: PendingInput = {
       playerId,
       sequence: input.sequence,
-      angle: input.angle,
-      boosting: input.boosting,
-    });
+      targetTick,
+      appliedTick,
+      input: {
+        playerId,
+        sequence: input.sequence,
+        angle: input.angle,
+        boosting: input.boosting,
+        appliedTick,
+      },
+    };
+    const pendingAtTick = queue.get(appliedTick) ?? [];
+    pendingAtTick.push(accepted);
+    queue.set(appliedTick, pendingAtTick);
+    this.lastQueuedSequence.set(playerId, input.sequence);
+    return { sequence: accepted.sequence, targetTick, appliedTick };
   }
 
   connectionIdForPlayer(playerId: string): string | undefined {
@@ -127,9 +175,25 @@ export class RoomController {
   }
 
   tick(): RoomTickResult {
-    const events = this.engine.step();
+    const tick = this.engine.tick + 1;
+    const inputs: Array<PendingInput> = [];
+    for (const [playerId, queue] of this.pendingInputs) {
+      const pendingAtTick = queue.get(tick);
+      if (pendingAtTick === undefined) continue;
+      queue.delete(tick);
+      inputs.push(...pendingAtTick);
+      if (queue.size === 0) this.pendingInputs.delete(playerId);
+    }
+    inputs.sort(
+      (left, right) =>
+        left.playerId.localeCompare(right.playerId) || left.sequence - right.sequence,
+    );
+    const events = this.engine.step(inputs.map((pending) => pending.input));
+    const appliedInputs = inputs.filter((pending) =>
+      this.engine.handledInputAt(pending.playerId, pending.sequence, pending.appliedTick),
+    );
     const expiredPlayerIds = this.expireDisconnectedPlayers();
-    return { events, expiredPlayerIds };
+    return { events, expiredPlayerIds, appliedInputs };
   }
 
   snapshot(): GameSnapshot {
@@ -146,6 +210,8 @@ export class RoomController {
     for (const playerId of expiredPlayerIds) {
       this.disconnectDeadlineByPlayer.delete(playerId);
       this.nicknameByPlayer.delete(playerId);
+      this.pendingInputs.delete(playerId);
+      this.lastQueuedSequence.delete(playerId);
       this.engine.removeSnake(playerId);
     }
     return expiredPlayerIds;

@@ -208,7 +208,7 @@ export class GameRoom {
       case "input": {
         const accepted = this.controller.applyInput(connection.id, {
           sequence: message.sequence,
-          clientTick: message.clientTick,
+          targetTick: message.targetTick,
           angle: message.angle,
           boosting: message.boosting,
         });
@@ -305,6 +305,19 @@ export class GameRoom {
   private step(): void {
     this.closeExpiredSessions();
     const result = this.controller.tick();
+    for (const input of result.appliedInputs) {
+      const connectionId = this.controller.connectionIdForPlayer(input.playerId);
+      const connection =
+        connectionId === undefined ? undefined : this.connections.get(connectionId);
+      if (connection === undefined) continue;
+      this.send(connection, {
+        v: GAME_PROTOCOL_VERSION,
+        _tag: "input-ack",
+        sequence: input.sequence,
+        targetTick: input.targetTick,
+        appliedTick: input.appliedTick,
+      });
+    }
     this.pendingEvents.push({ tick: this.controller.currentTick, ...result.events });
 
     const snapshotInterval = Math.max(1, Math.round(defaultGameConfig.tickRate / SNAPSHOT_RATE));

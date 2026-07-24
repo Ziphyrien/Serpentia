@@ -10,8 +10,9 @@ import {
   type SnakeSnapshot,
   type TickEventBatch,
 } from "./state";
+import { GAME_PROTOCOL_VERSION } from "./version";
 
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = GAME_PROTOCOL_VERSION;
 const STREAM_FULL_FRAME = 0xf0;
 const STREAM_DELTA_FRAME_BASE = 0xc0;
 const NUMBER_SCALE = 4;
@@ -69,7 +70,7 @@ export function decodeSnapshotMessage(bytes: Uint8Array): SnapshotMessage {
   const { serverTime, tick } = decodeSnapshotMeta(metadata);
   const snakes = compactSnakes.map(decodeSnake);
   return {
-    v: 1,
+    v: GAME_PROTOCOL_VERSION,
     _tag: "snapshot",
     serverTime,
     snapshot: {
@@ -281,7 +282,8 @@ function decodeSnapshotDelta(
   const encodedServerTimeDelta = readSignedVarint(bytes, offset);
   offset = encodedServerTimeDelta.offset;
   const serverTimeDelta =
-    encodedServerTimeDelta.value + (usesPredictedServerTime(frame) ? (previousServerTimeDelta ?? 0) : 0);
+    encodedServerTimeDelta.value +
+    (usesPredictedServerTime(frame) ? (previousServerTimeDelta ?? 0) : 0);
   const tickDelta = usesImplicitTickDelta(frame)
     ? { value: 2, offset }
     : readSignedVarint(bytes, offset);
@@ -317,6 +319,7 @@ function decodeSnapshotDelta(
       invulnerable: (scalars.flags & 4) !== 0,
       respawnAtTick: scalars.respawnAtTick < 0 ? null : scalars.respawnAtTick,
       lastInputSequence: scalars.lastInputSequence,
+      lastInputAppliedTick: scalars.lastInputAppliedTick,
     };
     snakes.push(
       scalars.targetAngle === null
@@ -330,7 +333,7 @@ function decodeSnapshotDelta(
   if (offset !== bytes.length) throw new Error("Trailing snapshot delta data");
 
   return {
-    v: 1,
+    v: GAME_PROTOCOL_VERSION,
     _tag: "snapshot",
     serverTime,
     snapshot: {
@@ -343,11 +346,7 @@ function decodeSnapshotDelta(
   };
 }
 
-function writeSnakeSections(
-  target: Array<number>,
-  scalars: Uint8Array,
-  body: Uint8Array,
-): void {
+function writeSnakeSections(target: Array<number>, scalars: Uint8Array, body: Uint8Array): void {
   if (scalars.length < 15 && body.length < 15 && (scalars.length << 4) + body.length !== 0xff) {
     target.push((scalars.length << 4) | body.length);
   } else {
@@ -404,7 +403,8 @@ function writeTailSections(
   leaderboard: Uint8Array,
   events: Uint8Array,
 ): number {
-  const mask = (foods.length > 0 ? 1 : 0) | (leaderboard.length > 0 ? 2 : 0) | (events.length > 0 ? 4 : 0);
+  const mask =
+    (foods.length > 0 ? 1 : 0) | (leaderboard.length > 0 ? 2 : 0) | (events.length > 0 ? 4 : 0);
   for (const section of [foods, leaderboard, events]) {
     if (section.length === 0) continue;
     writeUnsignedVarint(target, section.length);
@@ -503,10 +503,7 @@ function encodeBodyDelta(
       }
     }
   }
-  const overlap = Math.min(
-    Math.max(0, currentPoints.length - bestShift),
-    previousPoints.length,
-  );
+  const overlap = Math.min(Math.max(0, currentPoints.length - bestShift), previousPoints.length);
   if (bestShift === 0 || bestMatches < Math.min(4, overlap)) {
     return encodeFullBodyDelta(current);
   }
@@ -656,6 +653,7 @@ function decodeSnake(wire: CompactSnake): SnakeSnapshot {
     invulnerable: (scalars.flags & 4) !== 0,
     respawnAtTick: scalars.respawnAtTick < 0 ? null : scalars.respawnAtTick,
     lastInputSequence: scalars.lastInputSequence,
+    lastInputAppliedTick: scalars.lastInputAppliedTick,
   };
   return scalars.targetAngle === null
     ? snake
@@ -672,6 +670,7 @@ interface DecodedSnakeScalars {
   flags: number;
   respawnAtTick: number;
   lastInputSequence: number;
+  lastInputAppliedTick: number;
 }
 
 function encodeSnakeScalars(snake: SnakeSnapshot): Uint8Array {
@@ -697,6 +696,7 @@ function encodeSnakeScalars(snake: SnakeSnapshot): Uint8Array {
   writeUnsignedVarint(bytes, snake.kills * 16 + flags);
   if (snake.respawnAtTick !== null) writeUnsignedVarint(bytes, snake.respawnAtTick);
   writeSignedVarint(bytes, snake.lastInputSequence);
+  writeUnsignedVarint(bytes, snake.lastInputAppliedTick);
   return Uint8Array.from(bytes);
 }
 
@@ -718,7 +718,10 @@ function decodeSnakeScalars(bytes: Uint8Array): DecodedSnakeScalars {
   const respawnAtTick = (packedFlags & 8) !== 0 ? readUnsignedVarint(bytes, offset) : undefined;
   if (respawnAtTick !== undefined) offset = respawnAtTick.offset;
   const lastInputSequence = readSignedVarint(bytes, offset);
-  if (lastInputSequence.offset !== bytes.length) throw new Error("Trailing compact snake scalar data");
+  offset = lastInputSequence.offset;
+  const lastInputAppliedTick = readUnsignedVarint(bytes, offset);
+  if (lastInputAppliedTick.offset !== bytes.length)
+    throw new Error("Trailing compact snake scalar data");
   return {
     angle: angle.value,
     targetAngle:
@@ -732,6 +735,7 @@ function decodeSnakeScalars(bytes: Uint8Array): DecodedSnakeScalars {
     flags: packedFlags & 7,
     respawnAtTick: respawnAtTick === undefined ? -1 : respawnAtTick.value,
     lastInputSequence: lastInputSequence.value,
+    lastInputAppliedTick: lastInputAppliedTick.value,
   };
 }
 
@@ -750,6 +754,7 @@ function scalarValues(snake: SnakeSnapshot): DecodedSnakeScalars {
     flags,
     respawnAtTick: snake.respawnAtTick === null ? -1 : snake.respawnAtTick,
     lastInputSequence: snake.lastInputSequence,
+    lastInputAppliedTick: snake.lastInputAppliedTick,
   };
 }
 
@@ -761,10 +766,7 @@ function encodeTargetAngleCode(angle: number, targetAngle: number | null): numbe
   return zigzagEncode(delta) + 1;
 }
 
-function encodeSnakeScalarsDelta(
-  current: SnakeSnapshot,
-  previous: SnakeSnapshot,
-): Uint8Array {
+function encodeSnakeScalarsDelta(current: SnakeSnapshot, previous: SnakeSnapshot): Uint8Array {
   const next = scalarValues(current);
   const prior = scalarValues(previous);
   const full = encodeSnakeScalars(current);
@@ -781,6 +783,7 @@ function encodeSnakeScalarsDelta(
   if (next.kills !== prior.kills || next.flags !== prior.flags) mask |= 16;
   if (next.respawnAtTick !== prior.respawnAtTick) mask |= 128;
   if (next.lastInputSequence !== prior.lastInputSequence) mask |= 32;
+  if (next.lastInputAppliedTick !== prior.lastInputAppliedTick) mask |= 256;
 
   const delta: Array<number> = [];
   writeUnsignedVarint(delta, mask + 1);
@@ -801,18 +804,18 @@ function encodeSnakeScalarsDelta(
   if ((mask & 32) !== 0) {
     writeSignedVarint(delta, next.lastInputSequence - prior.lastInputSequence);
   }
+  if ((mask & 256) !== 0) {
+    writeSignedVarint(delta, next.lastInputAppliedTick - prior.lastInputAppliedTick);
+  }
   const deltaEncoded = Uint8Array.from(delta);
   return deltaEncoded.length < fullEncoded.length ? deltaEncoded : fullEncoded;
 }
 
-function decodeSnakeScalarsDelta(
-  bytes: Uint8Array,
-  previous: SnakeSnapshot,
-): DecodedSnakeScalars {
+function decodeSnakeScalarsDelta(bytes: Uint8Array, previous: SnakeSnapshot): DecodedSnakeScalars {
   const tag = readUnsignedVarint(bytes, 0);
   if (tag.value === 0) return decodeSnakeScalars(bytes.subarray(tag.offset));
   const mask = tag.value - 1;
-  if (mask > 0xff) throw new Error("Invalid snapshot scalar delta mask");
+  if (mask > 0x1ff) throw new Error("Invalid snapshot scalar delta mask");
 
   let offset = tag.offset;
   const prior = scalarValues(previous);
@@ -863,8 +866,19 @@ function decodeSnakeScalarsDelta(
     offset = sequence.offset;
     next.lastInputSequence = prior.lastInputSequence + sequence.value;
   }
+  if ((mask & 256) !== 0) {
+    const appliedTick = readSignedVarint(bytes, offset);
+    offset = appliedTick.offset;
+    next.lastInputAppliedTick = prior.lastInputAppliedTick + appliedTick.value;
+  }
   if (offset !== bytes.length) throw new Error("Trailing snapshot scalar delta data");
-  if (next.radius < 0 || next.length < 0 || next.score < 0 || next.kills < 0) {
+  if (
+    next.radius < 0 ||
+    next.length < 0 ||
+    next.score < 0 ||
+    next.kills < 0 ||
+    next.lastInputAppliedTick < 0
+  ) {
     throw new Error("Invalid snapshot scalar delta value");
   }
   return next;
@@ -947,7 +961,8 @@ function readUnsignedVarint(bytes: Uint8Array, offset: number): VarintResult {
     value += (byte & 0x7f) * multiplier;
     cursor += 1;
     if ((byte & 0x80) === 0) {
-      if (!Number.isSafeInteger(value)) throw new Error("Compact varint exceeds safe integer range");
+      if (!Number.isSafeInteger(value))
+        throw new Error("Compact varint exceeds safe integer range");
       return { value, offset: cursor };
     }
     multiplier *= 128;
@@ -964,10 +979,7 @@ function encodeFoods(foods: ReadonlyArray<FoodState>): Uint8Array {
     previousId = food.id;
     writeSignedVarint(bytes, quantizeSigned(food.position.x));
     writeSignedVarint(bytes, quantizeSigned(food.position.y));
-    writeUnsignedVarint(
-      bytes,
-      quantizeUnsigned(food.value) * 3 + encodeFoodKind(food.kind),
-    );
+    writeUnsignedVarint(bytes, quantizeUnsigned(food.value) * 3 + encodeFoodKind(food.kind));
   }
   return Uint8Array.from(bytes);
 }
@@ -1030,10 +1042,7 @@ function encodeFoodsDelta(
   return deltaEncoded.length < fullEncoded.length ? deltaEncoded : fullEncoded;
 }
 
-function decodeFoodsDelta(
-  bytes: Uint8Array,
-  previous: ReadonlyArray<FoodState>,
-): Array<FoodState> {
+function decodeFoodsDelta(bytes: Uint8Array, previous: ReadonlyArray<FoodState>): Array<FoodState> {
   if (bytes.length === 0) {
     return previous.map((food) => ({ ...food, position: { ...food.position } }));
   }
@@ -1245,7 +1254,10 @@ function decodeEventsDelta(
   return bytes.length === 0 ? [] : decodeEvents(bytes, snakes);
 }
 
-function decodeEvents(bytes: Uint8Array, snakes: ReadonlyArray<SnakeSnapshot>): Array<TickEventBatch> {
+function decodeEvents(
+  bytes: Uint8Array,
+  snakes: ReadonlyArray<SnakeSnapshot>,
+): Array<TickEventBatch> {
   let offset = 0;
   const count = readUnsignedVarint(bytes, offset);
   offset = count.offset;

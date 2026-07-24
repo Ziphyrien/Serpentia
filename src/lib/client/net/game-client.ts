@@ -62,12 +62,12 @@ export class GameClient {
     return this.socket?.readyState === WebSocket.OPEN;
   }
 
-  sendInput(sequence: number, clientTick: number, angle: number, boosting: boolean): void {
+  sendInput(sequence: number, targetTick: number, angle: number, boosting: boolean): void {
     this.send({
       v: GAME_PROTOCOL_VERSION,
       _tag: "input",
       sequence,
-      clientTick,
+      targetTick,
       angle,
       boosting,
     });

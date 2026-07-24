@@ -78,6 +78,7 @@ export const SnakeSnapshot = Schema.Struct({
     Schema.isGreaterThanOrEqualTo(-1),
     Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER),
   ),
+  lastInputAppliedTick: NonNegativeInteger,
 });
 export type SnakeSnapshot = typeof SnakeSnapshot.Type;
 

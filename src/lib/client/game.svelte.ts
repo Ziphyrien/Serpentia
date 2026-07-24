@@ -9,6 +9,7 @@ import type { PlayerId } from "$lib/protocol/state";
 import { INPUT } from "./config";
 import { ClockSync } from "./net/clock-sync";
 import { GameClient } from "./net/game-client";
+import { PredictionLeadEstimator } from "./net/prediction-lead";
 import { SnapshotBuffer } from "./sim/snapshot-buffer";
 import { SelfPredictor } from "./sim/self-predictor";
 import { InputState } from "./input/input-state";
@@ -67,6 +68,7 @@ export class GameController {
   latestSnapshot: GameSnapshot | undefined;
 
   private readonly clock = new ClockSync();
+  private readonly predictionLead = new PredictionLeadEstimator();
   private readonly buffer = new SnapshotBuffer(() => this.selfId);
   private readonly predictor: SelfPredictor;
   private readonly pointer: PointerInput;
@@ -77,7 +79,6 @@ export class GameController {
   private client: GameClient | undefined;
   private destroyed = false;
   private nextSequence = 0;
-  private lastSnapshotTick = 0;
   private authoritativeInputAngle: number | undefined;
   private lastSentAngle: number | undefined;
   private lastSentBoosting = false;
@@ -203,10 +204,18 @@ export class GameController {
         this.clock.seed(message.serverTime);
         this.handleSnapshot(message.snapshot, message.serverTime, message.events);
         break;
+      case "input-ack":
+        this.predictor.acknowledgeInput(message.sequence, message.targetTick, message.appliedTick);
+        break;
       case "pong": {
         const sentAt = this.pingSentAt.get(message.nonce);
         if (sentAt !== undefined) {
-          this.pingMs = Math.round(this.clock.sample(sentAt, message.serverTime));
+          const rttMs = this.clock.sample(sentAt, message.serverTime);
+          this.pingMs = Math.round(rttMs);
+          this.predictionLead.addRttSample(rttMs);
+          this.predictor.setPredictionLeadTicks(
+            this.predictionLead.leadTicks(this.descriptor.tickRate),
+          );
           this.pingSentAt.delete(message.nonce);
         }
         break;
@@ -231,6 +240,7 @@ export class GameController {
     this.status = "online";
     this.reconnectAttempts = 0;
     this.predictor.reset();
+    this.predictor.setPredictionLeadTicks(this.predictionLead.leadTicks(this.descriptor.tickRate));
     this.buffer.reset();
     this.pingSentAt.clear();
     this.handleSnapshot(message.snapshot, message.serverTime, []);
@@ -244,7 +254,6 @@ export class GameController {
     events: ReadonlyArray<TickEventBatch>,
   ): void {
     this.latestSnapshot = snapshot;
-    this.lastSnapshotTick = snapshot.tick;
     this.buffer.push(snapshot, serverTime);
 
     const selfSnake = snapshot.snakes.find((snake) => snake.id === this.selfId);
@@ -361,7 +370,9 @@ export class GameController {
     }
     if (code === "NICKNAME_IN_USE") this.notice = "昵称被占用，请换一个";
     else if (code === "RATE_LIMITED") this.notice = "操作太频繁，已被限流";
-    else if (!retryable) this.notice = `服务器错误：${code}`;
+    else if (code === "STALE_INPUT") {
+      this.forceInputResend();
+    } else if (!retryable) this.notice = `服务器错误：${code}`;
   }
 
   private handleClose(code: number, reason: string): void {
@@ -412,6 +423,7 @@ export class GameController {
   private scheduleInputSend(): void {
     if (
       this.destroyed ||
+      this.status !== "online" ||
       !this.client?.connected ||
       !this.self.alive ||
       this.pendingInputCommand() === undefined
@@ -433,19 +445,22 @@ export class GameController {
   }
 
   private flushInput(): void {
-    if (!this.client?.connected || !this.self.alive) return;
+    if (this.status !== "online" || !this.client?.connected || !this.self.alive) return;
     const command = this.pendingInputCommand();
     if (!command) return;
 
     this.lastSentAngle = command.angle;
     this.lastSentBoosting = command.boosting;
     this.lastInputSentAt = performance.now();
-    this.client.sendInput(
-      this.nextSequence++,
-      this.lastSnapshotTick,
-      command.angle,
-      command.boosting,
-    );
+    const sequence = this.nextSequence++;
+    const targetTick = this.predictor.nextInputTick;
+    this.predictor.scheduleInput({
+      sequence,
+      targetTick,
+      angle: command.angle,
+      boosting: command.boosting,
+    });
+    this.client.sendInput(sequence, targetTick, command.angle, command.boosting);
   }
 
   private pendingInputCommand(): NetworkInputCommand | undefined {

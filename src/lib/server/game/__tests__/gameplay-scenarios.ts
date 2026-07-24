@@ -5,7 +5,11 @@ import {
   normalizeAccessKey,
 } from "../../access/access-key";
 import { Effect } from "effect";
-import { decodeServerMessage, encodeServerMessage } from "../../../protocol/game";
+import {
+  decodeServerMessage,
+  encodeServerMessage,
+  GAME_PROTOCOL_VERSION,
+} from "../../../protocol/game";
 import { decodeClientMessage } from "../../protocol/client-message";
 import { GameEngine } from "../engine";
 import type { GameSnapshot, SnakeSnapshot } from "../model";
@@ -109,10 +113,10 @@ export const gameplayScenarios: ReadonlyArray<GameplayScenario> = [
       const message = Effect.runSync(
         decodeClientMessage(
           JSON.stringify({
-            v: 1,
+            v: GAME_PROTOCOL_VERSION,
             _tag: "input",
             sequence: 4,
-            clientTick: 0,
+            targetTick: 3,
             angle: 1.2,
             boosting: true,
           }),
@@ -123,13 +127,64 @@ export const gameplayScenarios: ReadonlyArray<GameplayScenario> = [
     },
   },
   {
+    name: "input acknowledgements preserve requested and applied ticks",
+    run: () => {
+      const decoded = Effect.runSync(
+        decodeServerMessage(
+          encodeServerMessage({
+            v: GAME_PROTOCOL_VERSION,
+            _tag: "input-ack",
+            sequence: 4,
+            targetTick: 12,
+            appliedTick: 13,
+          }),
+        ),
+      );
+      requireCondition(decoded._tag === "input-ack", "input ack tag was not decoded");
+      requireCondition(
+        decoded.targetTick === 12 && decoded.appliedTick === 13,
+        "input ack collapsed its tick timeline",
+      );
+    },
+  },
+  {
+    name: "protocol v1 input is rejected after the target-tick upgrade",
+    run: () => {
+      let rejected = false;
+      try {
+        Effect.runSync(
+          decodeClientMessage(
+            JSON.stringify({
+              v: 1,
+              _tag: "input",
+              sequence: 4,
+              targetTick: 3,
+              angle: 1.2,
+              boosting: true,
+            }),
+          ),
+        );
+      } catch {
+        rejected = true;
+      }
+      requireCondition(rejected, "obsolete protocol input was accepted");
+    },
+  },
+  {
     name: "malformed wire messages are rejected before simulation",
     run: () => {
       let rejected = false;
       try {
         Effect.runSync(
           decodeClientMessage(
-            '{"v":1,"_tag":"input","sequence":-1,"clientTick":0,"angle":0,"boosting":false}',
+            JSON.stringify({
+              v: GAME_PROTOCOL_VERSION,
+              _tag: "input",
+              sequence: -1,
+              targetTick: 1,
+              angle: 0,
+              boosting: false,
+            }),
           ),
         );
       } catch {
@@ -144,7 +199,7 @@ export const gameplayScenarios: ReadonlyArray<GameplayScenario> = [
       const engine = new GameEngine(gameConfig(), 1, false);
       engine.addSnake("friend-a", "Alpha", { position: { x: 0, y: 0 }, angle: 0 });
       const encoded = encodeServerMessage({
-        v: 1,
+        v: GAME_PROTOCOL_VERSION,
         _tag: "snapshot",
         serverTime: 1,
         snapshot: engine.snapshot(),

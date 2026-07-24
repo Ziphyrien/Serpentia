@@ -55,6 +55,7 @@ function snapshotOf(state: SnakeMotionState): SnakeSnapshot {
     invulnerable: false,
     respawnAtTick: null,
     lastInputSequence: -1,
+    lastInputAppliedTick: 0,
   };
 }
 
@@ -91,6 +92,12 @@ describe("self prediction", () => {
   it("keeps local turning and boost smooth across fixed ticks", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
+    predictor.scheduleInput({
+      sequence: 1,
+      targetTick: predictor.nextInputTick,
+      angle: Math.PI / 2,
+      boosting: true,
+    });
 
     let previous = predictor.renderState();
     expect(previous).toBeDefined();
@@ -132,6 +139,18 @@ describe("self prediction", () => {
     const initial = snapshotOf(server);
     withSnapshots.reconcile(initial, 0, 0);
     withoutSnapshots.reconcile(initial, 0, 0);
+    withSnapshots.scheduleInput({
+      sequence: 1,
+      targetTick: withSnapshots.nextInputTick,
+      angle: Math.PI / 2,
+      boosting: false,
+    });
+    withoutSnapshots.scheduleInput({
+      sequence: 1,
+      targetTick: withoutSnapshots.nextInputTick,
+      angle: Math.PI / 2,
+      boosting: false,
+    });
 
     for (let now = 5; now <= 800; now += 5) {
       if (now % TICK_MS === 0) {
@@ -146,12 +165,44 @@ describe("self prediction", () => {
     }
   });
 
+  it("does not overwrite a replayed future target after direction is released", () => {
+    const withSnapshot = new SelfPredictor(rules, TICK_RATE);
+    const baseline = new SelfPredictor(rules, TICK_RATE);
+    const server = initialMotion();
+    withSnapshot.reconcile(snapshotOf(server), 0, 0);
+    baseline.reconcile(snapshotOf(server), 0, 0);
+    for (const predictor of [withSnapshot, baseline]) {
+      predictor.scheduleInput({
+        sequence: 1,
+        targetTick: 3,
+        angle: Math.PI / 2,
+        boosting: false,
+      });
+      predictor.advance(100, undefined, false);
+    }
+    stepMotion(server, 0, false);
+    stepMotion(server, 0, false);
+    withSnapshot.reconcile(snapshotOf(server), 2, 100);
+
+    withSnapshot.advance(150, undefined, false);
+    baseline.advance(150, undefined, false);
+    expectSamePose(baseline.renderState()!, withSnapshot.renderState()!);
+  });
+
   it("applies authoritative length without moving the head", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     const server = initialMotion();
     predictor.reconcile(snapshotOf(server), 0, 0);
+    predictor.scheduleInput({
+      sequence: 1,
+      targetTick: predictor.nextInputTick,
+      angle: Math.PI / 2,
+      boosting: false,
+    });
     predictor.advance(100, Math.PI / 2, false);
     const before = predictor.renderState();
+    stepMotion(server, 0, false);
+    stepMotion(server, 0, false);
     server.length = 80;
 
     predictor.reconcile(snapshotOf(server), 2, 100);
@@ -181,7 +232,75 @@ describe("self prediction", () => {
       { x: 100, y: 0 },
     ];
     predictor.reconcile(snapshotOf(farAway), 1, 50);
-    expect(head(predictor.renderState()!).x).toBe(200);
+    expect(head(predictor.renderState()!).x).toBe(210);
+  });
+
+  it("keeps an applied ack input available until its target tick is simulated", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    const server = initialMotion();
+    predictor.reconcile(snapshotOf(server), 0, 0);
+    const targetTick = predictor.nextInputTick;
+    predictor.scheduleInput({
+      sequence: 1,
+      targetTick,
+      angle: Math.PI / 2,
+      boosting: false,
+    });
+    predictor.acknowledgeInput(1, targetTick, targetTick);
+    predictor.advance(50, Math.PI / 2, false);
+
+    stepMotion(server, 0, false);
+    stepMotion(server, 0, false);
+    stepMotion(server, Math.PI / 2, false);
+    expect(head(predictor.renderState()!).x).toBeCloseTo(head(server).x, 8);
+    expect(head(predictor.renderState()!).y).toBeCloseTo(head(server).y, 8);
+  });
+
+  it("remaps a late input and replays to the same authoritative head pose", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    const server = initialMotion();
+    predictor.reconcile(snapshotOf(server), 0, 0);
+    predictor.scheduleInput({
+      sequence: 1,
+      targetTick: 3,
+      angle: Math.PI / 2,
+      boosting: false,
+    });
+    predictor.advance(100, Math.PI / 2, false);
+
+    stepMotion(server, 0, false);
+    stepMotion(server, 0, false);
+    stepMotion(server, 0, false);
+    stepMotion(server, Math.PI / 2, false);
+    predictor.acknowledgeInput(1, 3, 4);
+    const replayed = predictor.renderState()!;
+    expect(head(replayed).x).toBeCloseTo(head(server).x, 8);
+    expect(head(replayed).y).toBeCloseTo(head(server).y, 8);
+
+    const authoritative = {
+      ...snapshotOf(server),
+      lastInputSequence: 1,
+      lastInputAppliedTick: 4,
+    };
+    predictor.reconcile(authoritative, 4, 100);
+    const afterSnapshot = predictor.renderState()!;
+    expect(head(afterSnapshot).x).toBeCloseTo(head(replayed).x, 8);
+    expect(head(afterSnapshot).y).toBeCloseTo(head(replayed).y, 8);
+  });
+
+  it("overwrites one target tick without increasing the prediction lead", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
+    const targetTick = predictor.nextInputTick;
+    predictor.scheduleInput({ sequence: 1, targetTick, angle: 0, boosting: false });
+    expect(predictor.nextInputTick).toBe(targetTick);
+    predictor.scheduleInput({
+      sequence: 2,
+      targetTick: predictor.nextInputTick,
+      angle: Math.PI / 2,
+      boosting: true,
+    });
+    expect(predictor.nextInputTick).toBe(targetTick);
   });
 
   it("initializes a respawn from its new authoritative pose", () => {
@@ -199,6 +318,9 @@ describe("self prediction", () => {
       { x: 300, y: 300 },
     ];
     predictor.reconcile(snapshotOf(respawned), 3, 150);
-    expectSamePose(respawned, predictor.renderState()!);
+    const respawnedFuture = { ...respawned, body: respawned.body.map((point) => ({ ...point })) };
+    stepMotion(respawnedFuture, respawnedFuture.targetAngle, false);
+    stepMotion(respawnedFuture, respawnedFuture.targetAngle, false);
+    expectSamePose(respawnedFuture, predictor.renderState()!);
   });
 });

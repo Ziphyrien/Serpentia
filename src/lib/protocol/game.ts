@@ -5,10 +5,10 @@ import {
   type SnapshotStreamDecoder,
 } from "./snapshot-codec";
 import { GameSnapshot, PlayerId, TickEventBatch, VoiceParticipant } from "./state";
+import { GAME_PROTOCOL_VERSION } from "./version";
 
 export { SnapshotStreamDecoder, SnapshotStreamEncoder } from "./snapshot-codec";
-
-export const GAME_PROTOCOL_VERSION = 1;
+export { GAME_PROTOCOL_VERSION } from "./version";
 export const MAX_CLIENT_MESSAGE_BYTES = 65_536;
 export const MAX_INPUT_MESSAGES_PER_SECOND = 40;
 export const MAX_VOICE_SIGNALS_PER_SECOND = 64;
@@ -31,9 +31,17 @@ const OptionalMLineIndex = Schema.NullOr(
 export class InputMessage extends Schema.TaggedClass<InputMessage>()("input", {
   v: ProtocolVersion,
   sequence: InputSequence,
-  clientTick: NonNegativeInteger,
+  /** Authoritative tick at which this input should take effect. */
+  targetTick: NonNegativeInteger,
   angle: Schema.Finite,
   boosting: Schema.Boolean,
+}) {}
+
+export class InputAckMessage extends Schema.TaggedClass<InputAckMessage>()("input-ack", {
+  v: ProtocolVersion,
+  sequence: InputSequence,
+  targetTick: NonNegativeInteger,
+  appliedTick: NonNegativeInteger,
 }) {}
 
 export class PingMessage extends Schema.TaggedClass<PingMessage>()("ping", {
@@ -226,6 +234,7 @@ export type ServerErrorMessage = typeof ServerErrorMessage.Type;
 export const ServerMessage = Schema.Union([
   WelcomeMessage,
   SnapshotMessage,
+  InputAckMessage,
   VoiceRosterMessage,
   VoiceSignalForwardMessage,
   PongMessage,

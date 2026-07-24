@@ -43,6 +43,47 @@ function latestRoster(
 }
 
 describe("game room voice membership", () => {
+  it("sends input acknowledgement only after the authoritative tick executes", async () => {
+    const room = new GameRoom();
+    const alpha = connection("connection-a", "friend-a", "Alpha");
+
+    try {
+      room.connect(alpha.connection);
+      room.receive(
+        alpha.connection.id,
+        JSON.stringify({
+          v: GAME_PROTOCOL_VERSION,
+          _tag: "input",
+          sequence: 1,
+          targetTick: 3,
+          angle: Math.PI / 2,
+          boosting: false,
+        }),
+      );
+      expect(
+        alpha.sent.some((wire) =>
+          typeof wire === "string"
+            ? Effect.runSync(decodeServerMessage(wire))._tag === "input-ack"
+            : false,
+        ),
+      ).toBe(false);
+
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      const acknowledgements = alpha.sent
+        .filter((wire): wire is string => typeof wire === "string")
+        .map((wire) => Effect.runSync(decodeServerMessage(wire)))
+        .filter((message) => message._tag === "input-ack");
+      expect(acknowledgements).toHaveLength(1);
+      expect(acknowledgements[0]).toMatchObject({
+        sequence: 1,
+        targetTick: 3,
+        appliedTick: 3,
+      });
+    } finally {
+      room.dispose();
+    }
+  });
+
   it("keeps ordinary players out of voice until they explicitly join", () => {
     const room = new GameRoom();
     const alpha = connection("connection-a", "friend-a", "Alpha");

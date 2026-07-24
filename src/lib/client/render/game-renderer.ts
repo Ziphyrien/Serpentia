@@ -8,6 +8,7 @@ import { ArenaLayer } from "./arena-layer";
 import { FoodLayer } from "./food-layer";
 import { SnakeLayer, type SnakeRenderView } from "./snake-layer";
 import { FxLayer } from "./fx-layer";
+import { FoodSpeculation } from "../sim/food-speculation";
 
 /**
  * 渲染编排器：拥有 Pixi Application 与所有图层，
@@ -23,6 +24,7 @@ export class GameRenderer {
   private food: FoodLayer | undefined;
   private snakes: SnakeLayer | undefined;
   private fx: FxLayer | undefined;
+  private readonly foodSpeculation = new FoodSpeculation();
   private started = false;
   private destroyed = false;
   private trailAccumulator = 0;
@@ -85,6 +87,7 @@ export class GameRenderer {
 
   /** 食物被吃：闪光 + 就近音效（由控制器在事件到达时调用）。 */
   foodConsumed(foodId: number): void {
+    this.foodSpeculation.confirm(foodId);
     const position = this.food?.positionOf(foodId);
     if (!position) return;
     const selfHead = this.selfHead();
@@ -120,6 +123,7 @@ export class GameRenderer {
     this.destroyed = true;
     this.unsubscribeSettings();
     this.app?.renderer.off("resize", this.handleResize);
+    this.foodSpeculation.reset();
     this.snakes?.destroy();
     this.food?.destroy();
     this.fx?.destroy();
@@ -230,8 +234,25 @@ export class GameRenderer {
     // 4. 图层同步
     const viewBounds = this.camera.viewBounds(width, height);
     const nowMs = performance.now();
-    if (controller.latestSnapshot)
-      this.food.sync(controller.latestSnapshot.foods, viewBounds, nowMs);
+    const latestSnapshot = controller.latestSnapshot;
+    if (latestSnapshot) {
+      const hiddenFoods = this.foodSpeculation.update({
+        foods: latestSnapshot.foods,
+        authoritativeTick: latestSnapshot.tick,
+        predictedTick: selfState?.collisionTick ?? latestSnapshot.tick,
+        head: selfHead,
+        predictedHeadAtTick: (tick) =>
+          tick === selfState?.collisionTick
+            ? selfState.collisionHead
+            : controller.selfPredictor.headAtTick(tick),
+        snakeRadius: selfSnapshot?.radius ?? 0,
+        foodRadius: controller.descriptor.rules.foodRadius,
+        alive: selfAlive,
+      });
+      this.food.sync(latestSnapshot.foods, viewBounds, nowMs, hiddenFoods);
+    } else {
+      this.foodSpeculation.reset();
+    }
     this.snakes.update(views, viewBounds, this.settings.showNicknames, nowMs);
     this.fx.update(deltaMS);
 

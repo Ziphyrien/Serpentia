@@ -19,6 +19,8 @@ interface FoodRecord {
   phase: number;
 }
 
+const NO_HIDDEN_FOODS: ReadonlySet<number> = new Set();
+
 /**
  * 食物层：精灵对象池 + 视口裁剪 + 呼吸动画。
  * 无纹理时降级为程序化发光圆点。
@@ -42,7 +44,12 @@ export class FoodLayer {
     return record ? { x: record.x, y: record.y, kind: record.kind } : undefined;
   }
 
-  sync(foods: ReadonlyArray<FoodState>, view: ViewBounds, nowMs: number): void {
+  sync(
+    foods: ReadonlyArray<FoodState>,
+    view: ViewBounds,
+    nowMs: number,
+    hiddenFoodIds: ReadonlySet<number> = NO_HIDDEN_FOODS,
+  ): void {
     const seen = new Set<number>();
     for (const food of foods) {
       seen.add(food.id);
@@ -56,6 +63,7 @@ export class FoodLayer {
       const node = record.sprite ?? record.fallback;
       if (!node) continue;
       const visible =
+        !hiddenFoodIds.has(food.id) &&
         food.position.x > view.left &&
         food.position.x < view.right &&
         food.position.y > view.top &&

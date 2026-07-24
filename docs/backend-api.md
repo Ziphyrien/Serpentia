@@ -125,13 +125,13 @@ wss://<host>/api/parties/game-room/friends
 
 浏览器会自动携带 HttpOnly 会话 cookie。后端忽略客户端伪造的身份 header，并根据签名会话注入 `playerId` 和昵称。
 
-所有 JSON 消息必须包含：
+所有客户端 JSON 消息必须包含：
 
 ```json
-{ "v": 1, "_tag": "..." }
+{ "v": 2, "_tag": "..." }
 ```
 
-当前单条消息上限为 65,536 bytes。只接受文本帧。
+当前单条客户端消息上限为 65,536 bytes，客户端只发送文本帧。服务端控制消息使用 JSON 文本，10 Hz `snapshot` 使用快照格式 v2 的有状态二进制 keyframe/delta。
 
 ### 客户端消息
 
@@ -139,33 +139,46 @@ wss://<host>/api/parties/game-room/friends
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "_tag": "input",
   "sequence": 42,
-  "clientTick": 1200,
+  "targetTick": 1203,
   "angle": 1.5707963267948966,
   "boosting": true
 }
 ```
 
 - `sequence` 必须单调递增，且不超过 JavaScript 安全整数
-- `clientTick` 应填写客户端最近一次收到的权威 `snapshot.tick`；过旧或超前输入会被拒绝
+- `targetTick` 是输入应生效的权威 tick；过旧输入会在下一个可执行 tick 生效，超出未来窗口的输入会被拒绝
 - `angle` 是有限弧度值
 - 客户端只提交意图；实际转向、速度和加速消耗由服务器决定
 - 每个连接最多 40 条输入消息/秒
-- `SnakeSnapshot.lastInputSequence` 是服务端确认序号，可用于客户端预测回滚；重连后新序号必须从该值继续递增
+- 服务端真正处理输入后发送 `input-ack`；`targetTick` 保留请求值，`appliedTick` 给出实际生效 tick
+- `SnakeSnapshot.lastInputSequence` 与 `lastInputAppliedTick` 构成权威确认点；重连后新序号必须从确认序号继续递增
 - `SnakeSnapshot.targetAngle` 是服务端当前转向目标；客户端从权威快照回放时应以它为起点，不能只用当前 `angle` 猜测下一 tick
+
+输入执行确认：
+
+```json
+{
+  "v": 2,
+  "_tag": "input-ack",
+  "sequence": 42,
+  "targetTick": 1203,
+  "appliedTick": 1204
+}
+```
 
 心跳：
 
 ```json
-{ "v": 1, "_tag": "ping", "nonce": "client-value" }
+{ "v": 2, "_tag": "ping", "nonce": "client-value" }
 ```
 
 麦克风成员状态：
 
 ```json
-{ "v": 1, "_tag": "voice-state", "joined": true, "muted": false }
+{ "v": 2, "_tag": "voice-state", "joined": true, "muted": false }
 ```
 
 `joined=false` 会离开语音 roster；`joined=true` 时 `muted` 更新静音状态。前端仍必须实际启用、禁用或停止本地音轨。
@@ -174,7 +187,7 @@ P2P 信令：
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "_tag": "voice-signal",
   "targetPlayerId": "friend-b",
   "signal": { "_tag": "offer", "sdp": "..." }
@@ -183,7 +196,7 @@ P2P 信令：
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "_tag": "voice-signal",
   "targetPlayerId": "friend-a",
   "signal": { "_tag": "answer", "sdp": "..." }
@@ -192,7 +205,7 @@ P2P 信令：
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "_tag": "voice-signal",
   "targetPlayerId": "friend-b",
   "signal": {
@@ -213,7 +226,7 @@ ICE 收集结束时允许 `candidate: null`。后端只向已认证且在线的�
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "_tag": "welcome",
   "selfPlayerId": "friend-a",
   "resumed": false,
@@ -225,11 +238,11 @@ ICE 收集结束时允许 `candidate: null`。后端只向已认证且在线的�
 }
 ```
 
-之后通常以 10Hz 收到 `snapshot`：
+之后通常以 10Hz 收到二进制 `snapshot`；解码后的逻辑结构如下：
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "_tag": "snapshot",
   "serverTime": 1784740000100,
   "snapshot": {},

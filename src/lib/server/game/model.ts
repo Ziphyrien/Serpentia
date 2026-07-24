@@ -26,6 +26,7 @@ export interface SnakeState {
   respawnAtTick: number | undefined;
   invulnerableUntilTick: number;
   lastInputSequence: number;
+  lastInputAppliedTick: number;
 }
 
 export interface PlayerInput {
@@ -33,4 +34,5 @@ export interface PlayerInput {
   readonly sequence: number;
   readonly angle: number;
   readonly boosting: boolean;
+  readonly appliedTick?: number;
 }

@@ -77,6 +77,7 @@ export class GameEngine {
       respawnAtTick: undefined,
       invulnerableUntilTick: this.currentTick + (options.invulnerabilityTicks ?? 0),
       lastInputSequence: -1,
+      lastInputAppliedTick: 0,
     };
     this.snakes.set(playerId, snake);
     const insertionIndex = this.orderedSnakes.findIndex(
@@ -131,15 +132,27 @@ export class GameEngine {
     if (!Number.isFinite(input.angle)) return false;
 
     snake.lastInputSequence = input.sequence;
+    snake.lastInputAppliedTick = input.appliedTick ?? this.currentTick + 1;
     snake.targetAngle = input.angle;
     snake.boosting = input.boosting;
     return true;
   }
 
+  handledInputAt(playerId: string, sequence: number, appliedTick: number): boolean {
+    const snake = this.snakes.get(playerId);
+    return (
+      snake !== undefined &&
+      snake.lastInputSequence >= sequence &&
+      snake.lastInputAppliedTick === appliedTick
+    );
+  }
+
   step(inputs: ReadonlyArray<PlayerInput> = []): TickEvents {
     this.currentTick += 1;
     const respawnedPlayerIds = this.respawnReadySnakes();
-    for (const input of inputs) this.applyInput(input);
+    for (const input of inputs) {
+      this.applyInput({ ...input, appliedTick: input.appliedTick ?? this.currentTick });
+    }
 
     this.moveAliveSnakes();
     const deaths = this.resolveDeaths();
@@ -167,6 +180,7 @@ export class GameEngine {
         invulnerable: snake.alive && snake.invulnerableUntilTick >= this.currentTick,
         respawnAtTick: snake.respawnAtTick ?? null,
         lastInputSequence: snake.lastInputSequence,
+        lastInputAppliedTick: snake.lastInputAppliedTick,
       }));
 
     const leaderboard = snakes
