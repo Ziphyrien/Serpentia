@@ -21,9 +21,13 @@ export interface SelfRenderState {
   readonly boosting: boolean;
 }
 
-export interface SelfPositionCorrection {
+interface PositionDelta {
   readonly x: number;
   readonly y: number;
+}
+
+export interface SelfPositionCorrection extends PositionDelta {
+  readonly mode: "smooth" | "snap";
 }
 
 const MAX_FRAME_CATCH_UP_TICKS = 8;
@@ -36,10 +40,9 @@ const MINIMUM_CORRECTION_SQUARED = 1e-8;
  *
  * Movement and steering advance from a monotonic local clock. Recent predicted
  * heads are retained by server tick so an authoritative snapshot can correct
- * the same point in time. Reconciliation translates the predicted body without
- * replacing its local angle; the renderer applies the same translation to the
- * camera, keeping steering visually continuous while restoring the authoritative
- * head-to-food coordinate relationship.
+ * the same point in time. Reconciliation translates the simulation without
+ * replacing its local angle. The renderer then removes that translation from
+ * the current picture and lets only the positional error converge smoothly.
  */
 export class SelfPredictor {
   private current: PredictedStep | undefined;
@@ -67,11 +70,7 @@ export class SelfPredictor {
     return this.current?.length ?? 0;
   }
 
-  /**
-   * Aligns local position with the authoritative state at the same server tick.
-   * The returned translation must also be applied to the camera in the same
-   * turn, otherwise a correct reconciliation would look like a head snap.
-   */
+  /** Aligns local position with the authoritative state at the same server tick. */
   reconcile(
     snapshot: SnakeSnapshot,
     snapshotTick: number,
@@ -97,7 +96,8 @@ export class SelfPredictor {
           y: snapshotHead.y - predictedAtSnapshot.y,
         }
       : undefined;
-    let correction: SelfPositionCorrection | undefined;
+    let correction: PositionDelta | undefined;
+    let correctionMode: SelfPositionCorrection["mode"] = "smooth";
 
     if (
       predictedCorrection &&
@@ -112,9 +112,10 @@ export class SelfPredictor {
         this.headByTick.set(snapshotTick, { x: snapshotHead.x, y: snapshotHead.y });
       }
     } else {
+      correctionMode = "snap";
       // A suspended tab or a long snapshot gap can move the authoritative tick
-      // outside retained history. Rebuild from authority, but compensate using
-      // the actually rendered fractional pose rather than the last fixed tick.
+      // outside retained history. Rebuild from authority and mark the correction
+      // as a snap so presentation does not drag a huge offset across the arena.
       const visibleBefore = this.renderState();
       const localAngle = visibleBefore?.angle ?? current.angle;
       const localTargetAngle = current.targetAngle;
@@ -132,7 +133,7 @@ export class SelfPredictor {
     }
 
     const reconciled = this.current;
-    if (!reconciled) return meaningfulCorrection(correction);
+    if (!reconciled) return presentCorrection(correction, correctionMode);
 
     if (this.latestIntent.angle === undefined) {
       reconciled.targetAngle = snapshot.targetAngle ?? snapshot.angle;
@@ -145,7 +146,7 @@ export class SelfPredictor {
       trimBody(reconciled.body, reconciled.length);
     }
 
-    return meaningfulCorrection(correction);
+    return presentCorrection(correction, correctionMode);
   }
 
   /** Reinitializes local prediction after a new/reconnected session. */
@@ -239,7 +240,7 @@ export class SelfPredictor {
     return head ? { x: head.x, y: head.y } : undefined;
   }
 
-  private translatePrediction(correction: SelfPositionCorrection, fromTick: number): void {
+  private translatePrediction(correction: PositionDelta, fromTick: number): void {
     const current = this.current;
     if (!current) return;
     for (const point of current.body) {
@@ -254,12 +255,16 @@ export class SelfPredictor {
   }
 }
 
-function meaningfulCorrection(
-  correction: SelfPositionCorrection | undefined,
+function presentCorrection(
+  correction: PositionDelta | undefined,
+  mode: SelfPositionCorrection["mode"],
 ): SelfPositionCorrection | undefined {
+  if (mode === "snap") {
+    return { x: correction?.x ?? 0, y: correction?.y ?? 0, mode };
+  }
   if (!correction) return undefined;
   return correction.x * correction.x + correction.y * correction.y > MINIMUM_CORRECTION_SQUARED
-    ? correction
+    ? { ...correction, mode }
     : undefined;
 }
 

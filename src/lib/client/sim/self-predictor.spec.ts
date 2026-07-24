@@ -143,7 +143,7 @@ describe("self prediction", () => {
 
     const correction = predictor.reconcile(snapshotOf(server), 1, 49);
     const after = predictor.renderState();
-    expect(correction).toBeDefined();
+    expect(correction?.mode).toBe("smooth");
     expect(after).toBeDefined();
     expect(after!.angle).toBeCloseTo(before!.angle, 8);
     expect(after!.body).toHaveLength(before!.body.length);
@@ -164,7 +164,7 @@ describe("self prediction", () => {
     for (let tick = 0; tick < 10; tick += 1) stepMotion(server, 0, false);
     const correction = predictor.reconcile(snapshotOf(server), 10, 49);
     const after = predictor.renderState();
-    expect(correction).toBeDefined();
+    expect(correction?.mode).toBe("snap");
     expect(after).toBeDefined();
     expect(after!.angle).toBeCloseTo(before!.angle, 8);
     expect(head(after!).x - head(before!).x).toBeCloseTo(correction!.x, 8);
@@ -263,7 +263,8 @@ describe("self prediction", () => {
       { x: 200, y: 0 },
       { x: 100, y: 0 },
     ];
-    predictor.reconcile(snapshotOf(farAway), 1, 50);
+    const correction = predictor.reconcile(snapshotOf(farAway), 1, 50);
+    expect(correction?.mode).toBe("snap");
     expect(head(predictor.renderState()!).x).toBe(200);
   });
 

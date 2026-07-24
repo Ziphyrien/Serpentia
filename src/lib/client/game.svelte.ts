@@ -252,7 +252,7 @@ export class GameController {
       const wasAlive = this.self.alive;
       this.authoritativeInputAngle = selfSnake.targetAngle ?? selfSnake.angle;
       const correction = this.predictor.reconcile(selfSnake, snapshot.tick, performance.now());
-      if (correction) this.renderer?.compensateSelfPosition(correction.x, correction.y);
+      if (correction) this.renderer?.applySelfPositionCorrection(correction);
       const becameAlive = selfSnake.alive && !wasAlive;
       const respawnReported = events.some((batch) =>
         batch.respawnedPlayerIds.includes(selfSnake.id),
