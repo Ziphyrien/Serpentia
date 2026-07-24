@@ -129,6 +129,72 @@ describe("self prediction", () => {
     expect(head(after!).y - head(before!).y).toBeCloseTo(correction!.y, 8);
   });
 
+  it("keeps the fractional pose when authority is one tick ahead", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    const server = initialMotion();
+    predictor.reconcile(snapshotOf(server), 0, 0);
+
+    // The WebSocket callback runs just before the 50 ms fixed step. Rendering
+    // is already 98% of the way to tick 1 even though tick 1 is not in history.
+    predictor.advance(49, Math.PI / 2, false);
+    const before = predictor.renderState();
+    expect(before).toBeDefined();
+    stepMotion(server, 0, false);
+
+    const correction = predictor.reconcile(snapshotOf(server), 1, 49);
+    const after = predictor.renderState();
+    expect(correction).toBeDefined();
+    expect(after).toBeDefined();
+    expect(after!.angle).toBeCloseTo(before!.angle, 8);
+    expect(after!.body).toHaveLength(before!.body.length);
+    for (let index = 0; index < before!.body.length; index += 1) {
+      expect(after!.body[index].x - before!.body[index].x).toBeCloseTo(correction!.x, 8);
+      expect(after!.body[index].y - before!.body[index].y).toBeCloseTo(correction!.y, 8);
+    }
+  });
+
+  it("measures discontinuity recovery from the visible fractional head", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    const server = initialMotion();
+    predictor.reconcile(snapshotOf(server), 0, 0);
+    predictor.advance(49, Math.PI / 2, false);
+    const before = predictor.renderState();
+    expect(before).toBeDefined();
+
+    for (let tick = 0; tick < 10; tick += 1) stepMotion(server, 0, false);
+    const correction = predictor.reconcile(snapshotOf(server), 10, 49);
+    const after = predictor.renderState();
+    expect(correction).toBeDefined();
+    expect(after).toBeDefined();
+    expect(after!.angle).toBeCloseTo(before!.angle, 8);
+    expect(head(after!).x - head(before!).x).toBeCloseTo(correction!.x, 8);
+    expect(head(after!).y - head(before!).y).toBeCloseTo(correction!.y, 8);
+  });
+
+  it("does not rebuild the pose when each 10 Hz snapshot leads fixed history", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    const server = initialMotion();
+    predictor.reconcile(snapshotOf(server), 0, 0);
+
+    for (let snapshotIndex = 1; snapshotIndex <= 8; snapshotIndex += 1) {
+      const now = snapshotIndex * 100 - 1;
+      predictor.advance(now, Math.PI / 2, false);
+      stepMotion(server, snapshotIndex === 1 ? 0 : Math.PI / 2, false);
+      stepMotion(server, snapshotIndex === 1 ? 0 : Math.PI / 2, false);
+      const before = predictor.renderState();
+      const correction = predictor.reconcile(snapshotOf(server), snapshotIndex * 2, now);
+      const after = predictor.renderState();
+      expect(before).toBeDefined();
+      expect(after).toBeDefined();
+      expect(after!.angle).toBeCloseTo(before!.angle, 8);
+      expect(after!.body).toHaveLength(before!.body.length);
+      for (let index = 0; index < before!.body.length; index += 1) {
+        expect(after!.body[index].x - before!.body[index].x).toBeCloseTo(correction?.x ?? 0, 8);
+        expect(after!.body[index].y - before!.body[index].y).toBeCloseTo(correction?.y ?? 0, 8);
+      }
+    }
+  });
+
   it("keeps repeated authoritative corrections from changing a continuous turn", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     const server = initialMotion();

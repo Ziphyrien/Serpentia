@@ -27,6 +27,7 @@ export interface SelfPositionCorrection {
 }
 
 const MAX_FRAME_CATCH_UP_TICKS = 8;
+const MAX_AUTHORITY_LEAD_TICKS = 4;
 const POSITION_HISTORY_TICKS = 64;
 const MINIMUM_CORRECTION_SQUARED = 1e-8;
 
@@ -48,12 +49,14 @@ export class SelfPredictor {
   private latestIntent: InputIntent = { boosting: false };
   private alive = false;
   private readonly headByTick = new Map<number, MotionPoint>();
+  private readonly rebaseDistance: number;
 
   constructor(
     private readonly rules: ClientGameRules,
     tickRate: number,
   ) {
     this.tickMs = 1000 / tickRate;
+    this.rebaseDistance = Math.max(80, rules.boostSpeed * 0.5);
   }
 
   get isAlive(): boolean {
@@ -86,31 +89,46 @@ export class SelfPredictor {
       return undefined;
     }
 
-    const predictedAtSnapshot = this.headByTick.get(snapshotTick);
+    const recordedHead = this.headByTick.get(snapshotTick);
+    const predictedAtSnapshot = recordedHead ?? this.projectHead(snapshotTick);
+    const predictedCorrection = predictedAtSnapshot
+      ? {
+          x: snapshotHead.x - predictedAtSnapshot.x,
+          y: snapshotHead.y - predictedAtSnapshot.y,
+        }
+      : undefined;
     let correction: SelfPositionCorrection | undefined;
 
-    if (predictedAtSnapshot) {
-      correction = {
-        x: snapshotHead.x - predictedAtSnapshot.x,
-        y: snapshotHead.y - predictedAtSnapshot.y,
-      };
-      this.translatePrediction(correction, snapshotTick);
-      this.headByTick.set(snapshotTick, { x: snapshotHead.x, y: snapshotHead.y });
+    if (
+      predictedCorrection &&
+      Math.hypot(predictedCorrection.x, predictedCorrection.y) <= this.rebaseDistance
+    ) {
+      correction = predictedCorrection;
+      // A snapshot commonly arrives just before the render ticker completes the
+      // same local tick. Projecting that tick and translating the existing pose
+      // keeps the fractional render phase intact instead of rebuilding at 10 Hz.
+      this.translatePrediction(correction, Math.min(snapshotTick, current.tick));
+      if (recordedHead) {
+        this.headByTick.set(snapshotTick, { x: snapshotHead.x, y: snapshotHead.y });
+      }
     } else {
       // A suspended tab or a long snapshot gap can move the authoritative tick
-      // outside retained history. Rebuild position/body, but preserve an active
-      // local steering angle so recovery does not jerk the head backwards.
-      const oldHead = current.body[0];
-      const localAngle = current.angle;
+      // outside retained history. Rebuild from authority, but compensate using
+      // the actually rendered fractional pose rather than the last fixed tick.
+      const visibleBefore = this.renderState();
+      const localAngle = visibleBefore?.angle ?? current.angle;
       const localTargetAngle = current.targetAngle;
       this.initialize(snapshot, snapshotTick, localNow);
       if (this.latestIntent.angle !== undefined && this.current) {
         this.current.angle = localAngle;
         this.current.targetAngle = localTargetAngle;
       }
-      correction = oldHead
-        ? { x: snapshotHead.x - oldHead.x, y: snapshotHead.y - oldHead.y }
-        : undefined;
+      const beforeHead = visibleBefore?.body[0];
+      const afterHead = this.renderState()?.body[0];
+      correction =
+        beforeHead && afterHead
+          ? { x: afterHead.x - beforeHead.x, y: afterHead.y - beforeHead.y }
+          : undefined;
     }
 
     const reconciled = this.current;
@@ -203,6 +221,22 @@ export class SelfPredictor {
       if (tick >= minimumTick) break;
       this.headByTick.delete(tick);
     }
+  }
+
+  private projectHead(snapshotTick: number): MotionPoint | undefined {
+    const current = this.current;
+    if (!current) return undefined;
+    const leadTicks = snapshotTick - current.tick;
+    if (leadTicks <= 0 || leadTicks > MAX_AUTHORITY_LEAD_TICKS) return undefined;
+
+    const projected = cloneStep(current, current.tick);
+    for (let tick = current.tick + 1; tick <= snapshotTick; tick += 1) {
+      applyIntent(projected, this.latestIntent);
+      advanceSnakeMotion(projected, this.rules, this.tickMs / 1000);
+      projected.tick = tick;
+    }
+    const head = projected.body[0];
+    return head ? { x: head.x, y: head.y } : undefined;
   }
 
   private translatePrediction(correction: SelfPositionCorrection, fromTick: number): void {
