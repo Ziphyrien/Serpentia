@@ -5,4 +5,6 @@ local.properties
 captures/
 *.jks
 *.keystore
+*.p12
 signing.properties
+serpentia-release.properties

@@ -55,15 +55,48 @@ android\app\build\outputs\apk\debug\app-debug.apk
 
 debug 构建只允许 `10.0.2.2`、`localhost` 和 `127.0.0.1` 使用 HTTP；其他服务器地址必须使用 HTTPS。真机调试推荐使用上面的 `adb reverse`，不开放整个局域网的明文流量。
 
-## 发布构建
+## Release 签名与构建
 
-release 构建拒绝明文 HTTP，必须传入实际 HTTPS 地址：
+首次生成长期 release key：
 
 ```powershell
-.\gradlew-d.bat assembleRelease -PSERPENTIA_APP_URL=https://game.example.com
+powershell -ExecutionPolicy Bypass -File .\tools\create-release-keystore-d.ps1
 ```
 
-当前 release APK 未配置签名；正式分发前应将 keystore 放到 `D:\Android\keystores`，不要提交密钥或密码。应用只允许服务器同源页面留在 WebView 中，外部链接交给系统浏览器；麦克风权限也只会授予配置的服务器 origin。
+私钥和密码分别保存在：
+
+```text
+D:\Android\keystores\serpentia-release.p12
+D:\Android\keystores\serpentia-release.properties
+```
+
+它们不会进入 Git。**发布前必须把这两个文件一起加密备份到另一块磁盘或密码库**；丢失 release key 后，直接分发的同包名 APK 将无法继续覆盖升级。Google Play App Signing 开启后，这把密钥可以作为 upload key。
+
+release 构建拒绝明文 HTTP，也拒绝缺少签名配置或服务器地址。默认正式地址为 `https://38-246-253-238.sslip.io`：
+
+```powershell
+.\gradlew-d.bat assembleRelease
+```
+
+如需构建其他环境，可显式覆盖：
+
+```powershell
+.\gradlew-d.bat assembleRelease -PSERPENTIA_RELEASE_APP_URL=https://game.example.com
+```
+
+签名 APK 输出到：
+
+```text
+android\app\build\outputs\apk\release\app-release.apk
+```
+
+验证 APK：
+
+```powershell
+D:\Android\sdk\build-tools\35.0.0\apksigner.bat verify --verbose --print-certs .\app\build\outputs\apk\release\app-release.apk
+```
+
+应用只允许服务器同源页面留在 WebView 中，外部链接交给系统浏览器；麦克风权限也只会授予配置的服务器 origin。
 
 ## 沉浸行为
 
