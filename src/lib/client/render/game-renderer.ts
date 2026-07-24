@@ -1,10 +1,9 @@
 import { Application, Container } from "pixi.js";
 import type { GameController } from "../game.svelte";
 import type { SettingsStore } from "../stores/settings.svelte";
-import type { SelfPositionCorrection } from "../sim/self-predictor";
 import { RENDER, skinForPlayer } from "../config";
 import { loadGameTextures, type GameTextures } from "./assets";
-import { Camera, PositionCorrectionSmoother } from "./camera";
+import { Camera } from "./camera";
 import { ArenaLayer } from "./arena-layer";
 import { FoodLayer } from "./food-layer";
 import { SnakeLayer, type SnakeRenderView } from "./snake-layer";
@@ -20,7 +19,6 @@ export class GameRenderer {
   private textures: GameTextures | undefined;
   private world = new Container();
   private camera = new Camera();
-  private selfCorrection = new PositionCorrectionSmoother();
   private arena: ArenaLayer | undefined;
   private food: FoodLayer | undefined;
   private snakes: SnakeLayer | undefined;
@@ -83,16 +81,6 @@ export class GameRenderer {
     if (this.started || !this.app) return;
     this.started = true;
     this.app.ticker.add(({ deltaMS }) => this.frame(deltaMS));
-  }
-
-  /** 校正当帧保持画面连续，随后只平滑收敛位置，不改写蛇头角度。 */
-  applySelfPositionCorrection(correction: SelfPositionCorrection): void {
-    if (correction.mode === "snap") {
-      this.selfCorrection.reset();
-      this.camera.reset();
-      return;
-    }
-    this.selfCorrection.preserveAfterTranslation(correction.x, correction.y, performance.now());
   }
 
   /** 食物被吃：闪光 + 就近音效（由控制器在事件到达时调用）。 */
@@ -159,7 +147,6 @@ export class GameRenderer {
     const clock = controller.clockSync;
     const serverNow = clock.serverNow() ?? Date.now();
     const localNow = performance.now();
-    this.selfCorrection.sample(localNow);
 
     // 1. 推进自我预测
     // 无方向输入时传 undefined，避免把出生朝向往 angle=0（正东）拽
@@ -193,23 +180,18 @@ export class GameRenderer {
     const selfState = controller.selfPredictor.renderState();
     const selfAlive = Boolean(selfState && selfSnapshot?.alive);
     if (selfAlive && !this.lastSelfAlive && selfSnapshot) {
-      this.selfCorrection.reset();
       this.camera.reset();
       this.selfRadiusSmooth = selfSnapshot.radius;
       this.trailAccumulator = 0;
-    } else if (!selfAlive && this.lastSelfAlive) {
-      this.selfCorrection.reset();
     }
     this.lastSelfAlive = selfAlive;
 
     let selfHead: { x: number; y: number } | undefined;
-    let simulationHead: { x: number; y: number } | undefined;
     let selfBoosting = false;
     if (selfState && selfSnapshot?.alive) {
       const radius = selfSnapshot.radius;
       this.selfRadiusSmooth += (radius - this.selfRadiusSmooth) * 0.08;
       selfBoosting = selfState.boosting && controller.selfPredictor.currentLength > minBoostLength;
-      const { offsetX, offsetY } = this.selfCorrection;
       views.push({
         id: selfSnapshot.id,
         nickname: selfSnapshot.nickname,
@@ -219,13 +201,8 @@ export class GameRenderer {
         boosting: selfBoosting,
         invulnerable: selfSnapshot.invulnerable,
         isSelf: true,
-        offsetX,
-        offsetY,
       });
-      simulationHead = selfState.body[0];
-      selfHead = simulationHead
-        ? { x: simulationHead.x + offsetX, y: simulationHead.y + offsetY }
-        : undefined;
+      selfHead = selfState.body[0];
 
       // 加速拖尾
       if (selfBoosting) {
@@ -233,7 +210,7 @@ export class GameRenderer {
         const tail = selfState.body[selfState.body.length - 1];
         while (this.trailAccumulator > 40 && tail) {
           this.trailAccumulator -= 40;
-          this.fx.trail(tail.x + offsetX, tail.y + offsetY, skinForPlayer(selfSnapshot.id).light);
+          this.fx.trail(tail.x, tail.y, skinForPlayer(selfSnapshot.id).light);
         }
       }
     }
@@ -266,10 +243,9 @@ export class GameRenderer {
     }
 
     // 6. 边界接近提示
-    if (simulationHead && selfSnapshot?.alive) {
+    if (selfHead && selfSnapshot?.alive) {
       const limit = controller.descriptor.rules.arenaHalfSize;
-      const distanceToBorder =
-        limit - Math.max(Math.abs(simulationHead.x), Math.abs(simulationHead.y));
+      const distanceToBorder = limit - Math.max(Math.abs(selfHead.x), Math.abs(selfHead.y));
       controller.nearBoundary = distanceToBorder < 220;
     } else {
       controller.nearBoundary = false;

@@ -1,72 +1,33 @@
 import { describe, expect, it } from "vite-plus/test";
-import { Camera, PositionCorrectionSmoother } from "./camera";
+import { Camera } from "./camera";
 
-describe("position correction presentation", () => {
-  it("keeps the corrected frame at the exact previous position", () => {
-    const smoother = new PositionCorrectionSmoother();
-    const before = { x: 120, y: -45 };
-    const correction = { x: -18, y: 9 };
-    const corrected = { x: before.x + correction.x, y: before.y + correction.y };
-
-    smoother.preserveAfterTranslation(correction.x, correction.y, 0);
-
-    expect(corrected.x + smoother.offsetX).toBeCloseTo(before.x, 8);
-    expect(corrected.y + smoother.offsetY).toBeCloseTo(before.y, 8);
-  });
-
-  it("preserves continuity when another correction arrives during convergence", () => {
-    const smoother = new PositionCorrectionSmoother();
-    let raw = { x: 100, y: 50 };
-    smoother.preserveAfterTranslation(20, -10, 0);
-    raw = { x: 120, y: 40 };
-    smoother.sample(50);
-    const before = { x: raw.x + smoother.offsetX, y: raw.y + smoother.offsetY };
-
-    const correction = { x: -7, y: 4 };
-    raw = { x: raw.x + correction.x, y: raw.y + correction.y };
-    smoother.preserveAfterTranslation(correction.x, correction.y, 50);
-
-    expect(raw.x + smoother.offsetX).toBeCloseTo(before.x, 8);
-    expect(raw.y + smoother.offsetY).toBeCloseTo(before.y, 8);
-  });
-
-  it("starts and ends correction without a velocity step", () => {
-    const smoother = new PositionCorrectionSmoother();
-    smoother.preserveAfterTranslation(20, 0, 0);
-    const start = smoother.offsetX;
-    smoother.sample(1);
-    const afterStart = smoother.offsetX;
-    smoother.sample(159);
-    const beforeEnd = smoother.offsetX;
-    smoother.sample(160);
-    const end = smoother.offsetX;
-
-    expect(Math.abs(afterStart - start)).toBeLessThan(0.001);
-    expect(Math.abs(end - beforeEnd)).toBeLessThan(0.001);
-    expect(end).toBe(0);
-  });
-
-  it("moves the viewport continuously instead of jumping on correction", () => {
+describe("camera", () => {
+  it("initializes directly at the controlled head", () => {
     const camera = new Camera();
-    const smoother = new PositionCorrectionSmoother();
-    const food = { x: 180, y: 20 };
-    let rawHead = { x: 100, y: 20 };
-    camera.update(rawHead.x, rawHead.y, 11, 16.7);
-    const foodScreenBefore = food.x - camera.x;
+    camera.update(120, -45, 11, 16.7);
+    expect(camera.x).toBe(120);
+    expect(camera.y).toBe(-45);
+  });
 
-    rawHead = { x: 120, y: 20 };
-    smoother.preserveAfterTranslation(20, 0, 0);
-    const correctedHead = rawHead.x + smoother.offsetX;
-    camera.update(correctedHead, rawHead.y + smoother.offsetY, 11, 16.7);
-    expect(food.x - camera.x).toBeCloseTo(foodScreenBefore, 8);
-
-    let previousCameraX = camera.x;
+  it("follows a moving head monotonically", () => {
+    const camera = new Camera();
+    camera.update(0, 0, 11, 16.7);
+    let previous = camera.x;
     for (let frame = 0; frame < 20; frame += 1) {
-      smoother.sample(((frame + 1) * 1000) / 60);
-      camera.update(rawHead.x + smoother.offsetX, rawHead.y + smoother.offsetY, 11, 1000 / 60);
-      expect(Math.abs(camera.x - previousCameraX)).toBeLessThan(2);
-      previousCameraX = camera.x;
+      camera.update(100, 0, 11, 1000 / 60);
+      expect(camera.x).toBeGreaterThan(previous);
+      expect(camera.x).toBeLessThanOrEqual(100);
+      previous = camera.x;
     }
-    expect(smoother.offsetX).toBe(0);
+  });
+
+  it("resets directly to a respawn position", () => {
+    const camera = new Camera();
+    camera.update(100, 50, 11, 16.7);
+    camera.update(140, 70, 11, 16.7);
+    camera.reset();
+    camera.update(-300, 240, 11, 16.7);
+    expect(camera.x).toBe(-300);
+    expect(camera.y).toBe(240);
   });
 });

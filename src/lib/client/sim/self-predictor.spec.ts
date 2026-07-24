@@ -67,12 +67,13 @@ function head(state: { readonly body: ReadonlyArray<{ x: number; y: number }> })
   return point;
 }
 
-function expectSameHead(
-  left: { readonly body: ReadonlyArray<{ x: number; y: number }> },
-  right: { readonly body: ReadonlyArray<{ x: number; y: number }> },
+function expectSamePose(
+  left: { readonly body: ReadonlyArray<{ x: number; y: number }>; readonly angle: number },
+  right: { readonly body: ReadonlyArray<{ x: number; y: number }>; readonly angle: number },
 ): void {
   expect(head(right).x).toBeCloseTo(head(left).x, 8);
   expect(head(right).y).toBeCloseTo(head(left).y, 8);
+  expect(right.angle).toBeCloseTo(left.angle, 8);
 }
 
 describe("self prediction", () => {
@@ -109,7 +110,7 @@ describe("self prediction", () => {
     }
   });
 
-  it("corrects authoritative position without changing the local steering angle", () => {
+  it("does not change the visible pose for normal network drift", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     const server = initialMotion();
     predictor.reconcile(snapshotOf(server), 0, 0);
@@ -117,130 +118,46 @@ describe("self prediction", () => {
     const before = predictor.renderState();
     expect(before).toBeDefined();
 
-    // The server has not applied the local turn yet. Correct the matching tick's
-    // position while preserving the responsive local angle.
     stepMotion(server, 0, false);
-    const correction = predictor.reconcile(snapshotOf(server), 1, 120);
+    predictor.reconcile(snapshotOf(server), 1, 120);
     const after = predictor.renderState();
-    expect(correction).toBeDefined();
     expect(after).toBeDefined();
-    expect(after!.angle).toBeCloseTo(before!.angle, 8);
-    expect(head(after!).x - head(before!).x).toBeCloseTo(correction!.x, 8);
-    expect(head(after!).y - head(before!).y).toBeCloseTo(correction!.y, 8);
+    expectSamePose(before!, after!);
   });
 
-  it("keeps the fractional pose when authority is one tick ahead", () => {
-    const predictor = new SelfPredictor(rules, TICK_RATE);
+  it("keeps every frame identical to a snapshot-free turn", () => {
+    const withSnapshots = new SelfPredictor(rules, TICK_RATE);
+    const withoutSnapshots = new SelfPredictor(rules, TICK_RATE);
     const server = initialMotion();
-    predictor.reconcile(snapshotOf(server), 0, 0);
+    const initial = snapshotOf(server);
+    withSnapshots.reconcile(initial, 0, 0);
+    withoutSnapshots.reconcile(initial, 0, 0);
 
-    // The WebSocket callback runs just before the 50 ms fixed step. Rendering
-    // is already 98% of the way to tick 1 even though tick 1 is not in history.
-    predictor.advance(49, Math.PI / 2, false);
-    const before = predictor.renderState();
-    expect(before).toBeDefined();
-    stepMotion(server, 0, false);
-
-    const correction = predictor.reconcile(snapshotOf(server), 1, 49);
-    const after = predictor.renderState();
-    expect(correction?.mode).toBe("smooth");
-    expect(after).toBeDefined();
-    expect(after!.angle).toBeCloseTo(before!.angle, 8);
-    expect(after!.body).toHaveLength(before!.body.length);
-    for (let index = 0; index < before!.body.length; index += 1) {
-      expect(after!.body[index].x - before!.body[index].x).toBeCloseTo(correction!.x, 8);
-      expect(after!.body[index].y - before!.body[index].y).toBeCloseTo(correction!.y, 8);
-    }
-  });
-
-  it("measures discontinuity recovery from the visible fractional head", () => {
-    const predictor = new SelfPredictor(rules, TICK_RATE);
-    const server = initialMotion();
-    predictor.reconcile(snapshotOf(server), 0, 0);
-    predictor.advance(49, Math.PI / 2, false);
-    const before = predictor.renderState();
-    expect(before).toBeDefined();
-
-    for (let tick = 0; tick < 10; tick += 1) stepMotion(server, 0, false);
-    const correction = predictor.reconcile(snapshotOf(server), 10, 49);
-    const after = predictor.renderState();
-    expect(correction?.mode).toBe("snap");
-    expect(after).toBeDefined();
-    expect(after!.angle).toBeCloseTo(before!.angle, 8);
-    expect(head(after!).x - head(before!).x).toBeCloseTo(correction!.x, 8);
-    expect(head(after!).y - head(before!).y).toBeCloseTo(correction!.y, 8);
-  });
-
-  it("does not rebuild the pose when each 10 Hz snapshot leads fixed history", () => {
-    const predictor = new SelfPredictor(rules, TICK_RATE);
-    const server = initialMotion();
-    predictor.reconcile(snapshotOf(server), 0, 0);
-
-    for (let snapshotIndex = 1; snapshotIndex <= 8; snapshotIndex += 1) {
-      const now = snapshotIndex * 100 - 1;
-      predictor.advance(now, Math.PI / 2, false);
-      stepMotion(server, snapshotIndex === 1 ? 0 : Math.PI / 2, false);
-      stepMotion(server, snapshotIndex === 1 ? 0 : Math.PI / 2, false);
-      const before = predictor.renderState();
-      const correction = predictor.reconcile(snapshotOf(server), snapshotIndex * 2, now);
-      const after = predictor.renderState();
-      expect(before).toBeDefined();
-      expect(after).toBeDefined();
-      expect(after!.angle).toBeCloseTo(before!.angle, 8);
-      expect(after!.body).toHaveLength(before!.body.length);
-      for (let index = 0; index < before!.body.length; index += 1) {
-        expect(after!.body[index].x - before!.body[index].x).toBeCloseTo(correction?.x ?? 0, 8);
-        expect(after!.body[index].y - before!.body[index].y).toBeCloseTo(correction?.y ?? 0, 8);
-      }
-    }
-  });
-
-  it("keeps repeated authoritative corrections from changing a continuous turn", () => {
-    const predictor = new SelfPredictor(rules, TICK_RATE);
-    const server = initialMotion();
-    predictor.reconcile(snapshotOf(server), 0, 0);
-
-    for (let now = 10; now <= 600; now += 10) {
+    for (let now = 5; now <= 800; now += 5) {
       if (now % TICK_MS === 0) {
-        stepMotion(server, now === TICK_MS ? 0 : Math.PI / 2, false);
+        stepMotion(server, now <= 100 ? 0 : Math.PI / 2, false);
       }
-      predictor.advance(now, Math.PI / 2, false);
-      if (now % (TICK_MS * 2) !== 0) continue;
-
-      const before = predictor.renderState();
-      const correction = predictor.reconcile(snapshotOf(server), now / TICK_MS, now);
-      const after = predictor.renderState();
-      expect(before).toBeDefined();
-      expect(after).toBeDefined();
-      expect(after!.angle).toBeCloseTo(before!.angle, 8);
-      if (correction) {
-        expect(head(after!).x - head(before!).x).toBeCloseTo(correction.x, 8);
-        expect(head(after!).y - head(before!).y).toBeCloseTo(correction.y, 8);
+      withSnapshots.advance(now, Math.PI / 2, false);
+      withoutSnapshots.advance(now, Math.PI / 2, false);
+      if (now % 100 === 0) {
+        withSnapshots.reconcile(snapshotOf(server), now / TICK_MS, now);
       }
+      expectSamePose(withoutSnapshots.renderState()!, withSnapshots.renderState()!);
     }
   });
 
-  it("keeps food distance aligned with the authoritative head under delayed steering", () => {
+  it("applies authoritative length without moving the head", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     const server = initialMotion();
     predictor.reconcile(snapshotOf(server), 0, 0);
-
-    // Local steering starts immediately, while the server continues straight for
-    // two ticks. This is the divergence that previously made visible food miss.
     predictor.advance(100, Math.PI / 2, false);
-    stepMotion(server, 0, false);
-    stepMotion(server, 0, false);
-    const correction = predictor.reconcile(snapshotOf(server), 2, 100);
-    const rendered = predictor.renderState();
-    expect(correction).toBeDefined();
-    expect(rendered).toBeDefined();
-    expectSameHead(server, rendered!);
-    expect(rendered!.angle).toBeGreaterThan(server.angle);
+    const before = predictor.renderState();
+    server.length = 80;
 
-    const food = { x: head(server).x + 12, y: head(server).y - 4 };
-    const serverDistance = Math.hypot(food.x - head(server).x, food.y - head(server).y);
-    const renderedDistance = Math.hypot(food.x - head(rendered!).x, food.y - head(rendered!).y);
-    expect(renderedDistance).toBeCloseTo(serverDistance, 8);
+    predictor.reconcile(snapshotOf(server), 2, 100);
+    const after = predictor.renderState();
+    expectSamePose(before!, after!);
+    expect(predictor.currentLength).toBe(80);
   });
 
   it("continues the authoritative target before local direction input exists", () => {
@@ -263,8 +180,7 @@ describe("self prediction", () => {
       { x: 200, y: 0 },
       { x: 100, y: 0 },
     ];
-    const correction = predictor.reconcile(snapshotOf(farAway), 1, 50);
-    expect(correction?.mode).toBe("snap");
+    predictor.reconcile(snapshotOf(farAway), 1, 50);
     expect(head(predictor.renderState()!).x).toBe(200);
   });
 
@@ -275,7 +191,6 @@ describe("self prediction", () => {
     predictor.advance(100, Math.PI / 2, true);
 
     predictor.reconcile({ ...snapshotOf(original), alive: false }, 2, 100);
-    predictor.advance(150, Math.PI / 2, false);
     expect(predictor.renderState()).toBeUndefined();
 
     const respawned = initialMotion();
@@ -284,6 +199,6 @@ describe("self prediction", () => {
       { x: 300, y: 300 },
     ];
     predictor.reconcile(snapshotOf(respawned), 3, 150);
-    expectSameHead(respawned, predictor.renderState()!);
+    expectSamePose(respawned, predictor.renderState()!);
   });
 });
