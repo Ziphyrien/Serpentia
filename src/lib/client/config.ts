@@ -3,6 +3,14 @@
  * 只存放常量，不包含任何行为逻辑。
  */
 
+export interface HeadTextureGeometry {
+  /** 圆形头部视觉中心在整张纹理中的归一化坐标（不含伸出的舌头）。 */
+  readonly centerX: number;
+  readonly centerY: number;
+  /** 圆形头部直径占纹理宽度的比例。 */
+  readonly diameterRatio: number;
+}
+
 export interface SkinDefinition {
   readonly id: string;
   /** 身体主色 */
@@ -12,6 +20,7 @@ export interface SkinDefinition {
   /** 高光色 */
   readonly light: number;
   readonly headTexture: string;
+  readonly headGeometry: HeadTextureGeometry;
 }
 
 export const SKINS: ReadonlyArray<SkinDefinition> = [
@@ -21,6 +30,7 @@ export const SKINS: ReadonlyArray<SkinDefinition> = [
     dark: 0x4c9a33,
     light: 0xd0f5a8,
     headTexture: "/assets/sprites/head-green.png",
+    headGeometry: { centerX: 128 / 256, centerY: 122 / 256, diameterRatio: 178 / 256 },
   },
   {
     id: "blue",
@@ -28,6 +38,7 @@ export const SKINS: ReadonlyArray<SkinDefinition> = [
     dark: 0x2a6fb8,
     light: 0xb3e2fa,
     headTexture: "/assets/sprites/head-blue.png",
+    headGeometry: { centerX: 128 / 256, centerY: 120 / 256, diameterRatio: 176 / 256 },
   },
   {
     id: "purple",
@@ -35,6 +46,7 @@ export const SKINS: ReadonlyArray<SkinDefinition> = [
     dark: 0x6a3ab8,
     light: 0xdcc4fa,
     headTexture: "/assets/sprites/head-purple.png",
+    headGeometry: { centerX: 128 / 256, centerY: 124 / 256, diameterRatio: 186 / 256 },
   },
   {
     id: "orange",
@@ -42,6 +54,7 @@ export const SKINS: ReadonlyArray<SkinDefinition> = [
     dark: 0xc06a1d,
     light: 0xfad6a0,
     headTexture: "/assets/sprites/head-orange.png",
+    headGeometry: { centerX: 128.5 / 256, centerY: 120 / 256, diameterRatio: 187 / 256 },
   },
   {
     id: "red",
@@ -49,6 +62,7 @@ export const SKINS: ReadonlyArray<SkinDefinition> = [
     dark: 0xb83a2e,
     light: 0xfabcb3,
     headTexture: "/assets/sprites/head-red.png",
+    headGeometry: { centerX: 128 / 256, centerY: 121 / 256, diameterRatio: 174 / 256 },
   },
 ];
 

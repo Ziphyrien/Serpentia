@@ -34,6 +34,5 @@ export async function loadGameTextures(): Promise<GameTextures> {
   return { heads, foodPearl, foodGold, bgTile };
 }
 
-/** 生成纹理中主体占比的估算系数（生成图带 padding），用于换算显示尺寸。 */
-export const HEAD_TEXTURE_CONTENT = 0.82;
+/** 生成食物纹理中主体占比的估算系数（生成图带 padding）。 */
 export const FOOD_TEXTURE_CONTENT = 0.6;

@@ -1,5 +1,6 @@
 import nipplejs from "nipplejs";
 import type { InputState } from "./input-state";
+import { directionAngleFromJoystickVector } from "./joystick-vector";
 
 /**
  * 移动端虚拟摇杆（nipplejs 封装）。
@@ -23,9 +24,9 @@ export class JoystickInput {
     });
     // nipplejs 的 move 回调签名是 (event)，摇杆数据在 event.data 上
     this.manager.on("move", (event) => {
-      const { vector } = event.data;
-      // nipplejs 的 y 轴向上为正，世界坐标 y 向下为正，需要翻转
-      this.state.angle = Math.atan2(-vector.y, vector.x);
+      const angle = directionAngleFromJoystickVector(event.data.vector);
+      if (angle === undefined) return;
+      this.state.angle = angle;
       this.state.hasDirection = true;
     });
   }

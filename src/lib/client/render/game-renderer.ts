@@ -27,6 +27,7 @@ export class GameRenderer {
   private destroyed = false;
   private trailAccumulator = 0;
   private selfRadiusSmooth = 11;
+  private lastSelfAlive = false;
   private lastBoosting = false;
   private readonly handleResize = (): void => this.resize();
 
@@ -161,6 +162,14 @@ export class GameRenderer {
       (snake) => snake.id === controller.selfId,
     );
     const selfState = controller.selfPredictor.renderState();
+    const selfAlive = Boolean(selfState && selfSnapshot?.alive);
+    if (selfAlive && !this.lastSelfAlive && selfSnapshot) {
+      this.camera.reset();
+      this.selfRadiusSmooth = selfSnapshot.radius;
+      this.trailAccumulator = 0;
+    }
+    this.lastSelfAlive = selfAlive;
+
     let selfHead: { x: number; y: number } | undefined;
     let selfBoosting = false;
     if (selfState && selfSnapshot?.alive) {

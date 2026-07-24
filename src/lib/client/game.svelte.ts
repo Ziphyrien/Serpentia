@@ -243,6 +243,10 @@ export class GameController {
     if (selfSnake) {
       const wasAlive = this.self.alive;
       this.predictor.reconcile(selfSnake, snapshot.tick, performance.now());
+      const becameAlive = selfSnake.alive && !wasAlive;
+      const respawnReported = events.some((batch) =>
+        batch.respawnedPlayerIds.includes(selfSnake.id),
+      );
       // 保留 respawnIn/deathBy：它们分别由倒计时定时器和死亡/重生事件维护，
       // 不能随快照重建，否则 10Hz 快照会把倒计时打回 0、把击杀者名字抹掉
       this.self = {
@@ -252,7 +256,8 @@ export class GameController {
         score: Math.round(selfSnake.score),
         alive: selfSnake.alive,
       };
-      if (selfSnake.alive && !wasAlive) this.sfx.respawn();
+      if (becameAlive) this.sfx.respawn();
+      if (becameAlive || respawnReported) this.forceInputResend();
       if (selfSnake.alive && selfSnake.respawnAtTick === null) this.clearRespawnCountdown();
       if (!selfSnake.alive && selfSnake.respawnAtTick != null && !this.respawnTimer) {
         // 重连等场景漏掉死亡事件时，从快照补齐倒计时
@@ -288,9 +293,8 @@ export class GameController {
         const killer = death.cause._tag === "Snake" ? nickOf(death.cause.killerId) : undefined;
         this.pushKillFeed(killer ? `${killer} 击杀了 ${victim}` : `${victim} 撞到了边界`);
         if (death.playerId === this.selfId) {
-          this.predictor.markDead();
           this.sfx.death();
-          this.self = { ...this.self, alive: false, deathBy: killer };
+          this.self = { ...this.self, deathBy: killer };
           const selfSnake = snapshot.snakes.find((snake) => snake.id === this.selfId);
           if (selfSnake?.respawnAtTick != null) {
             this.startRespawnCountdown(selfSnake.respawnAtTick, snapshot.tick);
@@ -304,7 +308,7 @@ export class GameController {
       for (const playerId of batch.respawnedPlayerIds) {
         if (playerId === this.selfId) {
           this.clearRespawnCountdown();
-          this.self = { ...this.self, alive: true, deathBy: undefined };
+          this.self = { ...this.self, deathBy: undefined };
         }
       }
     }
@@ -378,7 +382,9 @@ export class GameController {
   }
 
   private scheduleInputSend(): void {
-    if (this.destroyed || !this.client?.connected || !this.input.hasDirection) return;
+    if (this.destroyed || !this.client?.connected || !this.self.alive || !this.input.hasDirection) {
+      return;
+    }
     if (this.inputSendTimer) return;
 
     const elapsed = performance.now() - this.lastInputSentAt;
@@ -394,7 +400,7 @@ export class GameController {
   }
 
   private flushInput(): void {
-    if (!this.client?.connected || !this.input.hasDirection) return;
+    if (!this.client?.connected || !this.self.alive || !this.input.hasDirection) return;
     const angleChanged =
       this.lastSentAngle === undefined ||
       Math.abs(normalizeAngle(this.input.angle - this.lastSentAngle)) > INPUT.angleEpsilon;
@@ -412,15 +418,19 @@ export class GameController {
     );
   }
 
-  private startLoops(): void {
+  /** 死亡期间服务端拒绝输入；重生后必须重发仍按住的方向。 */
+  private forceInputResend(): void {
     if (this.inputSendTimer) clearTimeout(this.inputSendTimer);
     this.inputSendTimer = undefined;
-    if (this.pingTimer) clearInterval(this.pingTimer);
-
     this.lastSentAngle = undefined;
     this.lastSentBoosting = false;
     this.lastInputSentAt = Number.NEGATIVE_INFINITY;
     this.scheduleInputSend();
+  }
+
+  private startLoops(): void {
+    if (this.pingTimer) clearInterval(this.pingTimer);
+    this.forceInputResend();
 
     const sendPing = (): void => {
       if (!this.client?.connected) return;

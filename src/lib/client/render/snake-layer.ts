@@ -1,6 +1,6 @@
 import { Container, Graphics, Sprite, Text } from "pixi.js";
 import { skinForPlayer, type SkinDefinition } from "../config";
-import { HEAD_TEXTURE_CONTENT, type GameTextures } from "./assets";
+import type { GameTextures } from "./assets";
 
 interface Point {
   x: number;
@@ -89,7 +89,7 @@ export class SnakeLayer {
     let headFallback: Graphics | undefined;
     if (headTexture) {
       head = new Sprite(headTexture);
-      head.anchor.set(0.5);
+      head.anchor.set(skin.headGeometry.centerX, skin.headGeometry.centerY);
       root.addChild(head);
     } else {
       headFallback = new Graphics();
@@ -208,12 +208,12 @@ export class SnakeLayer {
     }
 
     const head = body[0];
-    const rotation = snake.angle + Math.PI / 2; // 贴图舌头朝下 = 前进方向
+    const rotation = snake.angle - Math.PI / 2; // 贴图舌头朝下，旋转到前进方向
     if (nodes.head) {
       nodes.head.position.set(head.x, head.y);
       nodes.head.rotation = rotation;
-      const diameter = radius * 2.5;
-      nodes.head.scale.set(diameter / (nodes.head.texture.width * HEAD_TEXTURE_CONTENT));
+      const faceDiameter = nodes.head.texture.width * nodes.skin.headGeometry.diameterRatio;
+      nodes.head.scale.set((radius * 2) / faceDiameter);
     }
     if (nodes.headFallback) {
       nodes.headFallback.position.set(head.x, head.y);

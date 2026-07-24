@@ -75,6 +75,14 @@ function expectSameHead(
   expect(head(right).y).toBeCloseTo(head(left).y, 8);
 }
 
+function expectSamePose(
+  left: { readonly body: ReadonlyArray<{ x: number; y: number }>; readonly angle: number },
+  right: { readonly body: ReadonlyArray<{ x: number; y: number }>; readonly angle: number },
+): void {
+  expectSameHead(left, right);
+  expect(right.angle).toBeCloseTo(left.angle, 8);
+}
+
 describe("self prediction", () => {
   it("renders movement and steering before the next server tick", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
@@ -122,7 +130,28 @@ describe("self prediction", () => {
     predictor.reconcile(snapshotOf(server), 1, 120);
     const after = predictor.renderState();
     expect(after).toBeDefined();
-    expectSameHead(before!, after!);
+    expectSamePose(before!, after!);
+  });
+
+  it("keeps repeated turning snapshots from changing the local pose", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    const server = initialMotion();
+    predictor.reconcile(snapshotOf(server), 0, 0);
+
+    for (let now = 10; now <= 600; now += 10) {
+      if (now % TICK_MS === 0) {
+        stepMotion(server, now === TICK_MS ? 0 : Math.PI / 2, false);
+      }
+      predictor.advance(now, Math.PI / 2, false);
+      if (now % (TICK_MS * 2) !== 0) continue;
+
+      const before = predictor.renderState();
+      predictor.reconcile(snapshotOf(server), now / TICK_MS, now);
+      const after = predictor.renderState();
+      expect(before).toBeDefined();
+      expect(after).toBeDefined();
+      expectSamePose(before!, after!);
+    }
   });
 
   it("continues the authoritative target before local direction input exists", () => {
@@ -147,5 +176,24 @@ describe("self prediction", () => {
     ];
     predictor.reconcile(snapshotOf(farAway), 1, 50);
     expect(head(predictor.renderState()!).x).toBe(200);
+  });
+
+  it("initializes a respawn from its new authoritative pose", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    const original = initialMotion();
+    predictor.reconcile(snapshotOf(original), 0, 0);
+    predictor.advance(100, Math.PI / 2, true);
+
+    predictor.reconcile({ ...snapshotOf(original), alive: false }, 2, 100);
+    predictor.advance(150, Math.PI / 2, false);
+    expect(predictor.renderState()).toBeUndefined();
+
+    const respawned = initialMotion();
+    respawned.body = [
+      { x: 400, y: 300 },
+      { x: 300, y: 300 },
+    ];
+    predictor.reconcile(snapshotOf(respawned), 3, 150);
+    expectSameHead(respawned, predictor.renderState()!);
   });
 });
