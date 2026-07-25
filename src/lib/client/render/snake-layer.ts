@@ -1,4 +1,4 @@
-import { Container, Graphics, Text } from "pixi.js";
+import { Container, Graphics, GraphicsContext, Text } from "pixi.js";
 import { skinForPlayer, type SkinDefinition } from "../config";
 
 interface Point {
@@ -24,13 +24,24 @@ interface ViewBounds {
   bottom: number;
 }
 
+interface BeadNodes {
+  glow: Graphics;
+  outline: Graphics;
+  body: Graphics;
+  highlight: Graphics;
+}
+
 interface SnakeNodes {
   root: Container;
-  gfx: Graphics;
+  glowLayer: Container;
+  outlineLayer: Container;
+  bodyLayer: Container;
+  head: Graphics;
   label: Text;
   skin: SkinDefinition;
   /** 舌头吐信动画相位（由 id 稳定推导）。 */
   phase: number;
+  beadNodes: Array<BeadNodes>;
   lastBody: ReadonlyArray<Point>;
 }
 
@@ -40,6 +51,8 @@ interface Bead {
   r: number;
   alternate: boolean;
 }
+
+const BEAD_CIRCLE_RADIUS = 32;
 
 /** 线性混合两个 0xRRGGBB 颜色。 */
 function mixColor(a: number, b: number, t: number): number {
@@ -73,6 +86,9 @@ export class SnakeLayer {
   readonly container = new Container();
   private snakes = new Map<string, SnakeNodes>();
   private readonly beads: Array<Bead> = [];
+  private readonly beadCircle = new GraphicsContext()
+    .circle(0, 0, BEAD_CIRCLE_RADIUS)
+    .fill(0xffffff);
 
   /** 供死亡特效读取蛇最后的外形。 */
   lastBodyOf(id: string): { body: ReadonlyArray<Point>; skin: SkinDefinition } | undefined {
@@ -103,6 +119,7 @@ export class SnakeLayer {
   destroy(): void {
     for (const nodes of this.snakes.values()) nodes.root.destroy({ children: true });
     this.snakes.clear();
+    this.beadCircle.destroy();
   }
 
   private ensureNodes(id: string): SnakeNodes {
@@ -110,8 +127,11 @@ export class SnakeLayer {
     if (nodes) return nodes;
     const skin = skinForPlayer(id);
     const root = new Container();
-    const gfx = new Graphics();
-    root.addChild(gfx);
+    const glowLayer = new Container();
+    const outlineLayer = new Container();
+    const bodyLayer = new Container();
+    const head = new Graphics();
+    root.addChild(glowLayer, outlineLayer, bodyLayer, head);
 
     const label = new Text({
       text: "",
@@ -134,10 +154,14 @@ export class SnakeLayer {
     this.container.addChild(root);
     nodes = {
       root,
-      gfx,
+      glowLayer,
+      outlineLayer,
+      bodyLayer,
+      head,
       label,
       skin,
       phase: (Math.abs(hash) % 1000) * 0.0032,
+      beadNodes: [],
       lastBody: [],
     };
     this.snakes.set(id, nodes);
@@ -197,6 +221,64 @@ export class SnakeLayer {
     return beads;
   }
 
+  private ensureBeadNodes(nodes: SnakeNodes, index: number): BeadNodes {
+    const existing = nodes.beadNodes[index];
+    if (existing) return existing;
+
+    const glow = new Graphics(this.beadCircle);
+    glow.tint = nodes.skin.light;
+    glow.alpha = 0.13;
+    const outline = new Graphics(this.beadCircle);
+    outline.tint = nodes.skin.dark;
+    const body = new Graphics(this.beadCircle);
+    const highlight = new Graphics(this.beadCircle);
+    highlight.tint = nodes.skin.light;
+    highlight.alpha = 0.4;
+
+    nodes.glowLayer.addChild(glow);
+    nodes.outlineLayer.addChild(outline);
+    nodes.bodyLayer.addChild(body, highlight);
+
+    const beadNodes = { glow, outline, body, highlight };
+    nodes.beadNodes.push(beadNodes);
+    return beadNodes;
+  }
+
+  private syncBeads(
+    nodes: SnakeNodes,
+    beads: ReadonlyArray<Bead>,
+    boosting: boolean,
+    alternateColor: number,
+  ): void {
+    nodes.glowLayer.visible = boosting;
+    for (let renderIndex = 0; renderIndex < beads.length; renderIndex += 1) {
+      const bead = beads[beads.length - 1 - renderIndex];
+      const beadNodes = this.ensureBeadNodes(nodes, renderIndex);
+      beadNodes.glow.visible = true;
+      beadNodes.outline.visible = true;
+      beadNodes.body.visible = true;
+      beadNodes.highlight.visible = true;
+
+      beadNodes.glow.position.set(bead.x, bead.y);
+      beadNodes.glow.scale.set((bead.r * 1.5) / BEAD_CIRCLE_RADIUS);
+      beadNodes.outline.position.set(bead.x, bead.y);
+      beadNodes.outline.scale.set((bead.r + 2.3) / BEAD_CIRCLE_RADIUS);
+      beadNodes.body.position.set(bead.x, bead.y);
+      beadNodes.body.scale.set(bead.r / BEAD_CIRCLE_RADIUS);
+      beadNodes.body.tint = bead.alternate ? alternateColor : nodes.skin.body;
+      beadNodes.highlight.position.set(bead.x, bead.y);
+      beadNodes.highlight.scale.set((bead.r * 0.5) / BEAD_CIRCLE_RADIUS);
+    }
+
+    for (let index = beads.length; index < nodes.beadNodes.length; index += 1) {
+      const beadNodes = nodes.beadNodes[index];
+      beadNodes.glow.visible = false;
+      beadNodes.outline.visible = false;
+      beadNodes.body.visible = false;
+      beadNodes.highlight.visible = false;
+    }
+  }
+
   private drawSnake(
     nodes: SnakeNodes,
     snake: SnakeRenderView,
@@ -235,31 +317,11 @@ export class SnakeLayer {
     nodes.root.visible = true;
 
     const skin = nodes.skin;
-    const gfx = nodes.gfx;
-    gfx.clear();
+    nodes.head.clear();
 
     const beads = this.collectBeads(body, radius, view);
     const alternateColor = mixColor(skin.body, skin.dark, 0.16);
-
-    // 加速光晕先整体垫底，避免盖住相邻圆珠
-    if (snake.boosting) {
-      for (const bead of beads) {
-        gfx.circle(bead.x, bead.y, bead.r * 1.5).fill({ color: skin.light, alpha: 0.13 });
-      }
-    }
-
-    // 尾→头绘制圆珠：描边 + 主体（深浅相间）+ 背部高光，形成鳞片交叠感
-    for (let index = beads.length - 1; index >= 0; index -= 1) {
-      const bead = beads[index];
-      gfx.circle(bead.x, bead.y, bead.r + 2.3).fill(skin.dark);
-    }
-    for (let index = beads.length - 1; index >= 0; index -= 1) {
-      const bead = beads[index];
-      gfx
-        .circle(bead.x, bead.y, bead.r)
-        .fill(bead.alternate ? alternateColor : skin.body);
-      gfx.circle(bead.x, bead.y, bead.r * 0.5).fill({ color: skin.light, alpha: 0.4 });
-    }
+    this.syncBeads(nodes, beads, snake.boosting, alternateColor);
 
     this.drawHead(nodes, snake, nowMs);
 
@@ -276,7 +338,7 @@ export class SnakeLayer {
 
   /** 大眼卡通头：脸部朝向移动方向，周期性吐信，加速时一直吐着。 */
   private drawHead(nodes: SnakeNodes, snake: SnakeRenderView, nowMs: number): void {
-    const gfx = nodes.gfx;
+    const gfx = nodes.head;
     const skin = nodes.skin;
     const head = snake.body[0];
     const angle = snake.angle;
@@ -320,6 +382,7 @@ export class SnakeLayer {
     const smileX = hx + forwardX * headR * 0.36;
     const smileY = hy + forwardY * headR * 0.36;
     gfx
+      .beginPath()
       .arc(smileX, smileY, headR * 0.3, angle - 1.05, angle + 1.05)
       .stroke({ width: Math.max(1.6, headR * 0.1), color: skin.dark, cap: "round" });
 

@@ -1,4 +1,4 @@
-import { Container, Graphics } from "pixi.js";
+import { Container, Graphics, GraphicsContext } from "pixi.js";
 import type { FoodState } from "$lib/protocol";
 
 interface ViewBounds {
@@ -37,7 +37,7 @@ const PALETTES: Record<FoodState["kind"], FoodPalette> = {
 
 /** 画一颗四角星形闪光。 */
 function drawSparkle(
-  gfx: Graphics,
+  gfx: GraphicsContext,
   x: number,
   y: number,
   size: number,
@@ -77,6 +77,7 @@ function drawSparkle(
 export class FoodLayer {
   readonly container = new Container();
   private records = new Map<number, FoodRecord>();
+  private contexts = new Map<string, GraphicsContext>();
 
   constructor(private readonly foodRadius: number) {}
 
@@ -133,35 +134,16 @@ export class FoodLayer {
   destroy(): void {
     for (const record of this.records.values()) record.node.destroy();
     this.records.clear();
+    for (const context of this.contexts.values()) context.destroy();
+    this.contexts.clear();
   }
 
   private createRecord(food: FoodState): FoodRecord {
     // 尺寸随价值增大；尸体食物（remains）偏暖色
     const sizeFactor = Math.min(1.9, 0.75 + food.value * 0.09);
     const radius = this.foodRadius * sizeFactor;
-    const palette = PALETTES[food.kind];
-    const node = new Graphics();
-
-    // 光晕
-    node.circle(0, 0, radius * 2).fill({ color: palette.glow, alpha: 0.14 });
-    node.circle(0, 0, radius * 1.45).fill({ color: palette.glow, alpha: 0.22 });
-    // 球体：主色 + 底部暗面 + 顶部亮面，模拟径向光泽
-    node.circle(0, 0, radius).fill(palette.base);
-    node.circle(0, radius * 0.22, radius * 0.8).fill({ color: palette.shade, alpha: 0.5 });
-    node.circle(0, -radius * 0.26, radius * 0.6).fill({ color: palette.top, alpha: 0.95 });
-    // 高光点 + 星形闪光
-    node
-      .circle(-radius * 0.3, -radius * 0.36, radius * 0.18)
-      .fill({ color: 0xffffff, alpha: 0.95 });
-    drawSparkle(node, radius * 0.4, -radius * 0.52, radius * 0.32, 0xffffff, 0.9);
-    // 加速食物：倾斜光环（整体旋转一点点，闪光随动无伤大雅）
-    if (food.kind === "boost") {
-      drawSparkle(node, -radius * 0.62, radius * 0.55, radius * 0.22, 0xffffff, 0.75);
-      node
-        .ellipse(0, 0, radius * 1.7, radius * 0.62)
-        .stroke({ width: Math.max(1.5, radius * 0.16), color: 0xffedb0, alpha: 0.85 });
-      node.rotation = -0.5;
-    }
+    const node = new Graphics(this.contextFor(food.kind, radius));
+    if (food.kind === "boost") node.rotation = -0.5;
 
     this.container.addChild(node);
     return {
@@ -172,5 +154,36 @@ export class FoodLayer {
       baseScale: 1,
       phase: (food.id * 7919) % (Math.PI * 2),
     };
+  }
+
+  private contextFor(kind: FoodState["kind"], radius: number): GraphicsContext {
+    const key = `${kind}:${radius}`;
+    const existing = this.contexts.get(key);
+    if (existing) return existing;
+
+    const palette = PALETTES[kind];
+    const context = new GraphicsContext();
+    // 光晕
+    context.circle(0, 0, radius * 2).fill({ color: palette.glow, alpha: 0.14 });
+    context.circle(0, 0, radius * 1.45).fill({ color: palette.glow, alpha: 0.22 });
+    // 球体：主色 + 底部暗面 + 顶部亮面，模拟径向光泽
+    context.circle(0, 0, radius).fill(palette.base);
+    context.circle(0, radius * 0.22, radius * 0.8).fill({ color: palette.shade, alpha: 0.5 });
+    context.circle(0, -radius * 0.26, radius * 0.6).fill({ color: palette.top, alpha: 0.95 });
+    // 高光点 + 星形闪光
+    context
+      .circle(-radius * 0.3, -radius * 0.36, radius * 0.18)
+      .fill({ color: 0xffffff, alpha: 0.95 });
+    drawSparkle(context, radius * 0.4, -radius * 0.52, radius * 0.32, 0xffffff, 0.9);
+    // 加速食物：倾斜光环（整体旋转一点点，闪光随动无伤大雅）
+    if (kind === "boost") {
+      drawSparkle(context, -radius * 0.62, radius * 0.55, radius * 0.22, 0xffffff, 0.75);
+      context
+        .ellipse(0, 0, radius * 1.7, radius * 0.62)
+        .stroke({ width: Math.max(1.5, radius * 0.16), color: 0xffedb0, alpha: 0.85 });
+    }
+
+    this.contexts.set(key, context);
+    return context;
   }
 }
