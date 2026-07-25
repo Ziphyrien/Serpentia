@@ -200,7 +200,12 @@ export class GameRoom {
         });
         return;
       case "voice-state":
-        this.handleVoiceState(connection, message.joined ?? true, message.muted);
+        this.handleVoiceState(
+          connection,
+          message.listening,
+          message.microphoneEnabled,
+          message.muted,
+        );
         return;
       case "voice-signal":
         this.forwardVoiceSignal(connection, message.targetPlayerId, message.signal);
@@ -217,15 +222,21 @@ export class GameRoom {
     }
   }
 
-  private handleVoiceState(connection: GameRoomConnection, joined: boolean, muted: boolean): void {
+  private handleVoiceState(
+    connection: GameRoomConnection,
+    listening: boolean,
+    microphoneEnabled: boolean,
+    muted: boolean,
+  ): void {
     const identity = connection.identity;
     if (!this.controller.isCurrentConnection(connection.id, identity.playerId)) {
       this.sendError(connection, "VOICE_NOT_AUTHORIZED", false);
       return;
     }
-    if (joined) this.voiceRoster.join(identity.playerId, identity.nickname, muted);
-    else this.voiceRoster.leave(identity.playerId);
-    this.broadcastVoiceRoster();
+    const changed = listening
+      ? this.voiceRoster.upsert(identity.playerId, identity.nickname, microphoneEnabled, muted)
+      : this.voiceRoster.leave(identity.playerId);
+    if (changed) this.broadcastVoiceRoster();
   }
 
   private forwardVoiceSignal(

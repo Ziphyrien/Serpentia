@@ -3,7 +3,8 @@ import type { VoiceManagerEvents } from "./voice-manager";
 import { VoiceManager } from "./voice-manager";
 
 interface VoiceStateCall {
-  readonly joined: boolean;
+  readonly listening: boolean;
+  readonly microphoneEnabled: boolean;
   readonly muted: boolean;
 }
 
@@ -43,7 +44,8 @@ function eventRecorder(): {
       onLocalLevel: () => {},
       onError: () => {},
       sendVoiceSignal: () => {},
-      sendVoiceState: (active, muted) => states.push({ joined: active, muted }),
+      sendVoiceState: (listening, microphoneEnabled, muted) =>
+        states.push({ listening, microphoneEnabled, muted }),
     },
   };
 }
@@ -173,7 +175,53 @@ describe("voice manager lifecycle", () => {
     expect(secondMedia.track.stopped).toBe(true);
   });
 
-  it("announces explicit membership and stops tracks on leave", async () => {
+  it("silently starts listening without requesting a microphone", async () => {
+    let mediaRequests = 0;
+    installNavigator(() => {
+      mediaRequests += 1;
+      return Promise.reject(new Error("microphone should not be requested"));
+    });
+    installCredentialFetch();
+    const recorder = eventRecorder();
+    const manager = new VoiceManager(() => "friend-a", recorder.events, "/turn");
+
+    await expect(manager.startListening()).resolves.toBe(true);
+
+    expect(mediaRequests).toBe(0);
+    expect(recorder.states).toEqual([{ listening: true, microphoneEnabled: false, muted: true }]);
+    manager.dispose();
+  });
+
+  it("retries a failed silent credential request three times", async () => {
+    installNavigator(() => Promise.reject(new Error("microphone should not be requested")));
+    let credentialRequests = 0;
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: () => {
+        credentialRequests += 1;
+        if (credentialRequests < 4) {
+          return Promise.resolve(Response.json({ error: "TURN_UNAVAILABLE" }, { status: 503 }));
+        }
+        return Promise.resolve(
+          Response.json({
+            iceServers: [{ urls: ["stun:voice.example.test:3478"] }],
+            expiresAt: Date.now() + 60_000,
+            refreshAfter: Date.now() + 30_000,
+          }),
+        );
+      },
+    });
+    const recorder = eventRecorder();
+    const manager = new VoiceManager(() => "friend-a", recorder.events, "/turn");
+
+    await expect(manager.startListening()).resolves.toBe(true);
+
+    expect(credentialRequests).toBe(4);
+    expect(recorder.states).toEqual([{ listening: true, microphoneEnabled: false, muted: true }]);
+    manager.dispose();
+  });
+
+  it("announces microphone state and keeps listening after tracks stop", async () => {
     const media = fakeStream();
     installNavigator(() => Promise.resolve(media.stream));
     installCredentialFetch();
@@ -182,14 +230,18 @@ describe("voice manager lifecycle", () => {
 
     await manager.join();
     expect(manager.isJoined).toBe(true);
-    expect(recorder.states).toEqual([{ joined: true, muted: false }]);
+    expect(recorder.states).toEqual([
+      { listening: true, microphoneEnabled: false, muted: true },
+      { listening: true, microphoneEnabled: true, muted: false },
+    ]);
 
     manager.leave();
     expect(media.track.stopped).toBe(true);
     expect(manager.isJoined).toBe(false);
     expect(recorder.states).toEqual([
-      { joined: true, muted: false },
-      { joined: false, muted: true },
+      { listening: true, microphoneEnabled: false, muted: true },
+      { listening: true, microphoneEnabled: true, muted: false },
+      { listening: true, microphoneEnabled: false, muted: true },
     ]);
   });
 });

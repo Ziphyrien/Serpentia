@@ -77,8 +77,14 @@ export class GameClient {
     this.send({ v: GAME_PROTOCOL_VERSION, _tag: "ping", nonce });
   }
 
-  sendVoiceState(joined: boolean, muted: boolean): void {
-    this.send({ v: GAME_PROTOCOL_VERSION, _tag: "voice-state", joined, muted });
+  sendVoiceState(listening: boolean, microphoneEnabled: boolean, muted: boolean): void {
+    this.send({
+      v: GAME_PROTOCOL_VERSION,
+      _tag: "voice-state",
+      listening,
+      microphoneEnabled,
+      muted,
+    });
   }
 
   sendVoiceSignal(targetPlayerId: PlayerId, signal: VoiceSignal): void {

@@ -1,10 +1,11 @@
 <script lang="ts">
   import { Dialog, mergeProps } from "bits-ui";
+  import Headphones from "lucide-svelte/icons/headphones";
   import Mic from "lucide-svelte/icons/mic";
   import MicOff from "lucide-svelte/icons/mic-off";
-  import PhoneOff from "lucide-svelte/icons/phone-off";
   import X from "lucide-svelte/icons/x";
   import type { GameController } from "$lib/client/game.svelte";
+  import type { VoicePeerView } from "$lib/client/voice/voice-manager";
   import Button from "./ui/button.svelte";
   import Switch from "./ui/switch.svelte";
   import Slider from "./ui/slider.svelte";
@@ -13,7 +14,18 @@
 
   let open = $state(false);
 
-  const peerCount = $derived(controller.voicePeers.length);
+  const talkingCount = $derived(controller.voicePeers.filter((peer) => peer.microphoneEnabled).length);
+  const micLive = $derived(controller.voiceJoined && !controller.voiceMuted);
+  const selfStatus = $derived.by(() => {
+    if (!controller.voiceJoined) return "收听中";
+    return controller.voiceMuted ? "已静音" : "通话中";
+  });
+
+  function peerStatus(peer: VoicePeerView): string {
+    if (!peer.microphoneEnabled) return "收听中";
+    if (peer.muted) return "已静音";
+    return peer.connected ? "已连接" : "连接中…";
+  }
 </script>
 
 <Dialog.Root bind:open>
@@ -24,17 +36,17 @@
         intent="ghost"
         size="icon"
         aria-label="语音"
-        class="relative {controller.voiceJoined && !controller.voiceMuted ? 'text-lime-300' : ''}"
+        class="relative {micLive ? 'text-lime-300' : ''}"
       >
-        {#if controller.voiceJoined && !controller.voiceMuted}
+        {#if micLive}
           <span class="mic-level-ring" style:--level={controller.voiceLevel}></span>
           <Mic size={19} />
         {:else}
           <MicOff size={19} />
         {/if}
-        {#if peerCount > 0}
+        {#if talkingCount > 0}
           <span class="absolute -top-1 -right-1 flex size-5 items-center justify-center rounded-full bg-lime-400 text-[10px] font-black text-night-950">
-            {peerCount}
+            {talkingCount}
           </span>
         {/if}
       </Button>
@@ -58,53 +70,69 @@
         </p>
       {/if}
 
-      {#if !controller.voiceJoined}
-        <p class="mb-5 text-sm leading-relaxed text-white/60">
-          加入后可以和房间里的朋友实时聊天。语音走 P2P 直连，不经过游戏服务器。
-        </p>
-        <Button intent="primary" class="w-full" onclick={() => controller.toggleVoice()}>
-          <Mic size={15} />
-          加入语音
-        </Button>
-      {:else}
-        <div class="mb-5 flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3">
-          <div class="flex items-center gap-2.5">
-            <span class="flex size-8 items-center justify-center rounded-full bg-lime-400/20 text-lime-300">
+      <div class="mb-5 flex items-center justify-between rounded-2xl bg-white/5 px-4 py-3">
+        <div class="flex items-center gap-2.5">
+          <span
+            class="flex size-8 items-center justify-center rounded-full {micLive
+              ? 'bg-lime-400/20 text-lime-300'
+              : 'bg-white/10 text-white/60'}"
+          >
+            {#if micLive}
               <Mic size={15} />
-            </span>
-            <div>
-              <p class="text-sm font-black text-white">我</p>
-              <p class="text-xs text-white/50">{controller.voiceMuted ? "已静音" : "通话中"}</p>
-            </div>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-white/50">麦克风</span>
-            <Switch checked={!controller.voiceMuted} onCheckedChange={(v) => controller.setVoiceMuted(!v)} />
+            {:else}
+              <Headphones size={15} />
+            {/if}
+          </span>
+          <div>
+            <p class="text-sm font-black text-white">我</p>
+            <p class="text-xs text-white/50">{selfStatus}</p>
           </div>
         </div>
+        {#if controller.voiceJoined}
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-white/50">静音</span>
+            <Switch checked={controller.voiceMuted} onCheckedChange={(v) => controller.setVoiceMuted(v)} />
+          </div>
+        {/if}
+      </div>
 
-        <div class="mb-5 flex max-h-56 flex-col gap-2 overflow-y-auto">
-          {#each controller.voicePeers as peer (peer.playerId)}
-            <div class="rounded-2xl bg-white/5 px-4 py-3">
-              <div class="flex items-center gap-2.5">
-                <span
-                  class="flex size-8 items-center justify-center rounded-full bg-white/10 text-white/80 {peer.speaking
-                    ? 'speaking-ring'
-                    : ''}"
-                >
-                  {#if peer.muted}
-                    <MicOff size={15} />
-                  {:else}
-                    <Mic size={15} />
-                  {/if}
-                </span>
-                <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-black text-white">{peer.nickname}</p>
-                  <p class="text-xs text-white/50">
-                    {peer.muted ? "对方已静音" : peer.connected ? "已连接" : "连接中…"}
-                  </p>
-                </div>
+      <Button
+        intent={controller.voiceJoined ? "danger" : "primary"}
+        class="mb-5 w-full"
+        onclick={() => controller.toggleVoice()}
+      >
+        {#if controller.voiceJoined}
+          <MicOff size={15} />
+          关闭麦克风
+        {:else}
+          <Mic size={15} />
+          开启麦克风
+        {/if}
+      </Button>
+
+      <div class="flex max-h-56 flex-col gap-2 overflow-y-auto">
+        {#each controller.voicePeers as peer (peer.playerId)}
+          <div class="rounded-2xl bg-white/5 px-4 py-3">
+            <div class="flex items-center gap-2.5">
+              <span
+                class="flex size-8 items-center justify-center rounded-full bg-white/10 text-white/80 {peer.speaking
+                  ? 'speaking-ring'
+                  : ''}"
+              >
+                {#if !peer.microphoneEnabled}
+                  <Headphones size={15} />
+                {:else if peer.muted}
+                  <MicOff size={15} />
+                {:else}
+                  <Mic size={15} />
+                {/if}
+              </span>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-black text-white">{peer.nickname}</p>
+                <p class="text-xs text-white/50">{peerStatus(peer)}</p>
               </div>
+            </div>
+            {#if peer.microphoneEnabled}
               <div class="mt-2.5 flex items-center gap-2 pl-10">
                 <span class="text-xs text-white/40">音量</span>
                 <Slider
@@ -112,19 +140,14 @@
                   onValueChange={(v) => controller.setPeerVolume(peer.playerId, v)}
                 />
               </div>
-            </div>
-          {:else}
-            <p class="rounded-2xl bg-white/5 px-4 py-5 text-center text-sm text-white/40">
-              还没有其他成员加入语音
-            </p>
-          {/each}
-        </div>
-
-        <Button intent="danger" class="w-full" onclick={() => controller.toggleVoice()}>
-          <PhoneOff size={15} />
-          离开语音
-        </Button>
-      {/if}
+            {/if}
+          </div>
+        {:else}
+          <p class="rounded-2xl bg-white/5 px-4 py-5 text-center text-sm text-white/40">
+            房间里的其他成员会自动显示在这里
+          </p>
+        {/each}
+      </div>
     </Dialog.Content>
   </Dialog.Portal>
 </Dialog.Root>

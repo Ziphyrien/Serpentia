@@ -123,7 +123,8 @@ export class GameController {
           }, 4000);
         },
         sendVoiceSignal: (target, signal) => this.client?.sendVoiceSignal(target, signal),
-        sendVoiceState: (joined, muted) => this.client?.sendVoiceState(joined, muted),
+        sendVoiceState: (listening, microphoneEnabled, muted) =>
+          this.client?.sendVoiceState(listening, microphoneEnabled, muted),
       },
       descriptor.turnCredentialsPath,
     );
@@ -245,6 +246,7 @@ export class GameController {
     this.pingSentAt.clear();
     this.handleSnapshot(message.snapshot, message.serverTime, []);
     this.voice.handleSignalingReconnect(message.voice);
+    void this.voice.startListening();
     this.startLoops();
   }
 

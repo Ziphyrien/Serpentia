@@ -51,8 +51,10 @@ export class PingMessage extends Schema.TaggedClass<PingMessage>()("ping", {
 
 export class VoiceStateMessage extends Schema.TaggedClass<VoiceStateMessage>()("voice-state", {
   v: ProtocolVersion,
-  /** Optional only for compatibility with already-loaded v1 clients. */
-  joined: Schema.optionalKey(Schema.Boolean),
+  /** Signaling and receive membership, independent from microphone capture. */
+  listening: Schema.Boolean,
+  /** Whether this participant currently publishes a microphone track. */
+  microphoneEnabled: Schema.Boolean,
   muted: Schema.Boolean,
 }) {}
 

@@ -14,36 +14,48 @@ function requireCondition(condition: boolean, message: string): asserts conditio
 
 export const voiceScenarios: ReadonlyArray<VoiceScenario> = [
   {
-    name: "voice roster contains active members and their mute state only",
+    name: "voice roster separates listeners from microphone publishers",
     run: () => {
       const roster = new VoiceRoster();
       requireCondition(roster.snapshot().length === 0, "ordinary room members entered voice");
-      roster.join("friend-b", "Beta", true);
-      roster.join("friend-a", "Alpha", false);
+      requireCondition(roster.upsert("friend-b", "Beta", false, false), "listener was not added");
+      requireCondition(
+        !roster.upsert("friend-b", "Beta", false, true),
+        "equivalent listener state was not idempotent",
+      );
+      roster.upsert("friend-a", "Alpha", true, false);
       const snapshot = roster.snapshot();
       requireCondition(
-        snapshot[0].playerId === "friend-a" && !snapshot[0].muted,
-        "voice roster was inconsistent",
+        snapshot[0].playerId === "friend-a" && snapshot[0].microphoneEnabled && !snapshot[0].muted,
+        "microphone publisher state was inconsistent",
+      );
+      requireCondition(
+        snapshot[1].playerId === "friend-b" && !snapshot[1].microphoneEnabled && snapshot[1].muted,
+        "listen-only participant was exposed as publishing",
       );
       requireCondition(roster.leave("friend-a"), "leaving member remained in voice roster");
       requireCondition(!roster.has("friend-a"), "inactive member remained signal-authorized");
     },
   },
   {
-    name: "versioned voice membership and P2P signals cross the schema boundary",
+    name: "versioned listening, microphone state, and P2P signals cross the schema boundary",
     run: () => {
       const state = Effect.runSync(
         decodeClientMessage(
           JSON.stringify({
             v: GAME_PROTOCOL_VERSION,
             _tag: "voice-state",
-            joined: false,
+            listening: true,
+            microphoneEnabled: false,
             muted: true,
           }),
         ),
       );
       requireCondition(state._tag === "voice-state", "voice state was not decoded");
-      requireCondition(state.joined === false && state.muted, "voice membership changed");
+      requireCondition(
+        state.listening === true && state.microphoneEnabled === false && state.muted,
+        "listening and microphone state were not independent",
+      );
 
       const offer = Effect.runSync(
         decodeClientMessage(
@@ -77,6 +89,27 @@ export const voiceScenarios: ReadonlyArray<VoiceScenario> = [
       );
       requireCondition(ice._tag === "voice-signal", "ICE signal was not decoded");
       requireCondition(ice.signal._tag === "ice", "ICE payload changed type");
+    },
+  },
+  {
+    name: "legacy joined voice state is rejected",
+    run: () => {
+      let rejected = false;
+      try {
+        Effect.runSync(
+          decodeClientMessage(
+            JSON.stringify({
+              v: GAME_PROTOCOL_VERSION,
+              _tag: "voice-state",
+              joined: true,
+              muted: false,
+            }),
+          ),
+        );
+      } catch {
+        rejected = true;
+      }
+      requireCondition(rejected, "legacy voice membership was accepted");
     },
   },
   {

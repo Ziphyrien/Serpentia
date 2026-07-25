@@ -16,6 +16,7 @@ interface AudioMeter {
 interface PeerEntry {
   pc: RTCPeerConnection;
   audio: HTMLAudioElement;
+  audioTransceiver: RTCRtpTransceiver;
   nickname: string;
   makingOffer: boolean;
   signaling: Promise<void>;
@@ -28,6 +29,7 @@ type VoiceLifecycle = "idle" | "joining" | "joined" | "disposed";
 export interface VoicePeerView {
   playerId: PlayerId;
   nickname: string;
+  microphoneEnabled: boolean;
   muted: boolean;
   speaking: boolean;
   volume: number;
@@ -40,11 +42,12 @@ export interface VoiceManagerEvents {
   onLocalLevel(level: number): void;
   onError(message: string): void;
   sendVoiceSignal(targetPlayerId: PlayerId, signal: VoiceSignal): void;
-  sendVoiceState(joined: boolean, muted: boolean): void;
+  sendVoiceState(listening: boolean, microphoneEnabled: boolean, muted: boolean): void;
 }
 
 const decodeTurnCredentials = Schema.decodeUnknownSync(TurnCredentialsResponse);
 const CREDENTIAL_RETRY_MS = 30_000;
+const SILENT_LISTEN_RETRY_DELAYS_MS: ReadonlyArray<number> = [150, 300, 600];
 const PEER_RESTART_DELAY_MS = 1_000;
 
 /** Cancellable P2P voice lifecycle with deterministic offer ownership. */
@@ -63,8 +66,12 @@ export class VoiceManager {
   private readonly volumes = new Map<PlayerId, number>();
   private readonly speaking = new Set<PlayerId>();
   private lifecycle: VoiceLifecycle = "idle";
-  private operation = 0;
+  private listening = false;
+  private listeningRequest: Promise<boolean> | undefined;
+  private listeningOperation = 0;
+  private microphoneOperation = 0;
   private muted = false;
+  private audioUnlockInstalled = false;
 
   constructor(
     private readonly selfId: () => PlayerId,
@@ -84,13 +91,26 @@ export class VoiceManager {
     return this.muted;
   }
 
+  /** Establishes receive-only signaling without requesting microphone access. */
+  startListening(): Promise<boolean> {
+    if (this.lifecycle === "disposed") return Promise.resolve(false);
+    if (this.listening) return Promise.resolve(true);
+    if (this.listeningRequest !== undefined) return this.listeningRequest;
+
+    const operation = ++this.listeningOperation;
+    const request = this.establishListening(operation).catch(() => false);
+    const tracked = request.finally(() => {
+      if (this.listeningRequest === tracked) this.listeningRequest = undefined;
+    });
+    this.listeningRequest = tracked;
+    return tracked;
+  }
+
   async join(): Promise<void> {
     if (this.lifecycle !== "idle") return;
-    const operation = ++this.operation;
+    const operation = ++this.microphoneOperation;
     this.lifecycle = "joining";
-    const credentialsReadyPromise = this.reuseCachedCredentials(operation)
-      ? Promise.resolve(true)
-      : this.refreshCredentials(operation, false);
+    const listeningReadyPromise = this.startListening();
 
     let stream: MediaStream;
     try {
@@ -98,64 +118,68 @@ export class VoiceManager {
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
     } catch {
-      if (this.isCurrent(operation, "joining")) {
+      if (this.isCurrentMicrophone(operation, "joining")) {
         this.lifecycle = "idle";
-        this.stopLocalResources(true);
         this.events.onError("无法访问麦克风，请检查浏览器权限");
       }
       return;
     }
 
-    if (!this.isCurrent(operation, "joining")) {
+    if (!this.isCurrentMicrophone(operation, "joining")) {
       stopStream(stream);
       return;
     }
-    this.localStream = stream;
-
-    const credentialsReady = await credentialsReadyPromise;
-    if (!this.isCurrent(operation, "joining")) {
+    const listeningReady = await listeningReadyPromise;
+    if (!this.isCurrentMicrophone(operation, "joining")) {
       stopStream(stream);
-      if (this.localStream === stream) this.localStream = undefined;
       return;
     }
-    if (!credentialsReady) {
-      this.stopLocalResources();
+    if (!listeningReady) {
+      stopStream(stream);
       this.lifecycle = "idle";
       this.events.onError("语音服务暂时不可用");
-      this.events.onJoinedChanged(false, this.muted);
+      this.events.onJoinedChanged(false, false);
+      return;
+    }
+
+    this.localStream = stream;
+    await this.attachMicrophoneTrack(stream);
+    if (!this.isCurrentMicrophone(operation, "joining")) {
+      stopStream(stream);
+      if (this.localStream === stream) this.localStream = undefined;
       return;
     }
 
     this.lifecycle = "joined";
     this.muted = false;
-    this.events.sendVoiceState(true, false);
-    this.reconcilePeers();
+    this.events.sendVoiceState(true, true, false);
     this.attachLocalMeter();
     this.startLevelMeter();
     this.events.onJoinedChanged(true, false);
     this.emitPeers();
   }
 
-  /** Cancels an in-flight join as well as an established voice session. */
+  /** Stops microphone publication while keeping receive-only voice active. */
   leave(): void {
     if (this.lifecycle === "idle" || this.lifecycle === "disposed") return;
     const wasJoined = this.lifecycle === "joined";
-    this.operation += 1;
+    this.microphoneOperation += 1;
     this.lifecycle = "idle";
-    if (wasJoined) this.events.sendVoiceState(false, true);
-    this.stopLocalResources(true);
+    if (wasJoined && this.listening) this.events.sendVoiceState(true, false, true);
+    this.stopMicrophoneResources();
     this.muted = false;
     this.events.onJoinedChanged(false, false);
     this.emitPeers();
   }
 
   setMuted(muted: boolean): void {
+    if (this.lifecycle !== "joined") return;
     this.muted = muted;
     this.localStream?.getAudioTracks().forEach((track) => {
       track.enabled = !muted;
     });
-    if (this.lifecycle === "joined") this.events.sendVoiceState(true, muted);
-    this.events.onJoinedChanged(this.lifecycle === "joined", muted);
+    if (this.listening) this.events.sendVoiceState(true, true, muted);
+    this.events.onJoinedChanged(true, muted);
     this.emitPeers();
   }
 
@@ -181,18 +205,21 @@ export class VoiceManager {
     this.emitPeers();
   }
 
-  /** Reannounces membership and creates fresh peers after a new welcome. */
+  /** Reannounces receive and microphone state after a new welcome. */
   handleSignalingReconnect(participants: ReadonlyArray<VoiceParticipant>): void {
     for (const playerId of this.peers.keys()) this.dropPeer(playerId);
     this.roster = new Map(participants.map((participant) => [participant.playerId, participant]));
-    if (this.lifecycle === "joined") this.events.sendVoiceState(true, this.muted);
+    if (this.listening) {
+      const microphoneEnabled = this.lifecycle === "joined";
+      this.events.sendVoiceState(true, microphoneEnabled, microphoneEnabled ? this.muted : true);
+    }
     this.reconcilePeers();
     this.emitPeers();
   }
 
   /** Serializes each peer's signaling so ICE cannot overtake its remote description. */
   async handleSignal(fromPlayerId: PlayerId, signal: VoiceSignal): Promise<void> {
-    if (this.lifecycle !== "joined") return;
+    if (!this.listening) return;
     const participant = this.roster.get(fromPlayerId);
     if (!participant) return;
     const peer = this.ensurePeer(participant);
@@ -203,21 +230,27 @@ export class VoiceManager {
 
   dispose(): void {
     if (this.lifecycle === "disposed") return;
-    const wasJoined = this.lifecycle === "joined";
-    this.operation += 1;
+    this.microphoneOperation += 1;
+    this.listeningOperation += 1;
     this.lifecycle = "disposed";
-    if (wasJoined) this.events.sendVoiceState(false, true);
-    this.stopLocalResources();
+    if (this.listening) this.events.sendVoiceState(false, false, true);
+    this.listening = false;
+    this.listeningRequest = undefined;
+    this.stopListeningResources();
     this.events.onJoinedChanged(false, false);
     this.emitPeers();
   }
 
-  private isCurrent(operation: number, lifecycle: VoiceLifecycle): boolean {
-    return this.operation === operation && this.lifecycle === lifecycle;
+  private isCurrentMicrophone(operation: number, lifecycle: VoiceLifecycle): boolean {
+    return this.microphoneOperation === operation && this.lifecycle === lifecycle;
+  }
+
+  private isCurrentListening(operation: number): boolean {
+    return this.listeningOperation === operation && this.lifecycle !== "disposed";
   }
 
   private reconcilePeers(): void {
-    if (this.lifecycle !== "joined") return;
+    if (!this.listening) return;
     for (const participant of this.roster.values()) {
       if (participant.playerId !== this.selfId()) this.ensurePeer(participant);
     }
@@ -241,9 +274,18 @@ export class VoiceManager {
     const audio = new Audio();
     audio.autoplay = true;
     audio.volume = this.volumes.get(participant.playerId) ?? 1;
+    const localTrack = this.localStream?.getAudioTracks()[0];
+    const audioTransceiver =
+      localTrack !== undefined && this.localStream !== undefined
+        ? pc.addTransceiver(localTrack, {
+            direction: "sendrecv",
+            streams: [this.localStream],
+          })
+        : pc.addTransceiver("audio", { direction: "sendrecv" });
     const entry: PeerEntry = {
       pc,
       audio,
+      audioTransceiver,
       nickname: participant.nickname,
       makingOffer: false,
       signaling: Promise.resolve(),
@@ -252,12 +294,8 @@ export class VoiceManager {
     };
     this.peers.set(participant.playerId, entry);
 
-    if (this.localStream) {
-      for (const track of this.localStream.getTracks()) pc.addTrack(track, this.localStream);
-    }
-
     pc.onicecandidate = (event) => {
-      if (this.lifecycle !== "joined" || this.peers.get(participant.playerId) !== entry) return;
+      if (!this.listening || this.peers.get(participant.playerId) !== entry) return;
       const candidate = event.candidate;
       this.events.sendVoiceSignal(participant.playerId, {
         _tag: "ice",
@@ -268,10 +306,9 @@ export class VoiceManager {
       });
     };
     pc.ontrack = (event) => {
-      const [stream] = event.streams;
-      if (!stream) return;
+      const stream = event.streams[0] ?? new MediaStream([event.track]);
       entry.audio.srcObject = stream;
-      void entry.audio.play().catch(() => undefined);
+      this.playPeerAudio(entry);
       this.attachLevelMeter(participant.playerId, stream);
     };
     pc.onconnectionstatechange = () => {
@@ -335,7 +372,7 @@ export class VoiceManager {
     entry: PeerEntry,
     iceRestart: boolean,
   ): Promise<void> {
-    if (this.lifecycle !== "joined" || entry.makingOffer || entry.pc.signalingState !== "stable") {
+    if (!this.listening || entry.makingOffer || entry.pc.signalingState !== "stable") {
       return;
     }
     try {
@@ -351,16 +388,12 @@ export class VoiceManager {
   }
 
   private schedulePeerRestart(playerId: PlayerId, entry: PeerEntry): void {
-    if (
-      this.lifecycle !== "joined" ||
-      this.selfId() >= playerId ||
-      entry.restartTimer !== undefined
-    ) {
+    if (!this.listening || this.selfId() >= playerId || entry.restartTimer !== undefined) {
       return;
     }
     entry.restartTimer = setTimeout(() => {
       entry.restartTimer = undefined;
-      if (this.peers.get(playerId) !== entry || this.lifecycle !== "joined") return;
+      if (this.peers.get(playerId) !== entry || !this.listening) return;
       entry.pc.restartIce();
       void this.makeOffer(playerId, entry, true);
     }, PEER_RESTART_DELAY_MS);
@@ -382,6 +415,39 @@ export class VoiceManager {
     meter?.analyser.disconnect();
     this.levels.delete(playerId);
     this.speaking.delete(playerId);
+  }
+
+  private async establishListening(operation: number): Promise<boolean> {
+    const cached = this.reuseCachedCredentials(operation);
+    if (!cached && !(await this.fetchCredentialsWithRetry(operation))) return false;
+    if (!this.isCurrentListening(operation)) return false;
+
+    this.listening = true;
+    this.installAudioUnlock();
+    const microphoneEnabled = this.lifecycle === "joined";
+    this.events.sendVoiceState(true, microphoneEnabled, microphoneEnabled ? this.muted : true);
+    this.reconcilePeers();
+    this.emitPeers();
+    return true;
+  }
+
+  private async attachMicrophoneTrack(stream: MediaStream): Promise<void> {
+    const track = stream.getAudioTracks()[0];
+    if (track === undefined) return;
+    await Promise.all(
+      [...this.peers.values()].map((peer) =>
+        peer.audioTransceiver.sender.replaceTrack(track).catch(() => undefined),
+      ),
+    );
+  }
+
+  private async fetchCredentialsWithRetry(operation: number): Promise<boolean> {
+    for (const delay of [0, ...SILENT_LISTEN_RETRY_DELAYS_MS]) {
+      if (delay > 0) await wait(delay);
+      if (!this.isCurrentListening(operation)) return false;
+      if (await this.refreshCredentials(operation, false)) return true;
+    }
+    return false;
   }
 
   private reuseCachedCredentials(operation: number): boolean {
@@ -406,17 +472,13 @@ export class VoiceManager {
       });
       if (!response.ok) throw new Error(`TURN credentials returned ${response.status}`);
       const credentials = decodeTurnCredentials(await response.json());
-      if (this.operation !== operation || this.lifecycle === "disposed") return false;
+      if (!this.isCurrentListening(operation)) return false;
       this.credentials = credentials;
       const iceServers = toRtcIceServers(credentials.iceServers);
       for (const [playerId, peer] of this.peers) {
         try {
           peer.pc.setConfiguration({ iceServers });
-          if (
-            this.lifecycle === "joined" &&
-            this.selfId() < playerId &&
-            peer.pc.signalingState === "stable"
-          ) {
+          if (this.listening && this.selfId() < playerId && peer.pc.signalingState === "stable") {
             peer.pc.restartIce();
             void this.makeOffer(playerId, peer, true);
           }
@@ -431,7 +493,7 @@ export class VoiceManager {
       );
       return true;
     } catch {
-      if (reportError && !request.signal.aborted && this.operation === operation) {
+      if (reportError && !request.signal.aborted && this.isCurrentListening(operation)) {
         this.events.onError("语音服务暂时不可用");
       }
       return false;
@@ -445,14 +507,28 @@ export class VoiceManager {
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = undefined;
       void this.refreshCredentials(operation, true).then((refreshed) => {
-        if (!refreshed && this.operation === operation && this.lifecycle === "joined") {
+        if (!refreshed && this.isCurrentListening(operation) && this.listening) {
           this.scheduleCredentialRefresh(operation, CREDENTIAL_RETRY_MS);
         }
       });
     }, delay);
   }
 
-  private stopLocalResources(retainCredentials = false): void {
+  private stopMicrophoneResources(): void {
+    for (const peer of this.peers.values()) {
+      void peer.audioTransceiver.sender.replaceTrack(null).catch(() => undefined);
+    }
+    this.localStream?.getTracks().forEach((track) => track.stop());
+    this.localStream = undefined;
+    this.localMeter?.source.disconnect();
+    this.localMeter?.analyser.disconnect();
+    this.localMeter = undefined;
+    this.lastLocalLevel = 0;
+    this.events.onLocalLevel(0);
+  }
+
+  private stopListeningResources(): void {
+    this.stopMicrophoneResources();
     this.credentialRequest?.abort();
     this.credentialRequest = undefined;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
@@ -460,18 +536,37 @@ export class VoiceManager {
     if (this.levelTimer) clearInterval(this.levelTimer);
     this.levelTimer = undefined;
     for (const playerId of this.peers.keys()) this.dropPeer(playerId);
-    this.localStream?.getTracks().forEach((track) => track.stop());
-    this.localStream = undefined;
-    if (!retainCredentials) this.credentials = undefined;
-    this.localMeter?.source.disconnect();
-    this.localMeter?.analyser.disconnect();
-    this.localMeter = undefined;
+    this.credentials = undefined;
     this.levels.clear();
     this.speaking.clear();
-    this.lastLocalLevel = 0;
-    this.events.onLocalLevel(0);
+    this.removeAudioUnlock();
     void this.audioContext?.close().catch(() => undefined);
     this.audioContext = undefined;
+  }
+
+  private installAudioUnlock(): void {
+    if (this.audioUnlockInstalled || typeof window === "undefined") return;
+    this.audioUnlockInstalled = true;
+    window.addEventListener("pointerup", this.unlockAudio, { capture: true, passive: true });
+    window.addEventListener("keydown", this.unlockAudio, { capture: true });
+  }
+
+  private removeAudioUnlock(): void {
+    if (!this.audioUnlockInstalled || typeof window === "undefined") return;
+    this.audioUnlockInstalled = false;
+    window.removeEventListener("pointerup", this.unlockAudio, { capture: true });
+    window.removeEventListener("keydown", this.unlockAudio, { capture: true });
+  }
+
+  private readonly unlockAudio = (): void => {
+    for (const peer of this.peers.values()) this.playPeerAudio(peer);
+    if (this.audioContext?.state === "suspended") {
+      void this.audioContext.resume().catch(() => undefined);
+    }
+  };
+
+  private playPeerAudio(peer: PeerEntry): void {
+    void peer.audio.play().catch(() => undefined);
   }
 
   private audioMeter(stream: MediaStream): AudioMeter | undefined {
@@ -505,7 +600,10 @@ export class VoiceManager {
     previous?.analyser.disconnect();
     this.levels.delete(playerId);
     const meter = this.audioMeter(stream);
-    if (meter) this.levels.set(playerId, meter);
+    if (meter) {
+      this.levels.set(playerId, meter);
+      this.startLevelMeter();
+    }
   }
 
   private startLevelMeter(): void {
@@ -550,6 +648,7 @@ export class VoiceManager {
       views.push({
         playerId,
         nickname: participant.nickname,
+        microphoneEnabled: participant.microphoneEnabled,
         muted: participant.muted,
         speaking: this.speaking.has(playerId),
         volume: this.volumes.get(playerId) ?? 1,
@@ -559,6 +658,10 @@ export class VoiceManager {
     views.sort((left, right) => left.playerId.localeCompare(right.playerId));
     this.events.onPeersChanged(views);
   }
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function stopStream(stream: MediaStream): void {

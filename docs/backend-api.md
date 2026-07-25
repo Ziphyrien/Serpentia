@@ -128,10 +128,10 @@ wss://<host>/api/parties/game-room/friends
 所有客户端 JSON 消息必须包含：
 
 ```json
-{ "v": 2, "_tag": "..." }
+{ "v": 3, "_tag": "..." }
 ```
 
-当前单条客户端消息上限为 65,536 bytes，客户端只发送文本帧。服务端控制消息使用 JSON 文本，10 Hz `snapshot` 使用快照格式 v2 的有状态二进制 keyframe/delta。
+当前单条客户端消息上限为 65,536 bytes，客户端只发送文本帧。服务端控制消息使用 JSON 文本，10 Hz `snapshot` 使用快照格式 v3 的有状态二进制 keyframe/delta。
 
 ### 客户端消息
 
@@ -139,7 +139,7 @@ wss://<host>/api/parties/game-room/friends
 
 ```json
 {
-  "v": 2,
+  "v": 3,
   "_tag": "input",
   "sequence": 42,
   "targetTick": 1203,
@@ -161,7 +161,7 @@ wss://<host>/api/parties/game-room/friends
 
 ```json
 {
-  "v": 2,
+  "v": 3,
   "_tag": "input-ack",
   "sequence": 42,
   "targetTick": 1203,
@@ -172,22 +172,28 @@ wss://<host>/api/parties/game-room/friends
 心跳：
 
 ```json
-{ "v": 2, "_tag": "ping", "nonce": "client-value" }
+{ "v": 3, "_tag": "ping", "nonce": "client-value" }
 ```
 
-麦克风成员状态：
+语音收听与麦克风状态：
 
 ```json
-{ "v": 2, "_tag": "voice-state", "joined": true, "muted": false }
+{
+  "v": 3,
+  "_tag": "voice-state",
+  "listening": true,
+  "microphoneEnabled": false,
+  "muted": true
+}
 ```
 
-`joined=false` 会离开语音 roster；`joined=true` 时 `muted` 更新静音状态。前端仍必须实际启用、禁用或停止本地音轨。
+`listening=true` 加入语音信令并允许接收队友音频，不要求麦克风权限；`microphoneEnabled` 独立表示是否发布本地麦克风轨道。未开麦时服务端会强制 roster 中的 `muted=true`，但该成员仍可交换 P2P 信令。`listening=false` 才会离开语音 roster。旧 `{ "joined", "muted" }` 格式在 v3 中无效。前端仍必须实际创建、禁用或停止本地音轨。
 
 P2P 信令：
 
 ```json
 {
-  "v": 2,
+  "v": 3,
   "_tag": "voice-signal",
   "targetPlayerId": "friend-b",
   "signal": { "_tag": "offer", "sdp": "..." }
@@ -196,7 +202,7 @@ P2P 信令：
 
 ```json
 {
-  "v": 2,
+  "v": 3,
   "_tag": "voice-signal",
   "targetPlayerId": "friend-a",
   "signal": { "_tag": "answer", "sdp": "..." }
@@ -205,7 +211,7 @@ P2P 信令：
 
 ```json
 {
-  "v": 2,
+  "v": 3,
   "_tag": "voice-signal",
   "targetPlayerId": "friend-b",
   "signal": {
@@ -226,7 +232,7 @@ ICE 收集结束时允许 `candidate: null`。后端只向已认证且在线的�
 
 ```json
 {
-  "v": 2,
+  "v": 3,
   "_tag": "welcome",
   "selfPlayerId": "friend-a",
   "resumed": false,
@@ -242,7 +248,7 @@ ICE 收集结束时允许 `candidate: null`。后端只向已认证且在线的�
 
 ```json
 {
-  "v": 2,
+  "v": 3,
   "_tag": "snapshot",
   "serverTime": 1784740000100,
   "snapshot": {},
@@ -254,7 +260,7 @@ ICE 收集结束时允许 `candidate: null`。后端只向已认证且在线的�
 
 其他服务端消息：
 
-- `voice-roster`：仅包含当前已加入语音的成员及其静音状态
+- `voice-roster`：仅包含当前收听成员，并分别给出 `microphoneEnabled` 与 `muted`
 - `voice-signal`：包含可信的 `fromPlayerId` 及 offer/answer/ICE
 - `pong`：回显 nonce，并附服务端时间
 - `error`：稳定错误码和 `retryable` 提示
