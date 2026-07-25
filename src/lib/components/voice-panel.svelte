@@ -142,10 +142,6 @@
               </div>
             {/if}
           </div>
-        {:else}
-          <p class="rounded-2xl bg-white/5 px-4 py-5 text-center text-sm text-white/40">
-            房间里的其他成员会自动显示在这里
-          </p>
         {/each}
       </div>
     </Dialog.Content>
