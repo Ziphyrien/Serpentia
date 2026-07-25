@@ -36,7 +36,7 @@ GET /api/session
 ```json
 {
   "authenticated": true,
-  "playerId": "friend-a",
+  "playerId": "550e8400-e29b-41d4-a716-446655440000",
   "nickname": "Alpha",
   "expiresAt": 1784740000000
 }
@@ -55,17 +55,15 @@ POST /api/session
 Content-Type: application/json
 
 {
-  "key": "XXXX-XXXX-XXXX",
   "nickname": "Alpha"
 }
 ```
 
-成功后设置 `HttpOnly`、`SameSite=Strict` 的 `serpentia_session` cookie。长期访问码不会进入 WebSocket URL，也不会返回给前端。
+成功后为本次会话生成独立 `playerId`，并设置 `HttpOnly`、`SameSite=Strict` 的 `serpentia_session` cookie。
 
 可能的错误码：
 
-- `INVALID_REQUEST`：Content-Type、JSON 或字段格式无效
-- `INVALID_ACCESS`：访问码或昵称无效
+- `INVALID_REQUEST`：Content-Type、JSON 或昵称格式无效
 - `RATE_LIMITED`：同一来源一分钟内尝试过多
 - `RUNTIME_UNAVAILABLE`：Bun 服务或房间暂不可用
 - `SERVER_MISCONFIGURED`：生产 secret 缺失或格式错误
@@ -96,7 +94,7 @@ POST /api/turn-credentials
         "turn:voice.example.com:3478?transport=tcp",
         "turns:voice.example.com:5349?transport=tcp"
       ],
-      "username": "1784761600:friend-a",
+      "username": "1784761600:550e8400-e29b-41d4-a716-446655440000",
       "credential": "temporary-hmac-credential"
     }
   ],
@@ -301,15 +299,13 @@ WebSocket 错误码：
 
 ## 生产配置
 
-生成访问码、哈希注册表和独立会话签名 secret：
+生成独立会话签名 secret：
 
 ```bash
-bun run backend:secrets -- friend-a friend-b
+bun run backend:secrets
 ```
 
-该命令只输出到终端，不写入仓库。访问码只展示一次，应分别交给对应朋友。
-
-将命令输出的两个值写入 VPS 的 `.env`，并配置 Bun/TLS/coturn：
+该命令只输出到终端，不写入仓库。将输出的值写入 VPS 的 `.env`，并配置 Bun/TLS/coturn：
 
 ```dotenv
 NODE_ENV=production
@@ -318,23 +314,13 @@ PORT=443
 COOKIE_SECURE=true
 TLS_CERT_FILE=/etc/letsencrypt/live/snake.example.com/fullchain.pem
 TLS_KEY_FILE=/etc/letsencrypt/live/snake.example.com/privkey.pem
-ACCESS_KEY_HASHES='[...]'
 SESSION_SIGNING_SECRET=...
 STUN_URLS=stun:voice.example.com:3478
 TURN_URLS=turn:voice.example.com:3478?transport=udp,turns:voice.example.com:5349?transport=tcp
 TURN_SHARED_SECRET=...
 ```
 
-`ACCESS_KEY_HASHES` 的格式为：
-
-```json
-[
-  { "playerId": "friend-a", "hash": "64-char-sha256-hex" },
-  { "playerId": "friend-b", "hash": "64-char-sha256-hex" }
-]
-```
-
-`playerId` 只能使用 ASCII 字母、数字、下划线和连字符。生产前执行：
+生产前执行：
 
 ```bash
 bun run test

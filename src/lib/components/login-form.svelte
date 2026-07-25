@@ -4,37 +4,19 @@
 
   let { session }: { session: SessionStore } = $props();
 
-  let nickname = $state("");
-  let accessKey = $state("");
   let error = $state<string | undefined>(undefined);
   let submitting = $state(false);
-
-  function formatKey(raw: string): string {
-    const cleaned = raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
-    return cleaned.replace(/(.{4})(?=.)/g, "$1-");
-  }
-
-  function onKeyInput(event: Event): void {
-    const input = event.currentTarget as HTMLInputElement;
-    const formatted = formatKey(input.value);
-    if (input.value !== formatted) input.value = formatted;
-    accessKey = formatted;
-  }
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     if (submitting) return;
     error = undefined;
-    if (!nickname.trim()) {
+    if (!session.savedNickname.trim()) {
       error = "先给自己起个名字吧";
       return;
     }
-    if (accessKey.replace(/-/g, "").length < 12) {
-      error = "访问码没输完哦";
-      return;
-    }
     submitting = true;
-    const message = await session.login(accessKey, nickname.trim());
+    const message = await session.login(session.savedNickname.trim());
     submitting = false;
     if (message) error = message;
   }
@@ -56,20 +38,11 @@
 
     <form class="flex w-full flex-col gap-3" onsubmit={submit}>
       <input
-        bind:value={nickname}
+        bind:value={session.savedNickname}
         type="text"
         maxlength="24"
         placeholder="你的昵称"
         class="h-13 w-full rounded-full border-2 border-white/15 bg-white/10 px-6 text-center text-lg font-bold text-white placeholder-white/45 backdrop-blur-sm outline-none transition focus:border-lime-300/70 focus:bg-white/15"
-      />
-      <input
-        value={accessKey}
-        oninput={onKeyInput}
-        type="text"
-        inputmode="text"
-        autocomplete="off"
-        placeholder="访问码 XXXX-XXXX-XXXX"
-        class="h-13 w-full rounded-full border-2 border-white/15 bg-white/10 px-6 text-center font-mono text-lg font-bold tracking-wider text-white placeholder-white/45 backdrop-blur-sm outline-none transition focus:border-lime-300/70 focus:bg-white/15"
       />
       <button
         type="submit"
@@ -84,6 +57,5 @@
       <p class="mt-4 rounded-full bg-red-500/85 px-5 py-1.5 text-sm font-bold text-white shadow-lg">{error}</p>
     {/if}
 
-    <p class="mt-10 text-xs text-white/40">朋友专属房间 · 访问码找房主领取</p>
   </div>
 </div>

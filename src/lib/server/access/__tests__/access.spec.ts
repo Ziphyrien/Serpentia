@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
-import { accessScenarios } from "./access-scenarios";
+import { sessionScenarios } from "./access-scenarios";
 
-describe("friend access session", () => {
-  for (const scenario of accessScenarios) {
+describe("sessions", () => {
+  for (const scenario of sessionScenarios) {
     it(scenario.name, async () => {
       await expect(Promise.resolve().then(() => scenario.run())).resolves.not.toThrow();
     });

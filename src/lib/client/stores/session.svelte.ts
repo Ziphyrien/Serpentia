@@ -18,10 +18,10 @@ const decodeBootstrap = Schema.decodeUnknownSync(GameBootstrapResponse);
 const decodeSessionStatus = Schema.decodeUnknownSync(SessionStatus);
 const decodeSessionInfo = Schema.decodeUnknownSync(SessionInfo);
 const decodeSessionError = Schema.decodeUnknownSync(SessionErrorResponse);
+const NICKNAME_STORAGE_KEY = "serpentia.nickname";
 
 const ERROR_MESSAGES: Record<SessionErrorCode, string> = {
   INVALID_REQUEST: "请求格式有误，请重试",
-  INVALID_ACCESS: "访问码或昵称不正确",
   RATE_LIMITED: "尝试太频繁了，休息一分钟再来",
   RUNTIME_UNAVAILABLE: "服务暂时不可用，请稍后再试",
   SERVER_MISCONFIGURED: "服务器配置异常，请联系房主",
@@ -30,6 +30,7 @@ const ERROR_MESSAGES: Record<SessionErrorCode, string> = {
 /** Session bootstrap and authentication with schema-validated HTTP boundaries. */
 export class SessionStore {
   state = $state<SessionState>({ status: "loading" });
+  savedNickname = $state(loadNickname());
   private operation = 0;
 
   async bootstrap(): Promise<void> {
@@ -64,8 +65,14 @@ export class SessionStore {
     }
   }
 
-  async login(key: string, nickname: string): Promise<string | undefined> {
+  async login(nickname: string): Promise<string | undefined> {
     const operation = ++this.operation;
+    this.savedNickname = nickname;
+    try {
+      localStorage.setItem(NICKNAME_STORAGE_KEY, nickname);
+    } catch {
+      // Login still works when browser storage is unavailable.
+    }
     const descriptor =
       this.state.status === "anonymous" || this.state.status === "authenticated"
         ? this.state.descriptor
@@ -74,7 +81,7 @@ export class SessionStore {
       const response = await fetch(descriptor?.sessionPath ?? "/api/session", {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ key, nickname }),
+        body: JSON.stringify({ nickname }),
       });
       if (!response.ok) {
         try {
@@ -97,12 +104,17 @@ export class SessionStore {
     }
   }
 
-  async logout(): Promise<void> {
+  async logout(keepalive = false): Promise<void> {
     const operation = ++this.operation;
     const descriptor = this.state.status === "authenticated" ? this.state.descriptor : undefined;
     if (descriptor) this.state = { status: "anonymous", descriptor };
     try {
-      await fetch(descriptor?.sessionPath ?? "/api/session", { method: "DELETE" });
+      await fetch(descriptor?.sessionPath ?? "/api/session", {
+        method: "DELETE",
+        keepalive,
+      });
+    } catch {
+      // The local session is already cleared; page-exit delivery is best effort.
     } finally {
       if (!descriptor && this.operation === operation) await this.bootstrap();
     }
@@ -113,5 +125,13 @@ export class SessionStore {
     this.operation += 1;
     const descriptor = this.state.status === "authenticated" ? this.state.descriptor : undefined;
     if (descriptor) this.state = { status: "anonymous", descriptor };
+  }
+}
+
+function loadNickname(): string {
+  try {
+    return localStorage.getItem(NICKNAME_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
   }
 }

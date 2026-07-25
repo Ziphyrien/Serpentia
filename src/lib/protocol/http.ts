@@ -3,7 +3,6 @@ import { BackendDescriptor, IceServer } from "./game";
 import { PlayerId } from "./state";
 
 export class SessionRequest extends Schema.Class<SessionRequest>("SessionRequest")({
-  key: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(32)),
   nickname: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
 }) {}
 
@@ -25,7 +24,6 @@ export type SessionStatus = typeof SessionStatus.Type;
 
 export const SessionErrorCode = Schema.Union([
   Schema.Literal("INVALID_REQUEST"),
-  Schema.Literal("INVALID_ACCESS"),
   Schema.Literal("RATE_LIMITED"),
   Schema.Literal("RUNTIME_UNAVAILABLE"),
   Schema.Literal("SERVER_MISCONFIGURED"),

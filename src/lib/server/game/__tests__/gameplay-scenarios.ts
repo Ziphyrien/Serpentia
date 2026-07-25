@@ -1,9 +1,3 @@
-import {
-  generateAccessKey,
-  hashAccessKey,
-  identifyAccessKey,
-  normalizeAccessKey,
-} from "../../access/access-key";
 import { Effect } from "effect";
 import {
   decodeClientMessage,
@@ -215,26 +209,6 @@ export const gameplayScenarios: ReadonlyArray<GameplayScenario> = [
       requireCondition(
         decoded.snapshot.snakes[0].targetAngle === 0,
         "wire snapshot omitted its steering target",
-      );
-    },
-  },
-  {
-    name: "short friend keys normalize, hash, and identify without plaintext storage",
-    run: async () => {
-      const formatted = generateAccessKey(new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]));
-      const normalized = normalizeAccessKey(formatted);
-      requireCondition(normalized !== undefined, "generated key did not normalize");
-      requireCondition(formatted.length === 14, "generated key is not human-sized");
-      const hash = await hashAccessKey(formatted);
-      requireCondition(hash !== undefined && hash.length === 64, "key hash is invalid");
-      const records = new Map([[hash, "friend-a"]]);
-      requireCondition(
-        (await identifyAccessKey(formatted.toLowerCase(), records)) === "friend-a",
-        "key was not identified",
-      );
-      requireCondition(
-        (await identifyAccessKey("0000-0000-0000", records)) === undefined,
-        "unknown key was accepted",
       );
     },
   },

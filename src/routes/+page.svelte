@@ -11,8 +11,15 @@
 
   onMount(() => {
     const disposeFullscreen = installTouchFullscreen();
+    const logoutOnPageExit = (): void => {
+      if (session.state.status === "authenticated") void session.logout(true);
+    };
+    window.addEventListener("pagehide", logoutOnPageExit);
     void session.bootstrap();
-    return disposeFullscreen;
+    return () => {
+      window.removeEventListener("pagehide", logoutOnPageExit);
+      disposeFullscreen();
+    };
   });
 </script>
 

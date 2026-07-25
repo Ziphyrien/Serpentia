@@ -3,7 +3,7 @@ interface AttemptWindow {
   readonly count: number;
 }
 
-export class AccessAttemptLimiter {
+export class AttemptLimiter {
   private readonly windows = new Map<string, AttemptWindow>();
   private lastPrunedAt = 0;
 

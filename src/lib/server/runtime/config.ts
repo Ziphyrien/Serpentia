@@ -1,6 +1,5 @@
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import type { IceServer } from "../../protocol";
-import { parseAccessKeyRegistry } from "../access/registry";
 import { isSessionSigningSecretConfigured } from "../access/session";
 import { isCoturnConfigured, type CoturnConfig } from "../voice/coturn";
 
@@ -9,7 +8,6 @@ const DEFAULT_STUN_URLS = ["stun:stun.l.google.com:19302"];
 export interface RuntimeConfig {
   readonly host: string;
   readonly port: number;
-  readonly accessKeyHashes: string;
   readonly sessionSigningSecret: string;
   readonly publicIceServers: ReadonlyArray<IceServer>;
   readonly coturn: CoturnConfig | undefined;
@@ -28,13 +26,6 @@ export class RuntimeConfigError extends Schema.TaggedErrorClass<RuntimeConfigErr
 export function loadRuntimeConfig(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): RuntimeConfig {
-  const accessKeyHashes = requireValue(environment, "ACCESS_KEY_HASHES");
-  try {
-    Effect.runSync(parseAccessKeyRegistry(accessKeyHashes));
-  } catch {
-    throw RuntimeConfigError.make({ message: "ACCESS_KEY_HASHES is not a valid registry" });
-  }
-
   const sessionSigningSecret = requireValue(environment, "SESSION_SIGNING_SECRET");
   if (!isSessionSigningSecretConfigured(sessionSigningSecret)) {
     throw RuntimeConfigError.make({
@@ -67,7 +58,6 @@ export function loadRuntimeConfig(
   return {
     host: environment.HOST?.trim() || "0.0.0.0",
     port: parsePort(environment.PORT),
-    accessKeyHashes,
     sessionSigningSecret,
     publicIceServers: stunUrls.length > 0 ? [{ urls: stunUrls }] : [],
     coturn,

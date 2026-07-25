@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import {
   SessionRequest,
   type BackendDescriptor,
@@ -7,8 +7,6 @@ import {
   type TurnCredentialsErrorCode,
   type TurnCredentialsResponse,
 } from "../../protocol";
-import { identifyAccessKey } from "../access/access-key";
-import { parseAccessKeyRegistry } from "../access/registry";
 import {
   SESSION_COOKIE_NAME,
   SESSION_TTL_SECONDS,
@@ -26,15 +24,11 @@ import { expiredSessionCookie, readCookie, sessionCookie } from "./cookies";
 const MAX_SESSION_BODY_BYTES = 2_048;
 
 export class ApiRouter {
-  private readonly accessRegistry: ReadonlyMap<string, string>;
-
   constructor(
     private readonly config: RuntimeConfig,
     private readonly services: RuntimeServices,
     private readonly descriptor: BackendDescriptor,
-  ) {
-    this.accessRegistry = Effect.runSync(parseAccessKeyRegistry(config.accessKeyHashes));
-  }
+  ) {}
 
   async handle(request: Request, clientAddress: string): Promise<Response | undefined> {
     const pathname = new URL(request.url).pathname;
@@ -100,7 +94,7 @@ export class ApiRouter {
 
   private async createSession(request: Request, clientAddress: string): Promise<Response> {
     if (!isJsonRequest(request)) return sessionError("INVALID_REQUEST", 400);
-    if (!this.services.accessAttempts.allow(clientAddress.slice(0, 128))) {
+    if (!this.services.sessionAttempts.allow(clientAddress.slice(0, 128))) {
       return sessionError("RATE_LIMITED", 429);
     }
 
@@ -113,29 +107,20 @@ export class ApiRouter {
     }
 
     const nickname = normalizeNickname(input.nickname);
-    if (nickname === undefined) return sessionError("INVALID_ACCESS", 401);
+    if (nickname === undefined) return sessionError("INVALID_REQUEST", 400);
 
-    let playerId: string | undefined;
     try {
-      playerId = await identifyAccessKey(input.key, this.accessRegistry);
+      const playerId = crypto.randomUUID();
+      const expiresAt = Date.now() + SESSION_TTL_SECONDS * 1_000;
+      const claims = SessionClaims.make({ playerId, nickname, expiresAt });
+      const token = await signSession(claims, this.config.sessionSigningSecret);
+      return sessionJson(
+        { authenticated: true, playerId, nickname, expiresAt },
+        sessionCookie(token, SESSION_TTL_SECONDS, this.secureCookie(request)),
+      );
     } catch {
       return sessionError("RUNTIME_UNAVAILABLE", 503);
     }
-    if (playerId === undefined) return sessionError("INVALID_ACCESS", 401);
-
-    const expiresAt = Date.now() + SESSION_TTL_SECONDS * 1_000;
-    const claims = SessionClaims.make({ playerId, nickname, expiresAt });
-    let token: string;
-    try {
-      token = await signSession(claims, this.config.sessionSigningSecret);
-    } catch {
-      return sessionError("RUNTIME_UNAVAILABLE", 503);
-    }
-
-    return sessionJson(
-      { authenticated: true, playerId, nickname, expiresAt },
-      sessionCookie(token, SESSION_TTL_SECONDS, this.secureCookie(request)),
-    );
   }
 
   private async handleTurnCredentials(request: Request): Promise<Response> {

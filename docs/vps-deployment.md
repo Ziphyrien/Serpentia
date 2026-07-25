@@ -25,12 +25,12 @@ sudo -u serpentia -H bash -lc 'cd /opt/serpentia && bun install --frozen-lockfil
 
 ```bash
 cd /opt/serpentia
-sudo -u serpentia -H /home/serpentia/.bun/bin/bun run backend:secrets -- friend-a friend-b
+sudo -u serpentia -H /home/serpentia/.bun/bin/bun run backend:secrets
 sudo -u serpentia cp .env.example .env
 sudo -u serpentia chmod 600 .env
 ```
 
-把命令输出的 `ACCESS_KEY_HASHES` 与 `SESSION_SIGNING_SECRET` 写入 `.env`。访问码只显示一次，应分别交给对应玩家。
+把命令输出的 `SESSION_SIGNING_SECRET` 写入 `.env`。
 
 ## 3. HTTPS 证书
 

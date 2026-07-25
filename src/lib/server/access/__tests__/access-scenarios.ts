@@ -1,10 +1,14 @@
-import { Effect } from "effect";
+import { Schema } from "effect";
+import { SessionInfo, SessionRequest } from "../../../protocol";
 import { readBoundedJson } from "../../http/bounded-json";
-import { AccessAttemptLimiter } from "../attempt-limiter";
-import { parseAccessKeyRegistry } from "../registry";
+import { ApiRouter } from "../../http/api-router";
+import { createBackendDescriptor, createRoomMetadata } from "../../room/room-settings";
+import { loadRuntimeConfig } from "../../runtime/config";
+import { RuntimeServices } from "../../runtime/services";
+import { AttemptLimiter } from "../attempt-limiter";
 import { SessionClaims, signSession, verifySession } from "../session";
 
-export interface AccessScenario {
+export interface SessionScenario {
   readonly name: string;
   readonly run: () => void | Promise<void>;
 }
@@ -13,39 +17,7 @@ function requireCondition(condition: boolean, message: string): asserts conditio
   if (!condition) throw new Error(message);
 }
 
-export const accessScenarios: ReadonlyArray<AccessScenario> = [
-  {
-    name: "access registry decodes hashes without exposing raw keys",
-    run: async () => {
-      const registry = await Effect.runPromise(
-        parseAccessKeyRegistry(JSON.stringify([{ playerId: "friend-a", hash: "a".repeat(64) }])),
-      );
-      requireCondition(
-        registry.get("a".repeat(64)) === "friend-a",
-        "registry hash was not decoded",
-      );
-      requireCondition(!registry.has("0000"), "registry exposed an unexpected key");
-    },
-  },
-  {
-    name: "access registry rejects duplicate player identities",
-    run: async () => {
-      let rejected = false;
-      try {
-        await Effect.runPromise(
-          parseAccessKeyRegistry(
-            JSON.stringify([
-              { playerId: "friend-a", hash: "a".repeat(64) },
-              { playerId: "friend-a", hash: "b".repeat(64) },
-            ]),
-          ),
-        );
-      } catch {
-        rejected = true;
-      }
-      requireCondition(rejected, "duplicate player identity was accepted");
-    },
-  },
+export const sessionScenarios: ReadonlyArray<SessionScenario> = [
   {
     name: "session tokens are signed, expiring, and tamper resistant",
     run: async () => {
@@ -78,9 +50,40 @@ export const accessScenarios: ReadonlyArray<AccessScenario> = [
     },
   },
   {
-    name: "friend key attempts are bounded per source window",
+    name: "a nickname alone creates a signed session with a generated player ID",
+    run: async () => {
+      const room = createRoomMetadata([]);
+      const services = new RuntimeServices(room);
+      try {
+        const config = loadRuntimeConfig({
+          NODE_ENV: "development",
+          SESSION_SIGNING_SECRET: "test-session-signing-secret-at-least-32-characters",
+        });
+        const router = new ApiRouter(config, services, createBackendDescriptor(room));
+        const response = await router.handle(
+          new Request("http://snake.example/api/session", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ nickname: "Alpha" }),
+          }),
+          "127.0.0.1",
+        );
+        requireCondition(response?.status === 200, "nickname-only login was rejected");
+        const session = await Schema.decodeUnknownPromise(SessionInfo)(await response.json());
+        requireCondition(session.nickname === "Alpha", "session changed the nickname");
+        requireCondition(
+          response.headers.get("set-cookie")?.includes("serpentia_session=") === true,
+          "session cookie was not set",
+        );
+      } finally {
+        services.dispose();
+      }
+    },
+  },
+  {
+    name: "session attempts are bounded per source window",
     run: () => {
-      const limiter = new AccessAttemptLimiter(2, 1_000);
+      const limiter = new AttemptLimiter(2, 1_000);
       requireCondition(limiter.allow("source-a", 0), "first attempt was blocked");
       requireCondition(limiter.allow("source-a", 100), "second attempt was blocked");
       requireCondition(!limiter.allow("source-a", 200), "excess attempt was accepted");
@@ -89,16 +92,17 @@ export const accessScenarios: ReadonlyArray<AccessScenario> = [
     },
   },
   {
-    name: "session JSON bodies are bounded before decoding",
+    name: "session requests require only a nickname and bound the JSON body",
     run: async () => {
       const payload = await readBoundedJson(
         new Request("https://snake.example/api/session", {
           method: "POST",
-          body: JSON.stringify({ key: "test", nickname: "Alpha" }),
+          body: JSON.stringify({ nickname: "Alpha" }),
         }),
         128,
       );
-      requireCondition(JSON.stringify(payload).includes("Alpha"), "bounded JSON was not decoded");
+      const input = await Schema.decodeUnknownPromise(SessionRequest)(payload);
+      requireCondition(input.nickname === "Alpha", "nickname-only session request was rejected");
 
       let rejected = false;
       try {

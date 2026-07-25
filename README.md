@@ -21,11 +21,11 @@ Web 客户端同时提供 SvelteKit 原生 PWA：应用壳、图标、贴图和�
 
 ```bash
 bun install
-bun run backend:secrets -- friend-a friend-b
+bun run backend:secrets
 cp .env.example .env
 ```
 
-把生成的 `ACCESS_KEY_HASHES` 和 `SESSION_SIGNING_SECRET` 写入 `.env`。本地 HTTP 调试时设置：
+把生成的 `SESSION_SIGNING_SECRET` 写入 `.env`。本地 HTTP 调试时设置：
 
 ```dotenv
 NODE_ENV=development

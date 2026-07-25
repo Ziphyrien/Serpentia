@@ -15,7 +15,7 @@ function requireCondition(condition: boolean, message: string): asserts conditio
 
 export const roomScenarios: ReadonlyArray<RoomScenario> = [
   {
-    name: "one access key controls only one live snake connection",
+    name: "one session controls only one live snake connection",
     run: () => {
       const controller = new RoomController(new GameEngine(gameConfig(), 1, false));
       const first = controller.join("old", { playerId: "friend-a", nickname: "Alpha" });
