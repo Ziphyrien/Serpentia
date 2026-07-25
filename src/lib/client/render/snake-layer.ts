@@ -1,6 +1,5 @@
-import { Container, Graphics, Sprite, Text } from "pixi.js";
+import { Container, Graphics, Text } from "pixi.js";
 import { skinForPlayer, type SkinDefinition } from "../config";
-import type { GameTextures } from "./assets";
 
 interface Point {
   x: number;
@@ -27,23 +26,53 @@ interface ViewBounds {
 
 interface SnakeNodes {
   root: Container;
-  body: Graphics;
-  head: Sprite | undefined;
-  headFallback: Graphics | undefined;
+  gfx: Graphics;
   label: Text;
   skin: SkinDefinition;
+  /** 舌头吐信动画相位（由 id 稳定推导）。 */
+  phase: number;
   lastBody: ReadonlyArray<Point>;
 }
 
+interface Bead {
+  x: number;
+  y: number;
+  r: number;
+  alternate: boolean;
+}
+
+/** 线性混合两个 0xRRGGBB 颜色。 */
+function mixColor(a: number, b: number, t: number): number {
+  const ar = (a >> 16) & 0xff;
+  const ag = (a >> 8) & 0xff;
+  const ab = a & 0xff;
+  const br = (b >> 16) & 0xff;
+  const bg = (b >> 8) & 0xff;
+  const bb = b & 0xff;
+  return (
+    (((ar + (br - ar) * t) | 0) << 16) |
+    (((ag + (bg - ag) * t) | 0) << 8) |
+    ((ab + (bb - ab) * t) | 0)
+  );
+}
+
+/** 吐信周期：大部分时间缩回，短暂弹出（0..1 为伸出程度）。 */
+function tongueOut(nowMs: number, phase: number, boosting: boolean): number {
+  if (boosting) return 1;
+  const cycle = (((nowMs * 0.001 + phase) % 3.2) + 3.2) % 3.2;
+  if (cycle > 0.55) return 0;
+  return Math.sin((cycle / 0.55) * Math.PI);
+}
+
 /**
- * 蛇渲染层：平滑描边身体 + 生成头部贴图 + 昵称标签。
- * 每条蛇一个容器，按需创建/销毁。
+ * 蛇渲染层：贪吃蛇大战风格的程序化绘制。
+ * 身体沿脊椎重采样为一串交叠圆珠（节节分明、向尾部收细），
+ * 头部为大眼卡通脸 + 周期性吐信；无任何贴图。
  */
 export class SnakeLayer {
   readonly container = new Container();
   private snakes = new Map<string, SnakeNodes>();
-
-  constructor(private readonly textures: GameTextures) {}
+  private readonly beads: Array<Bead> = [];
 
   /** 供死亡特效读取蛇最后的外形。 */
   lastBodyOf(id: string): { body: ReadonlyArray<Point>; skin: SkinDefinition } | undefined {
@@ -81,26 +110,8 @@ export class SnakeLayer {
     if (nodes) return nodes;
     const skin = skinForPlayer(id);
     const root = new Container();
-    const body = new Graphics();
-    root.addChild(body);
-
-    const headTexture = this.textures.heads.get(skin.id);
-    let head: Sprite | undefined;
-    let headFallback: Graphics | undefined;
-    if (headTexture) {
-      head = new Sprite(headTexture);
-      head.anchor.set(skin.headGeometry.centerX, skin.headGeometry.centerY);
-      root.addChild(head);
-    } else {
-      headFallback = new Graphics();
-      headFallback.circle(0, 0, 10).fill(skin.body);
-      // 眼睛（朝向 +y，与贴图一致）
-      headFallback.circle(-4.5, 4, 3).fill(0xffffff);
-      headFallback.circle(4.5, 4, 3).fill(0xffffff);
-      headFallback.circle(-4.5, 4.8, 1.6).fill(0x1a1a2e);
-      headFallback.circle(4.5, 4.8, 1.6).fill(0x1a1a2e);
-      root.addChild(headFallback);
-    }
+    const gfx = new Graphics();
+    root.addChild(gfx);
 
     const label = new Text({
       text: "",
@@ -115,10 +126,75 @@ export class SnakeLayer {
     label.anchor.set(0.5, 1);
     root.addChild(label);
 
+    let hash = 0;
+    for (let index = 0; index < id.length; index += 1) {
+      hash = (hash * 31 + id.charCodeAt(index)) | 0;
+    }
+
     this.container.addChild(root);
-    nodes = { root, body, head, headFallback, label, skin, lastBody: [] };
+    nodes = {
+      root,
+      gfx,
+      label,
+      skin,
+      phase: (Math.abs(hash) % 1000) * 0.0032,
+      lastBody: [],
+    };
     this.snakes.set(id, nodes);
     return nodes;
+  }
+
+  /** 沿脊椎按弧长重采样出圆珠位置（头→尾），只收集视野附近的珠子。 */
+  private collectBeads(
+    body: ReadonlyArray<Point>,
+    radius: number,
+    view: ViewBounds,
+  ): Array<Bead> {
+    const beads = this.beads;
+    beads.length = 0;
+
+    let totalLength = 0;
+    for (let index = 1; index < body.length; index += 1) {
+      totalLength += Math.hypot(
+        body[index].x - body[index - 1].x,
+        body[index].y - body[index - 1].y,
+      );
+    }
+    if (totalLength <= 0) return beads;
+
+    const spacing = Math.max(3.5, radius * 0.52);
+    const margin = radius * 3;
+    let target = 0;
+    let travelled = 0;
+    let beadIndex = 0;
+    let startX = body[0].x;
+    let startY = body[0].y;
+    for (let index = 1; index < body.length; index += 1) {
+      const endX = body[index].x;
+      const endY = body[index].y;
+      const segmentLength = Math.hypot(endX - startX, endY - startY);
+      while (segmentLength > 0 && target <= travelled + segmentLength) {
+        const t = (target - travelled) / segmentLength;
+        const x = startX + (endX - startX) * t;
+        const y = startY + (endY - startY) * t;
+        if (
+          x > view.left - margin &&
+          x < view.right + margin &&
+          y > view.top - margin &&
+          y < view.bottom + margin
+        ) {
+          const progress = Math.min(1, target / totalLength);
+          const taper = 0.34 + 0.66 * Math.pow(1 - progress, 1.15);
+          beads.push({ x, y, r: radius * taper, alternate: beadIndex % 2 === 1 });
+        }
+        beadIndex += 1;
+        target += spacing;
+      }
+      travelled += segmentLength;
+      startX = endX;
+      startY = endY;
+    }
+    return beads;
   }
 
   private drawSnake(
@@ -159,75 +235,109 @@ export class SnakeLayer {
     nodes.root.visible = true;
 
     const skin = nodes.skin;
-    const gfx = nodes.body;
+    const gfx = nodes.gfx;
     gfx.clear();
 
-    // 只画视野内（附近）的点，减少 Graphics 负载
-    const margin = radius * 3;
-    const points: Array<Point> = [];
-    for (const point of body) {
-      if (
-        point.x > view.left - margin &&
-        point.x < view.right + margin &&
-        point.y > view.top - margin &&
-        point.y < view.bottom + margin
-      ) {
-        points.push(point);
+    const beads = this.collectBeads(body, radius, view);
+    const alternateColor = mixColor(skin.body, skin.dark, 0.16);
+
+    // 加速光晕先整体垫底，避免盖住相邻圆珠
+    if (snake.boosting) {
+      for (const bead of beads) {
+        gfx.circle(bead.x, bead.y, bead.r * 1.5).fill({ color: skin.light, alpha: 0.13 });
       }
-    }
-    if (points.length >= 2) {
-      if (snake.boosting) {
-        gfx.poly(points, false).stroke({
-          width: radius * 2 + 12,
-          color: skin.light,
-          alpha: 0.3,
-          cap: "round",
-          join: "round",
-        });
-      }
-      gfx.poly(points, false).stroke({
-        width: radius * 2 + 5,
-        color: skin.dark,
-        cap: "round",
-        join: "round",
-      });
-      gfx.poly(points, false).stroke({
-        width: radius * 2,
-        color: skin.body,
-        cap: "round",
-        join: "round",
-      });
-      // 背部高光
-      gfx.poly(points, false).stroke({
-        width: radius * 0.85,
-        color: skin.light,
-        alpha: 0.4,
-        cap: "round",
-        join: "round",
-      });
     }
 
-    const head = body[0];
-    const rotation = snake.angle - Math.PI / 2; // 贴图舌头朝下，旋转到前进方向
-    if (nodes.head) {
-      nodes.head.position.set(head.x, head.y);
-      nodes.head.rotation = rotation;
-      const faceDiameter = nodes.head.texture.width * nodes.skin.headGeometry.diameterRatio;
-      nodes.head.scale.set((radius * 2) / faceDiameter);
+    // 尾→头绘制圆珠：描边 + 主体（深浅相间）+ 背部高光，形成鳞片交叠感
+    for (let index = beads.length - 1; index >= 0; index -= 1) {
+      const bead = beads[index];
+      gfx.circle(bead.x, bead.y, bead.r + 2.3).fill(skin.dark);
     }
-    if (nodes.headFallback) {
-      nodes.headFallback.position.set(head.x, head.y);
-      nodes.headFallback.rotation = rotation;
-      nodes.headFallback.scale.set(radius / 10);
+    for (let index = beads.length - 1; index >= 0; index -= 1) {
+      const bead = beads[index];
+      gfx
+        .circle(bead.x, bead.y, bead.r)
+        .fill(bead.alternate ? alternateColor : skin.body);
+      gfx.circle(bead.x, bead.y, bead.r * 0.5).fill({ color: skin.light, alpha: 0.4 });
     }
+
+    this.drawHead(nodes, snake, nowMs);
 
     nodes.label.visible = showNicknames;
     if (showNicknames) {
+      const head = body[0];
       nodes.label.text = snake.nickname;
-      nodes.label.position.set(head.x, head.y - radius * 2.1);
+      nodes.label.position.set(head.x, head.y - radius * 2.3);
     }
 
     // 无敌期闪烁
     nodes.root.alpha = snake.invulnerable ? 0.55 + Math.sin(nowMs * 0.02) * 0.2 : 1;
+  }
+
+  /** 大眼卡通头：脸部朝向移动方向，周期性吐信，加速时一直吐着。 */
+  private drawHead(nodes: SnakeNodes, snake: SnakeRenderView, nowMs: number): void {
+    const gfx = nodes.gfx;
+    const skin = nodes.skin;
+    const head = snake.body[0];
+    const angle = snake.angle;
+    const forwardX = Math.cos(angle);
+    const forwardY = Math.sin(angle);
+    const perpX = -forwardY;
+    const perpY = forwardX;
+    const headR = snake.radius * 1.16;
+    const hx = head.x + forwardX * snake.radius * 0.25;
+    const hy = head.y + forwardY * snake.radius * 0.25;
+
+    if (snake.boosting) {
+      gfx.circle(hx, hy, headR * 1.6).fill({ color: skin.light, alpha: 0.15 });
+    }
+    gfx.circle(hx, hy, headR + 2.5).fill(skin.dark);
+    gfx.circle(hx, hy, headR).fill(skin.body);
+    // 吻部受光
+    gfx
+      .circle(hx + forwardX * headR * 0.4, hy + forwardY * headR * 0.4, headR * 0.72)
+      .fill({ color: mixColor(skin.body, skin.light, 0.55), alpha: 0.5 });
+
+    // 吐信：基部在吻端，中段前伸后分叉
+    const flick = tongueOut(nowMs, nodes.phase, snake.boosting);
+    if (flick > 0.01) {
+      const baseX = hx + forwardX * headR * 0.92;
+      const baseY = hy + forwardY * headR * 0.92;
+      const midX = baseX + forwardX * headR * 0.85 * flick;
+      const midY = baseY + forwardY * headR * 0.85 * flick;
+      const forkLength = headR * 0.5 * flick;
+      const spread = 0.4;
+      const leftX = midX + Math.cos(angle - spread) * forkLength;
+      const leftY = midY + Math.sin(angle - spread) * forkLength;
+      const rightX = midX + Math.cos(angle + spread) * forkLength;
+      const rightY = midY + Math.sin(angle + spread) * forkLength;
+      const tongue = { width: Math.max(1.8, headR * 0.14), color: 0xff5d73, cap: "round" as const };
+      gfx.poly([baseX, baseY, midX, midY, leftX, leftY], false).stroke(tongue);
+      gfx.poly([midX, midY, rightX, rightY], false).stroke(tongue);
+    }
+
+    // 微笑
+    const smileX = hx + forwardX * headR * 0.36;
+    const smileY = hy + forwardY * headR * 0.36;
+    gfx
+      .arc(smileX, smileY, headR * 0.3, angle - 1.05, angle + 1.05)
+      .stroke({ width: Math.max(1.6, headR * 0.1), color: skin.dark, cap: "round" });
+
+    // 大眼睛：白底 + 前视瞳孔 + 高光点
+    const eyeForward = headR * 0.42;
+    const eyeSide = headR * 0.6;
+    const eyeR = headR * 0.42;
+    for (const side of [-1, 1]) {
+      const eyeX = hx + forwardX * eyeForward + perpX * side * eyeSide;
+      const eyeY = hy + forwardY * eyeForward + perpY * side * eyeSide;
+      gfx.circle(eyeX, eyeY, eyeR + 1.6).fill(skin.dark);
+      gfx.circle(eyeX, eyeY, eyeR).fill(0xffffff);
+      const pupilX = eyeX + forwardX * eyeR * 0.3;
+      const pupilY = eyeY + forwardY * eyeR * 0.3;
+      gfx.circle(pupilX, pupilY, eyeR * 0.48).fill(0x101528);
+      gfx
+        .circle(pupilX - eyeR * 0.16, pupilY - eyeR * 0.18, eyeR * 0.16)
+        .fill(0xffffff);
+    }
   }
 }

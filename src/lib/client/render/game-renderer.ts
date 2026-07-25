@@ -65,8 +65,8 @@ export class GameRenderer {
 
     const rules = this.controller.descriptor.rules;
     this.arena = new ArenaLayer(textures.bgTile, rules.arenaHalfSize);
-    this.food = new FoodLayer(textures.foodPearl, textures.foodGold, rules.foodRadius);
-    this.snakes = new SnakeLayer(textures);
+    this.food = new FoodLayer(rules.foodRadius);
+    this.snakes = new SnakeLayer();
     this.fx = new FxLayer();
 
     app.stage.addChild(this.arena.screenContainer);
