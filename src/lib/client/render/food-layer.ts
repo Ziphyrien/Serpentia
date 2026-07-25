@@ -13,8 +13,6 @@ interface FoodRecord {
   x: number;
   y: number;
   kind: FoodState["kind"];
-  baseScale: number;
-  phase: number;
 }
 
 interface FoodPalette {
@@ -24,55 +22,18 @@ interface FoodPalette {
   base: number;
   /** 底部暗面 */
   shade: number;
-  /** 顶部亮面 */
-  top: number;
 }
 
 const NO_HIDDEN_FOODS: ReadonlySet<number> = new Set();
 const PALETTES: Record<FoodState["kind"], FoodPalette> = {
-  ambient: { glow: 0xffc9e2, base: 0xfff3f8, shade: 0xf0a8cd, top: 0xffffff },
-  boost: { glow: 0xffe9a8, base: 0xffd75e, shade: 0xeda03a, top: 0xfff6d8 },
-  remains: { glow: 0xffd2a0, base: 0xffc27a, shade: 0xe88a3c, top: 0xffe8cc },
+  ambient: { glow: 0xffc9e2, base: 0xfff3f8, shade: 0xf0a8cd },
+  boost: { glow: 0xffe9a8, base: 0xffd75e, shade: 0xeda03a },
+  remains: { glow: 0xffd2a0, base: 0xffc27a, shade: 0xe88a3c },
 };
 
-/** 画一颗四角星形闪光。 */
-function drawSparkle(
-  gfx: GraphicsContext,
-  x: number,
-  y: number,
-  size: number,
-  color: number,
-  alpha: number,
-): void {
-  const k = 0.22;
-  gfx
-    .poly(
-      [
-        x,
-        y - size,
-        x + size * k,
-        y - size * k,
-        x + size,
-        y,
-        x + size * k,
-        y + size * k,
-        x,
-        y + size,
-        x - size * k,
-        y + size * k,
-        x - size,
-        y,
-        x - size * k,
-        y - size * k,
-      ],
-      true,
-    )
-    .fill({ color, alpha });
-}
-
 /**
- * 食物层：程序化绘制的糖珠——径向光泽球体 + 闪光，
- * 加速食物（boost）带倾斜光环；视口裁剪 + 呼吸缩放动画。
+ * 食物层：程序化绘制的固定尺寸糖珠，保留柔和暗面但不带高光与缩放动画。
+ * 加速食物（boost）通过倾斜光环区分。
  */
 export class FoodLayer {
   readonly container = new Container();
@@ -90,7 +51,6 @@ export class FoodLayer {
   sync(
     foods: ReadonlyArray<FoodState>,
     view: ViewBounds,
-    nowMs: number,
     hiddenFoodIds: ReadonlySet<number> = NO_HIDDEN_FOODS,
   ): void {
     const seen = new Set<number>();
@@ -110,11 +70,7 @@ export class FoodLayer {
         food.position.y > view.top &&
         food.position.y < view.bottom;
       record.node.visible = visible;
-      if (visible) {
-        record.node.position.set(food.position.x, food.position.y);
-        const pulse = 1 + Math.sin(nowMs * 0.004 + record.phase) * 0.12;
-        record.node.scale.set(record.baseScale * pulse);
-      }
+      if (visible) record.node.position.set(food.position.x, food.position.y);
     }
     for (const [id, record] of this.records) {
       if (!seen.has(id)) {
@@ -151,8 +107,6 @@ export class FoodLayer {
       x: food.position.x,
       y: food.position.y,
       kind: food.kind,
-      baseScale: 1,
-      phase: (food.id * 7919) % (Math.PI * 2),
     };
   }
 
@@ -166,18 +120,11 @@ export class FoodLayer {
     // 光晕
     context.circle(0, 0, radius * 2).fill({ color: palette.glow, alpha: 0.14 });
     context.circle(0, 0, radius * 1.45).fill({ color: palette.glow, alpha: 0.22 });
-    // 球体：主色 + 底部暗面 + 顶部亮面，模拟径向光泽
+    // 球体：主色 + 底部暗面
     context.circle(0, 0, radius).fill(palette.base);
     context.circle(0, radius * 0.22, radius * 0.8).fill({ color: palette.shade, alpha: 0.5 });
-    context.circle(0, -radius * 0.26, radius * 0.6).fill({ color: palette.top, alpha: 0.95 });
-    // 高光点 + 星形闪光
-    context
-      .circle(-radius * 0.3, -radius * 0.36, radius * 0.18)
-      .fill({ color: 0xffffff, alpha: 0.95 });
-    drawSparkle(context, radius * 0.4, -radius * 0.52, radius * 0.32, 0xffffff, 0.9);
-    // 加速食物：倾斜光环（整体旋转一点点，闪光随动无伤大雅）
+    // 加速食物：倾斜光环
     if (kind === "boost") {
-      drawSparkle(context, -radius * 0.62, radius * 0.55, radius * 0.22, 0xffffff, 0.75);
       context
         .ellipse(0, 0, radius * 1.7, radius * 0.62)
         .stroke({ width: Math.max(1.5, radius * 0.16), color: 0xffedb0, alpha: 0.85 });

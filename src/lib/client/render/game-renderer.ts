@@ -249,7 +249,7 @@ export class GameRenderer {
           );
         }
       }
-      this.food.sync(latestSnapshot.foods, viewBounds, nowMs, hiddenFoods);
+      this.food.sync(latestSnapshot.foods, viewBounds, hiddenFoods);
     } else {
       this.foodSpeculation.reset();
     }
