@@ -88,6 +88,9 @@ export class VoiceManager {
     if (this.lifecycle !== "idle") return;
     const operation = ++this.operation;
     this.lifecycle = "joining";
+    const credentialsReadyPromise = this.reuseCachedCredentials(operation)
+      ? Promise.resolve(true)
+      : this.refreshCredentials(operation, false);
 
     let stream: MediaStream;
     try {
@@ -97,6 +100,7 @@ export class VoiceManager {
     } catch {
       if (this.isCurrent(operation, "joining")) {
         this.lifecycle = "idle";
+        this.stopLocalResources(true);
         this.events.onError("无法访问麦克风，请检查浏览器权限");
       }
       return;
@@ -108,7 +112,7 @@ export class VoiceManager {
     }
     this.localStream = stream;
 
-    const credentialsReady = await this.refreshCredentials(operation, true);
+    const credentialsReady = await credentialsReadyPromise;
     if (!this.isCurrent(operation, "joining")) {
       stopStream(stream);
       if (this.localStream === stream) this.localStream = undefined;
@@ -117,6 +121,7 @@ export class VoiceManager {
     if (!credentialsReady) {
       this.stopLocalResources();
       this.lifecycle = "idle";
+      this.events.onError("语音服务暂时不可用");
       this.events.onJoinedChanged(false, this.muted);
       return;
     }
@@ -138,7 +143,7 @@ export class VoiceManager {
     this.operation += 1;
     this.lifecycle = "idle";
     if (wasJoined) this.events.sendVoiceState(false, true);
-    this.stopLocalResources();
+    this.stopLocalResources(true);
     this.muted = false;
     this.events.onJoinedChanged(false, false);
     this.emitPeers();
@@ -379,6 +384,17 @@ export class VoiceManager {
     this.speaking.delete(playerId);
   }
 
+  private reuseCachedCredentials(operation: number): boolean {
+    const credentials = this.credentials;
+    const refreshDelay = (credentials?.refreshAfter ?? 0) - Date.now();
+    if (credentials === undefined || refreshDelay <= 0) {
+      this.credentials = undefined;
+      return false;
+    }
+    this.scheduleCredentialRefresh(operation, Math.max(CREDENTIAL_RETRY_MS, refreshDelay));
+    return true;
+  }
+
   private async refreshCredentials(operation: number, reportError: boolean): Promise<boolean> {
     const request = new AbortController();
     this.credentialRequest?.abort();
@@ -436,7 +452,7 @@ export class VoiceManager {
     }, delay);
   }
 
-  private stopLocalResources(): void {
+  private stopLocalResources(retainCredentials = false): void {
     this.credentialRequest?.abort();
     this.credentialRequest = undefined;
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
@@ -446,7 +462,7 @@ export class VoiceManager {
     for (const playerId of this.peers.keys()) this.dropPeer(playerId);
     this.localStream?.getTracks().forEach((track) => track.stop());
     this.localStream = undefined;
-    this.credentials = undefined;
+    if (!retainCredentials) this.credentials = undefined;
     this.localMeter?.source.disconnect();
     this.localMeter?.analyser.disconnect();
     this.localMeter = undefined;

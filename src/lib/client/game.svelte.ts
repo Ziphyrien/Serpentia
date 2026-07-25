@@ -154,8 +154,8 @@ export class GameController {
   }
 
   toggleVoice(): void {
-    if (this.voice.isJoined || this.voice.isJoining) this.voice.leave();
-    else void this.voice.join();
+    if (this.voice.isJoined) this.voice.leave();
+    else if (!this.voice.isJoining) void this.voice.join();
   }
 
   setVoiceMuted(muted: boolean): void {

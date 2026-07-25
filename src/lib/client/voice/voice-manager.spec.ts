@@ -103,6 +103,76 @@ describe("voice manager lifecycle", () => {
     expect(recorder.states).toEqual([]);
   });
 
+  it("fetches credentials while microphone permission is still pending", async () => {
+    const media = fakeStream();
+    let resolveStream: ((stream: typeof media.stream) => void) | undefined;
+    const streamPromise = new Promise<typeof media.stream>((resolve) => {
+      resolveStream = resolve;
+    });
+    installNavigator(() => streamPromise);
+    let credentialRequests = 0;
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: () => {
+        credentialRequests += 1;
+        return Promise.resolve(
+          Response.json({
+            iceServers: [{ urls: ["stun:voice.example.test:3478"] }],
+            expiresAt: Date.now() + 60_000,
+            refreshAfter: Date.now() + 30_000,
+          }),
+        );
+      },
+    });
+    const recorder = eventRecorder();
+    const manager = new VoiceManager(() => "friend-a", recorder.events, "/turn");
+
+    const joining = manager.join();
+    expect(credentialRequests).toBe(1);
+    resolveStream?.(media.stream);
+    await joining;
+
+    expect(manager.isJoined).toBe(true);
+    manager.dispose();
+  });
+
+  it("reuses fresh credentials without retaining the microphone stream", async () => {
+    const firstMedia = fakeStream();
+    const secondMedia = fakeStream();
+    let mediaRequests = 0;
+    installNavigator(() => {
+      mediaRequests += 1;
+      return Promise.resolve(mediaRequests === 1 ? firstMedia.stream : secondMedia.stream);
+    });
+    let credentialRequests = 0;
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: () => {
+        credentialRequests += 1;
+        return Promise.resolve(
+          Response.json({
+            iceServers: [{ urls: ["stun:voice.example.test:3478"] }],
+            expiresAt: Date.now() + 60_000,
+            refreshAfter: Date.now() + 30_000,
+          }),
+        );
+      },
+    });
+    const recorder = eventRecorder();
+    const manager = new VoiceManager(() => "friend-a", recorder.events, "/turn");
+
+    await manager.join();
+    manager.leave();
+    expect(firstMedia.track.stopped).toBe(true);
+    await manager.join();
+
+    expect(mediaRequests).toBe(2);
+    expect(credentialRequests).toBe(1);
+    expect(manager.isJoined).toBe(true);
+    manager.dispose();
+    expect(secondMedia.track.stopped).toBe(true);
+  });
+
   it("announces explicit membership and stops tracks on leave", async () => {
     const media = fakeStream();
     installNavigator(() => Promise.resolve(media.stream));
