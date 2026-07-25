@@ -31,10 +31,6 @@ export class ArenaLayer {
     const size = halfSize * 2;
     // 场内微亮底色，让场内/场外有区分
     this.boundary.rect(-halfSize, -halfSize, size, size).fill({ color: 0x151d3d, alpha: 0.35 });
-    // 外圈辉光 + 内圈亮线
-    this.boundary
-      .rect(-halfSize, -halfSize, size, size)
-      .stroke({ width: 26, color: ARENA_COLORS.borderGlow, alpha: 0.5 });
     this.boundary
       .rect(-halfSize, -halfSize, size, size)
       .stroke({ width: 6, color: ARENA_COLORS.border, alpha: 0.95 });

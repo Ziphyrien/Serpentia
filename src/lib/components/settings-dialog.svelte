@@ -21,7 +21,6 @@
 
   let open = $state(false);
 
-  // 设置变化即时生效到音效层（UI → 音效的单一出口）
   $effect(() => sfx.setVolume(settings.sfxVolume));
   $effect(() => sfx.setMuted(settings.sfxMuted));
 </script>

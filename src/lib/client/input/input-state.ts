@@ -1,4 +1,4 @@
-export type InputStateListener = () => void;
+type InputStateListener = () => void;
 
 /**
  * Shared input intent for pointer, keyboard, and joystick controls.

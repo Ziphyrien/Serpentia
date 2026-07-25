@@ -80,7 +80,7 @@ export class SnapshotBuffer {
   sampleRemoteSnakes(renderServerTime: number): Array<InterpolatedSnake> {
     if (this.frames.length === 0) return [];
 
-    let upperIndex = this.frames.findIndex((frame) => frame.serverTime >= renderServerTime);
+    const upperIndex = this.frames.findIndex((frame) => frame.serverTime >= renderServerTime);
     if (upperIndex === 0) return this.viewsFrom(this.frames[0].snapshot);
     if (upperIndex === -1) return this.viewsFrom(this.frames[this.frames.length - 1].snapshot);
 

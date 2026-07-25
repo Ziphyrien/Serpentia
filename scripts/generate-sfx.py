@@ -31,7 +31,7 @@ def write_wav(name: str, samples: list[float]) -> None:
     print(f"wrote {path}")
 
 
-def envelope(t: float, duration: float, attack: float = 0.01, release: float = 0.3) -> float:
+def envelope(t: float, attack: float = 0.01, release: float = 0.3) -> float:
     """简单起音/释音包络，t 为 0..1 进度。"""
     attack_t = max(attack, 1e-4)
     release_t = max(release, 1e-4)
@@ -66,7 +66,7 @@ def tone(
             sample = 2.0 * (phase % 1.0) - 1.0
         else:
             sample = math.sin(phase * math.tau)
-        out.append(sample * volume * envelope(t, duration, attack, release))
+        out.append(sample * volume * envelope(t, attack, release))
     return out
 
 
@@ -118,7 +118,8 @@ def main() -> None:
     for i in range(count):
         t = i / count
         # 低通平滑 + 首尾交叉淡化保证循环无缝
-        smoothed = sum(raw[max(0, i - 6): i + 1]) / len(raw[max(0, i - 6): i + 1])
+        window = raw[max(0, i - 6) : i + 1]
+        smoothed = sum(window) / len(window)
         crossfade = 0.5 - 0.5 * math.cos(t * math.tau)
         loop.append(smoothed * 0.32 * (0.6 + 0.4 * crossfade))
     write_wav("boost", loop)

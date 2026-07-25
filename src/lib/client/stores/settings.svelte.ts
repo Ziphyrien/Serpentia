@@ -19,7 +19,7 @@ const DEFAULTS: SettingsData = {
   highQuality: true,
 };
 
-export type SettingsListener = () => void;
+type SettingsListener = () => void;
 
 /** Local settings with validated persistence and an explicit change boundary. */
 export class SettingsStore {

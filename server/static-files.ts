@@ -35,7 +35,6 @@ export class StaticFileServer {
       return new Response("Not found", { status: 404 });
     }
 
-    // 客户端路由回落到 SPA shell
     return this.fileResponse(request, resolve(this.root, "index.html"), "/index.html");
   }
 

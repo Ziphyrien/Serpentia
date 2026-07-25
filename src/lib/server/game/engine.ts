@@ -1,4 +1,4 @@
-import { advanceSnakeMotion } from "../../game/snake-motion";
+import { advanceSnakeMotion, trimBody } from "../../game/snake-motion";
 import { BodySpatialIndex } from "./body-spatial-index";
 import { defaultGameConfig, snakeRadius, type GameConfig } from "./config";
 import {
@@ -163,25 +163,23 @@ export class GameEngine {
   }
 
   snapshot(): GameSnapshot {
-    const snakes = [...this.snakes.values()]
-      .sort((left, right) => left.id.localeCompare(right.id))
-      .map((snake) => ({
-        id: snake.id,
-        nickname: snake.nickname,
-        body: snake.body.map((point) => ({ x: point.x, y: point.y })),
-        angle: snake.angle,
-        targetAngle: snake.targetAngle,
-        radius: snakeRadius(snake.length, this.config),
-        length: snake.length,
-        score: snake.score,
-        kills: snake.kills,
-        boosting: snake.boosting,
-        alive: snake.alive,
-        invulnerable: snake.alive && snake.invulnerableUntilTick >= this.currentTick,
-        respawnAtTick: snake.respawnAtTick ?? null,
-        lastInputSequence: snake.lastInputSequence,
-        lastInputAppliedTick: snake.lastInputAppliedTick,
-      }));
+    const snakes = this.orderedSnakes.map((snake) => ({
+      id: snake.id,
+      nickname: snake.nickname,
+      body: snake.body.map((point) => ({ x: point.x, y: point.y })),
+      angle: snake.angle,
+      targetAngle: snake.targetAngle,
+      radius: snakeRadius(snake.length, this.config),
+      length: snake.length,
+      score: snake.score,
+      kills: snake.kills,
+      boosting: snake.boosting,
+      alive: snake.alive,
+      invulnerable: snake.alive && snake.invulnerableUntilTick >= this.currentTick,
+      respawnAtTick: snake.respawnAtTick ?? null,
+      lastInputSequence: snake.lastInputSequence,
+      lastInputAppliedTick: snake.lastInputAppliedTick,
+    }));
 
     const leaderboard = snakes
       .filter((snake) => snake.alive)
@@ -204,7 +202,7 @@ export class GameEngine {
   private moveAliveSnakes(): void {
     const secondsPerTick = 1 / this.config.tickRate;
 
-    for (const snake of this.sortedSnakes()) {
+    for (const snake of this.orderedSnakes) {
       if (!snake.alive) continue;
 
       const drained = advanceSnakeMotion(snake, this.config, secondsPerTick);
@@ -226,7 +224,7 @@ export class GameEngine {
 
   private resolveDeaths(): Array<DeathEvent> {
     const pending = new Map<string, DeathCause>();
-    const snakes = this.sortedSnakes().filter((snake) => snake.alive);
+    const snakes = this.orderedSnakes.filter((snake) => snake.alive);
     const bodyIndex = new BodySpatialIndex(this.config.maximumRadius * 2);
 
     for (const other of snakes) {
@@ -234,7 +232,6 @@ export class GameEngine {
       for (let index = 1; index < other.body.length; index += 1) {
         bodyIndex.add({
           snakeId: other.id,
-          segmentIndex: index,
           start: other.body[index - 1],
           end: other.body[index],
         });
@@ -288,7 +285,7 @@ export class GameEngine {
 
   private consumeFood(): Array<number> {
     const consumed = new Set<number>();
-    for (const snake of this.sortedSnakes()) {
+    for (const snake of this.orderedSnakes) {
       if (!snake.alive) continue;
       const head = snake.body[0];
       const reach = snakeRadius(snake.length, this.config) + this.config.foodRadius;
@@ -348,7 +345,7 @@ export class GameEngine {
 
   private respawnReadySnakes(): Array<string> {
     const respawned: Array<string> = [];
-    for (const snake of this.sortedSnakes()) {
+    for (const snake of this.orderedSnakes) {
       if (snake.alive || snake.respawnAtTick === undefined) continue;
       if (snake.respawnAtTick > this.currentTick) continue;
 
@@ -401,13 +398,13 @@ export class GameEngine {
     for (let index = 0; index < pointCount; index += 1) {
       body.push(move(position, angle + Math.PI, index * this.config.bodyPointSpacing));
     }
-    return trimPoints(body, length);
+    trimBody(body, length);
+    return body;
   }
 
   private replenishAmbientFood(): void {
-    let ambientCount = this.ambientFoodCount;
     const extent = this.config.arenaHalfSize - this.config.foodRadius * 2;
-    while (ambientCount < this.config.ambientFoodTarget) {
+    while (this.ambientFoodCount < this.config.ambientFoodTarget) {
       this.addFood(
         {
           x: this.random.between(-extent, extent),
@@ -415,31 +412,6 @@ export class GameEngine {
         },
         this.config.ambientFoodValue,
       );
-      ambientCount += 1;
     }
   }
-
-  private sortedSnakes(): Array<SnakeState> {
-    return this.orderedSnakes;
-  }
-}
-
-function trimPoints(body: Array<Point>, length: number): Array<Point> {
-  let accumulated = 0;
-  for (let index = 1; index < body.length; index += 1) {
-    const previous = body[index - 1];
-    const current = body[index];
-    const segmentLength = distance(previous, current);
-    if (accumulated + segmentLength < length) {
-      accumulated += segmentLength;
-      continue;
-    }
-
-    const remaining = Math.max(0, length - accumulated);
-    const ratio = segmentLength === 0 ? 0 : remaining / segmentLength;
-    body[index] = interpolate(previous, current, ratio);
-    body.splice(index + 1);
-    return body;
-  }
-  return body;
 }

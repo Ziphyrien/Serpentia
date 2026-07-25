@@ -4,7 +4,6 @@
 @custom-variant landscape-short (@media (orientation: landscape) and (max-height: 30rem));
 
 @theme {
-  /* 蛇域夜空配色 */
   --color-night-950: #0b1020;
   --color-night-900: #101736;
   --color-night-800: #151d3d;

@@ -87,10 +87,6 @@ export class VoiceManager {
     return this.lifecycle === "joining";
   }
 
-  get isMuted(): boolean {
-    return this.muted;
-  }
-
   /** Establishes receive-only signaling without requesting microphone access. */
   startListening(): Promise<boolean> {
     if (this.lifecycle === "disposed") return Promise.resolve(false);
@@ -211,7 +207,7 @@ export class VoiceManager {
     this.roster = new Map(participants.map((participant) => [participant.playerId, participant]));
     if (this.listening) {
       const microphoneEnabled = this.lifecycle === "joined";
-      this.events.sendVoiceState(true, microphoneEnabled, microphoneEnabled ? this.muted : true);
+      this.events.sendVoiceState(true, microphoneEnabled, !microphoneEnabled || this.muted);
     }
     this.reconcilePeers();
     this.emitPeers();
@@ -425,7 +421,7 @@ export class VoiceManager {
     this.listening = true;
     this.installAudioUnlock();
     const microphoneEnabled = this.lifecycle === "joined";
-    this.events.sendVoiceState(true, microphoneEnabled, microphoneEnabled ? this.muted : true);
+    this.events.sendVoiceState(true, microphoneEnabled, !microphoneEnabled || this.muted);
     this.reconcilePeers();
     this.emitPeers();
     return true;

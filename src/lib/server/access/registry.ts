@@ -1,6 +1,5 @@
 import { Effect, Schema } from "effect";
 import { PlayerId } from "../../protocol/state";
-import { identifyAccessKey } from "./access-key";
 
 const AccessKeyRecord = Schema.Struct({
   playerId: PlayerId,
@@ -43,13 +42,6 @@ export const parseAccessKeyRegistry = Effect.fn("parseAccessKeyRegistry")(functi
   }
   return registry;
 });
-
-export async function identifyPlayer(
-  accessKey: string,
-  registry: ReadonlyMap<string, string>,
-): Promise<string | undefined> {
-  return identifyAccessKey(accessKey, registry);
-}
 
 function parseJson(serialized: string): unknown {
   return JSON.parse(serialized);

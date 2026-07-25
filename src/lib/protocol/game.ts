@@ -126,9 +126,6 @@ export const IceServer = Schema.Struct({
 });
 export type IceServer = typeof IceServer.Type;
 
-export const PublicIceServer = IceServer;
-export type PublicIceServer = IceServer;
-
 export const ClientGameRules = Schema.Struct({
   arenaHalfSize: Schema.Finite.check(Schema.isGreaterThan(0)),
   baseSpeed: Schema.Finite.check(Schema.isGreaterThan(0)),
@@ -151,7 +148,7 @@ export const RoomMetadata = Schema.Struct({
   snapshotRate: PositiveInteger,
   reconnectGraceTicks: NonNegativeInteger,
   voiceMode: Schema.Literal("p2p"),
-  iceServers: Schema.Array(PublicIceServer),
+  iceServers: Schema.Array(IceServer),
   rules: ClientGameRules,
   limits: RoomLimits,
 });

@@ -7,7 +7,7 @@
 
   const INTENTS = {
     primary:
-      "bg-gradient-to-b from-lime-300 to-lime-500 text-night-950 shadow-[0_4px_0_#3f7a1d] active:shadow-[0_1px_0_#3f7a1d]",
+      "bg-linear-to-b from-lime-300 to-lime-500 text-night-950 shadow-[0_4px_0_#3f7a1d] active:shadow-[0_1px_0_#3f7a1d]",
     ghost: "border border-panel-border bg-panel text-white/85 backdrop-blur-sm hover:bg-white/10",
     danger: "bg-red-500/85 text-white shadow-[0_4px_0_#7f1d1d] active:shadow-[0_1px_0_#7f1d1d]",
   } as const;

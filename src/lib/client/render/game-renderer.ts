@@ -3,7 +3,7 @@ import type { FoodState } from "$lib/protocol";
 import type { GameController } from "../game.svelte";
 import type { SettingsStore } from "../stores/settings.svelte";
 import { RENDER, skinForPlayer } from "../config";
-import { loadGameTextures, type GameTextures } from "./assets";
+import { loadGameTextures } from "./assets";
 import { Camera } from "./camera";
 import { ArenaLayer } from "./arena-layer";
 import { FoodLayer } from "./food-layer";
@@ -18,7 +18,6 @@ import { FoodSpeculation } from "../sim/food-speculation";
  */
 export class GameRenderer {
   private app: Application | undefined;
-  private textures: GameTextures | undefined;
   private world = new Container();
   private camera = new Camera();
   private arena: ArenaLayer | undefined;
@@ -61,13 +60,13 @@ export class GameRenderer {
     app.renderer.on("resize", this.handleResize);
     host.appendChild(app.canvas);
 
-    this.textures = await loadGameTextures();
+    const textures = await loadGameTextures();
     if (this.destroyed) return;
 
     const rules = this.controller.descriptor.rules;
-    this.arena = new ArenaLayer(this.textures.bgTile, rules.arenaHalfSize);
-    this.food = new FoodLayer(this.textures.foodPearl, this.textures.foodGold, rules.foodRadius);
-    this.snakes = new SnakeLayer(this.textures);
+    this.arena = new ArenaLayer(textures.bgTile, rules.arenaHalfSize);
+    this.food = new FoodLayer(textures.foodPearl, textures.foodGold, rules.foodRadius);
+    this.snakes = new SnakeLayer(textures);
     this.fx = new FxLayer();
 
     app.stage.addChild(this.arena.screenContainer);

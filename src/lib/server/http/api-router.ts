@@ -7,7 +7,8 @@ import {
   type TurnCredentialsErrorCode,
   type TurnCredentialsResponse,
 } from "../../protocol";
-import { identifyPlayer, parseAccessKeyRegistry } from "../access/registry";
+import { identifyAccessKey } from "../access/access-key";
+import { parseAccessKeyRegistry } from "../access/registry";
 import {
   SESSION_COOKIE_NAME,
   SESSION_TTL_SECONDS,
@@ -24,7 +25,6 @@ import { expiredSessionCookie, readCookie, sessionCookie } from "./cookies";
 
 const MAX_SESSION_BODY_BYTES = 2_048;
 
-/** Bun HTTP 层使用的无框架 API 路由器。 */
 export class ApiRouter {
   private readonly accessRegistry: ReadonlyMap<string, string>;
 
@@ -117,7 +117,7 @@ export class ApiRouter {
 
     let playerId: string | undefined;
     try {
-      playerId = await identifyPlayer(input.key, this.accessRegistry);
+      playerId = await identifyAccessKey(input.key, this.accessRegistry);
     } catch {
       return sessionError("RUNTIME_UNAVAILABLE", 503);
     }

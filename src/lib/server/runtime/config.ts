@@ -88,8 +88,7 @@ function requireValue(
 }
 
 function optionalValue(value: string | undefined): string | undefined {
-  const normalized = value?.trim();
-  return normalized ? normalized : undefined;
+  return value?.trim() || undefined;
 }
 
 function parsePort(value: string | undefined): number {

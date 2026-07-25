@@ -9,7 +9,6 @@
   let error = $state<string | undefined>(undefined);
   let submitting = $state(false);
 
-  /** 访问码自动格式化为 XXXX-XXXX-XXXX */
   function formatKey(raw: string): string {
     const cleaned = raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 12);
     return cleaned.replace(/(.{4})(?=.)/g, "$1-");
@@ -42,7 +41,6 @@
 </script>
 
 <div class="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-night-950 px-6">
-  <!-- 背景：星空底 + 主视觉 -->
   <div
     class="absolute inset-0 bg-cover bg-center opacity-90"
     style="background-image: url({ASSET_PATHS.bgTile})"

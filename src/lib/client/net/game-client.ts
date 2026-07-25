@@ -13,7 +13,6 @@ import type { PlayerId } from "$lib/protocol/state";
 export interface GameClientEvents {
   onMessage(message: ServerMessage): void;
   onClose(code: number, reason: string): void;
-  onOpen(): void;
 }
 
 /**
@@ -34,11 +33,7 @@ export class GameClient {
     const socket = new WebSocket(this.url);
     socket.binaryType = "arraybuffer";
     this.socket = socket;
-    socket.onopen = () => this.events.onOpen();
     socket.onclose = (event) => this.events.onClose(event.code, event.reason);
-    socket.onerror = () => {
-      // onclose 会随后触发，统一在那里处理
-    };
     socket.onmessage = (event) => {
       if (typeof event.data !== "string" && !(event.data instanceof ArrayBuffer)) return;
       let message: ServerMessage;
@@ -95,8 +90,6 @@ export class GameClient {
     if (!this.socket) return;
     this.socket.onclose = null;
     this.socket.onmessage = null;
-    this.socket.onerror = null;
-    this.socket.onopen = null;
     try {
       this.socket.close(1000, "client closing");
     } catch {

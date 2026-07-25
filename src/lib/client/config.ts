@@ -1,8 +1,3 @@
-/**
- * 客户端静态配置：皮肤注册表、渲染常量、资产路径。
- * 只存放常量，不包含任何行为逻辑。
- */
-
 export interface HeadTextureGeometry {
   /** 圆形头部视觉中心在整张纹理中的归一化坐标（不含伸出的舌头）。 */
   readonly centerX: number;
@@ -13,11 +8,8 @@ export interface HeadTextureGeometry {
 
 export interface SkinDefinition {
   readonly id: string;
-  /** 身体主色 */
   readonly body: number;
-  /** 描边/暗部色 */
   readonly dark: number;
-  /** 高光色 */
   readonly light: number;
   readonly headTexture: string;
   readonly headGeometry: HeadTextureGeometry;
@@ -84,12 +76,10 @@ export const ASSET_PATHS = {
 } as const;
 
 export const RENDER = {
-  /** 插值延迟相对快照间隔的倍率 */
   interpolationDelayFactor: 1.4,
   minInterpolationDelayMs: 90,
   maxInterpolationDelayMs: 260,
   maxDevicePixelRatio: 2,
-  /** 相机缩放随蛇半径变化 */
   zoomAtBaseRadius: 1.45,
   zoomAtMaxRadius: 0.78,
   cameraLerp: 0.12,
@@ -103,6 +93,5 @@ export const INPUT = {
 
 export const ARENA_COLORS = {
   border: 0x3ddc84,
-  borderGlow: 0x1d5c3a,
   danger: 0xf26d5f,
 } as const;

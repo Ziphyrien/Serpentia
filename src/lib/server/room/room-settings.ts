@@ -12,10 +12,10 @@ import { defaultGameConfig } from "../game/config";
 import { INPUT_LAG_TOLERANCE_SECONDS, INPUT_LEAD_TOLERANCE_SECONDS } from "./room-controller";
 
 export const SNAPSHOT_RATE = 10;
-export const RECONNECT_GRACE_SECONDS = 5;
+const RECONNECT_GRACE_SECONDS = 5;
 export const RECONNECT_GRACE_TICKS = defaultGameConfig.tickRate * RECONNECT_GRACE_SECONDS;
 
-export const DEFAULT_PUBLIC_ICE_SERVERS: ReadonlyArray<IceServer> = [
+const DEFAULT_PUBLIC_ICE_SERVERS: ReadonlyArray<IceServer> = [
   { urls: ["stun:stun.l.google.com:19302"] },
 ];
 
@@ -64,4 +64,3 @@ export function createBackendDescriptor(room: RoomMetadata): BackendDescriptor {
 }
 
 export const ROOM_METADATA = createRoomMetadata();
-export const BACKEND_DESCRIPTOR = createBackendDescriptor(ROOM_METADATA);

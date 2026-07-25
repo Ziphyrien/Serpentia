@@ -20,7 +20,7 @@ import { Sfx } from "./audio/sfx";
 import { VoiceManager, type VoicePeerView } from "./voice/voice-manager";
 import type { SettingsStore } from "./stores/settings.svelte";
 
-export type ConnectionStatus = "connecting" | "online" | "reconnecting" | "closed";
+type ConnectionStatus = "connecting" | "online" | "reconnecting" | "closed";
 
 export interface KillFeedEntry {
   id: number;
@@ -189,7 +189,6 @@ export class GameController {
     if (this.destroyed) return;
     const protocol = location.protocol === "https:" ? "wss" : "ws";
     this.client = new GameClient(`${protocol}://${location.host}${this.descriptor.websocketPath}`, {
-      onOpen: () => {},
       onMessage: (message) => this.handleMessage(message),
       onClose: (code, reason) => this.handleClose(code, reason),
     });

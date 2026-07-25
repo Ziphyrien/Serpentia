@@ -102,15 +102,9 @@ export class SnapshotStreamEncoder {
     if (
       this.previous === undefined ||
       this.previousServerTime === undefined ||
-      message.snapshot.tick <= this.previous.tick
+      message.snapshot.tick <= this.previous.tick ||
+      !sameSnakeIdentities(this.previous, message.snapshot)
     ) {
-      const framed = encodeFullStreamFrame(message);
-      this.previous = message.snapshot;
-      this.previousServerTime = message.serverTime;
-      this.previousServerTimeDelta = undefined;
-      return framed;
-    }
-    if (!sameSnakeIdentities(this.previous, message.snapshot)) {
       const framed = encodeFullStreamFrame(message);
       this.previous = message.snapshot;
       this.previousServerTime = message.serverTime;
@@ -152,13 +146,6 @@ export class SnapshotStreamDecoder {
   }
 
   decode(bytes: Uint8Array): SnapshotMessage {
-    if (bytes.length >= 2 && bytes[0] === STREAM_FULL_FRAME) {
-      const message = decodeSnapshotMessage(bytes);
-      this.previous = message.snapshot;
-      this.previousServerTime = message.serverTime;
-      this.previousServerTimeDelta = undefined;
-      return message;
-    }
     if (bytes.length > 0 && isStreamDeltaFrame(bytes[0])) {
       if (this.previous === undefined || this.previousServerTime === undefined) {
         throw new Error("Snapshot delta frame has no base");
@@ -509,7 +496,8 @@ function encodeBodyDelta(
   }
 
   const sameCount = currentPoints.length === previousPoints.length;
-  const mode = bestShift === 2 ? (sameCount ? 1 : 3) : 2;
+  let mode = 2;
+  if (bestShift === 2) mode = sameCount ? 1 : 3;
   const delta: Array<number> = [mode];
   if (bestShift !== 2) writeUnsignedVarint(delta, bestShift);
   if (!sameCount || bestShift !== 2) writeUnsignedVarint(delta, currentPoints.length);
@@ -1163,18 +1151,15 @@ function encodeLeaderboardsDelta(
   previous: ReadonlyArray<LeaderboardEntry>,
   playerIndex: ReadonlyMap<string, number>,
 ): Uint8Array {
-  const full = encodeLeaderboards(entries, snakes, playerIndex);
-  const fullEncoded = new Uint8Array(full.length + 1);
-  fullEncoded[0] = 0;
-  fullEncoded.set(full, 1);
   const sameOrder =
     entries.length === previous.length &&
     entries.every((entry, index) => entry.playerId === previous[index]?.playerId);
   if (sameOrder) return new Uint8Array(0);
-  const delta: Array<number> = [1, 1];
-  for (const byte of full) delta.push(byte);
-  const deltaEncoded = Uint8Array.from(delta);
-  return deltaEncoded.length < fullEncoded.length ? deltaEncoded : fullEncoded;
+
+  const full = encodeLeaderboards(entries, snakes, playerIndex);
+  const encoded = new Uint8Array(full.length + 1);
+  encoded.set(full, 1);
+  return encoded;
 }
 
 function decodeLeaderboardsDelta(

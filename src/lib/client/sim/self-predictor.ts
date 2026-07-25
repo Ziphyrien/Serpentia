@@ -66,10 +66,6 @@ export class SelfPredictor {
     this.tickMs = 1000 / tickRate;
   }
 
-  get isAlive(): boolean {
-    return this.alive;
-  }
-
   get currentLength(): number {
     return this.current?.length ?? 0;
   }
@@ -114,12 +110,8 @@ export class SelfPredictor {
   /** Remaps a late input after the server reports the tick where it really ran. */
   acknowledgeInput(sequence: number, targetTick: number, appliedTick: number): void {
     const input = this.inputsBySequence.get(sequence);
-    if (input === undefined || input.targetTick === appliedTick) return;
-    if (input.targetTick !== targetTick) return;
-
-    const previousTick = input.targetTick;
-    this.inputsBySequence.set(sequence, { ...input, targetTick: appliedTick });
-    this.replayFromTick(Math.max(this.lastServerTick, Math.min(previousTick, appliedTick) - 1));
+    if (input === undefined || input.targetTick !== targetTick) return;
+    this.remapFromAuthority(sequence, appliedTick);
   }
 
   reconcile(snapshot: SnakeSnapshot, snapshotTick: number, localNow: number): void {

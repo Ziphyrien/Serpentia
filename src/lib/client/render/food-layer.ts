@@ -20,6 +20,11 @@ interface FoodRecord {
 }
 
 const NO_HIDDEN_FOODS: ReadonlySet<number> = new Set();
+const FALLBACK_COLORS: Record<FoodState["kind"], number> = {
+  ambient: 0xfff3f8,
+  boost: 0xffd75e,
+  remains: 0xffc27a,
+};
 
 /**
  * 食物层：精灵对象池 + 视口裁剪 + 呼吸动画。
@@ -72,8 +77,7 @@ export class FoodLayer {
       if (visible) {
         node.position.set(food.position.x, food.position.y);
         const pulse = 1 + Math.sin(nowMs * 0.004 + record.phase) * 0.12;
-        if (record.sprite) record.sprite.scale.set(record.baseScale * pulse);
-        else record.fallback?.scale.set(record.baseScale * pulse);
+        node.scale.set(record.baseScale * pulse);
       }
     }
     for (const [id, record] of this.records) {
@@ -127,7 +131,7 @@ export class FoodLayer {
     }
 
     // 降级：程序化光点
-    const color = food.kind === "boost" ? 0xffd75e : food.kind === "remains" ? 0xffc27a : 0xfff3f8;
+    const color = FALLBACK_COLORS[food.kind];
     const fallback = new Graphics();
     const radius = desiredDiameter / 2;
     fallback.circle(0, 0, radius * 1.9).fill({ color, alpha: 0.18 });

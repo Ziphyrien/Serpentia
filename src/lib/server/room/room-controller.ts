@@ -128,10 +128,10 @@ export class RoomController {
     }
     const maximumLag = this.engine.config.tickRate * INPUT_LAG_TOLERANCE_SECONDS;
     const maximumLead = this.engine.config.tickRate * INPUT_LEAD_TOLERANCE_SECONDS;
-    const requestedTick = input.targetTick;
+    const targetTick = input.targetTick;
     if (
-      requestedTick < Math.max(0, this.engine.tick - maximumLag) ||
-      requestedTick > this.engine.tick + maximumLead
+      targetTick < Math.max(0, this.engine.tick - maximumLag) ||
+      targetTick > this.engine.tick + maximumLead
     ) {
       return false;
     }
@@ -139,7 +139,6 @@ export class RoomController {
     const lastQueued = this.lastQueuedSequence.get(playerId) ?? -1;
     if (input.sequence <= lastQueued) return false;
 
-    const targetTick = requestedTick;
     const appliedTick = Math.max(this.engine.tick + 1, targetTick);
     let queue = this.pendingInputs.get(playerId);
     if (queue === undefined) {

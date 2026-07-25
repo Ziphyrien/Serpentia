@@ -28,5 +28,5 @@ function percentile(values: ReadonlyArray<number>, fraction: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((left, right) => left - right);
   const index = Math.ceil((sorted.length - 1) * fraction);
-  return sorted[index] ?? sorted[sorted.length - 1];
+  return sorted[index];
 }

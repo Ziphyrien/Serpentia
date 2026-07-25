@@ -31,7 +31,6 @@
 </script>
 
 <div class="pointer-events-none absolute inset-0 z-10 flex flex-col p-hud" data-ui>
-  <!-- 顶部行：排行榜 / 击杀播报 / 小地图与按钮 -->
   <div class="flex items-start justify-between gap-3">
     <Leaderboard entries={controller.leaderboard} selfId={controller.selfId} />
     <div class="flex-1 pt-1">
@@ -43,7 +42,6 @@
     </div>
   </div>
 
-  <!-- 左下：自己的数据 -->
   <div class="mt-auto flex items-end justify-between">
     <div class="flex gap-2">
       <div class="flex items-center gap-1.5 rounded-full border border-panel-border bg-panel px-4 py-1.5 backdrop-blur-sm">
@@ -62,7 +60,6 @@
     </div>
   </div>
 
-  <!-- 桌面端操作提示（短暂显示） -->
   {#if !isTouch && hintVisible}
     <div class="absolute inset-x-0 bottom-16 flex justify-center transition-opacity duration-700">
       <p class="rounded-full bg-panel px-5 py-1.5 text-xs font-bold text-white/60 backdrop-blur-sm">

@@ -6,11 +6,11 @@ import {
 } from "../../access/access-key";
 import { Effect } from "effect";
 import {
+  decodeClientMessage,
   decodeServerMessage,
   encodeServerMessage,
   GAME_PROTOCOL_VERSION,
 } from "../../../protocol/game";
-import { decodeClientMessage } from "../../protocol/client-message";
 import { GameEngine } from "../engine";
 import type { GameSnapshot, SnakeSnapshot } from "../model";
 import { gameConfig } from "./game-config";

@@ -1,6 +1,6 @@
 import { Howl, Howler } from "howler";
 
-export type SfxName = "eat" | "eat-big" | "boost" | "death" | "kill" | "respawn" | "click" | "warn";
+type SfxName = "eat" | "eat-big" | "boost" | "death" | "kill" | "respawn" | "click" | "warn";
 
 /**
  * 音效管理（howler 封装）：负责加载、音量、静音与连击变调。
@@ -20,7 +20,7 @@ export class Sfx {
   };
 
   constructor() {
-    const make = (name: SfxName, options: { loop?: boolean; volume?: number } = {}) =>
+    const createSound = (name: SfxName, options: { loop?: boolean; volume?: number } = {}) =>
       new Howl({
         src: [`/assets/sfx/${name}.wav`],
         format: ["wav"],
@@ -29,14 +29,14 @@ export class Sfx {
         preload: true,
       });
     this.sounds = {
-      eat: make("eat", { volume: 0.5 }),
-      "eat-big": make("eat-big", { volume: 0.55 }),
-      boost: make("boost", { loop: true, volume: 0.35 }),
-      death: make("death", { volume: 0.7 }),
-      kill: make("kill", { volume: 0.6 }),
-      respawn: make("respawn", { volume: 0.6 }),
-      click: make("click", { volume: 0.5 }),
-      warn: make("warn", { volume: 0.4 }),
+      eat: createSound("eat", { volume: 0.5 }),
+      "eat-big": createSound("eat-big", { volume: 0.55 }),
+      boost: createSound("boost", { loop: true, volume: 0.35 }),
+      death: createSound("death", { volume: 0.7 }),
+      kill: createSound("kill", { volume: 0.6 }),
+      respawn: createSound("respawn", { volume: 0.6 }),
+      click: createSound("click", { volume: 0.5 }),
+      warn: createSound("warn", { volume: 0.4 }),
     };
 
     window.addEventListener("pointerdown", this.unlock);
