@@ -22,7 +22,7 @@ interface PredictedStep extends SnakeMotionState {
 export interface SelfRenderState {
   /** C¹ presentation path through deterministic tick positions; tick endpoints remain exact. */
   readonly body: ReadonlyArray<MotionPoint>;
-  /** Immediate visual heading; movement uses the scheduled authoritative input. */
+  /** Responsive visual heading; movement uses the scheduled authoritative input. */
   readonly angle: number;
   readonly boosting: boolean;
   readonly collisionTick: number;
@@ -30,6 +30,7 @@ export interface SelfRenderState {
 }
 
 const MAX_FRAME_CATCH_UP_TICKS = 8;
+const VISUAL_TURN_RATE_MULTIPLIER = 3;
 const MAX_REPLAY_TICKS = 64;
 const DEFAULT_PREDICTION_LEAD_TICKS = 2;
 const POSITION_MATCH_TOLERANCE = 0.5;
@@ -180,15 +181,12 @@ export class SelfPredictor {
     this.lastLocalTime = localNow;
     this.accumulatorMs += elapsed;
 
-    if (intentAngle === undefined) {
-      this.visualAngle = turnTowards(
-        this.visualAngle,
-        this.current.targetAngle,
-        this.rules.turnRate * (elapsed / 1000),
-      );
-    } else {
-      this.visualAngle = intentAngle;
-    }
+    const visualTargetAngle = intentAngle ?? this.current.targetAngle;
+    this.visualAngle = turnTowards(
+      this.visualAngle,
+      visualTargetAngle,
+      this.rules.turnRate * VISUAL_TURN_RATE_MULTIPLIER * (elapsed / 1000),
+    );
 
     let processed = 0;
     while (this.accumulatorMs >= this.tickMs && processed < MAX_FRAME_CATCH_UP_TICKS) {

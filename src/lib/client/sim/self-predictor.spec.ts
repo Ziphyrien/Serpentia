@@ -92,7 +92,7 @@ function distanceToSegment(
 }
 
 describe("self prediction", () => {
-  it("tracks local steering immediately before the next server tick", () => {
+  it("responds to local steering without snapping to the target", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
 
@@ -100,7 +100,8 @@ describe("self prediction", () => {
     const rendered = predictor.renderState();
     expect(rendered).toBeDefined();
     expect(head(rendered!).x).toBeGreaterThan(0);
-    expect(rendered!.angle).toBe(Math.PI / 2);
+    expect(rendered!.angle).toBeGreaterThan(rules.turnRate * 0.02);
+    expect(rendered!.angle).toBeLessThan(Math.PI / 2);
   });
 
   it("keeps local movement and boost smooth across fixed ticks", () => {
@@ -125,6 +126,8 @@ describe("self prediction", () => {
       );
       expect(distance).toBeGreaterThan(0.9);
       expect(distance).toBeLessThan(1.1);
+      expect(current!.angle).toBeGreaterThanOrEqual(previous!.angle);
+      expect(current!.angle - previous!.angle).toBeLessThanOrEqual(0.061);
       previous = current;
     }
   });
