@@ -48,10 +48,8 @@ export class SelfPredictor {
   private readonly tickMs: number;
   private accumulatorMs = 0;
   private lastLocalTime: number | undefined;
-  private intentAngle: number | undefined;
   private alive = false;
   private visualAngle = 0;
-  private visualTargetAngle = 0;
   private configuredLeadTicks = DEFAULT_PREDICTION_LEAD_TICKS;
   private activeLeadTicks = DEFAULT_PREDICTION_LEAD_TICKS;
   private lastServerTick = 0;
@@ -103,8 +101,6 @@ export class SelfPredictor {
     const previous = this.inputsBySequence.get(input.sequence);
     if (previous !== undefined && previous.targetTick > input.targetTick) return;
     this.inputsBySequence.set(input.sequence, input);
-    this.intentAngle = input.angle;
-    this.visualTargetAngle = input.angle;
   }
 
   /** Remaps a late input after the server reports the tick where it really ran. */
@@ -157,7 +153,6 @@ export class SelfPredictor {
     this.accumulatorMs = previousAccumulator;
     this.lastLocalTime = previousLocalTime;
     this.lastServerTick = Math.max(this.lastServerTick, snapshotTick);
-    if (this.intentAngle === undefined) this.visualTargetAngle = this.current.targetAngle;
     this.pruneHistory(this.current.tick - MAX_REPLAY_TICKS);
   }
 
@@ -165,9 +160,7 @@ export class SelfPredictor {
     this.current = undefined;
     this.accumulatorMs = 0;
     this.lastLocalTime = undefined;
-    this.intentAngle = undefined;
     this.visualAngle = 0;
-    this.visualTargetAngle = 0;
     this.alive = false;
     this.activeLeadTicks = this.configuredLeadTicks;
     this.lastServerTick = 0;
@@ -177,7 +170,6 @@ export class SelfPredictor {
   }
 
   advance(localNow: number, intentAngle: number | undefined, _intentBoosting: boolean): void {
-    this.intentAngle = intentAngle;
     if (!this.alive || !this.current) {
       this.lastLocalTime = localNow;
       return;
@@ -188,12 +180,15 @@ export class SelfPredictor {
     this.lastLocalTime = localNow;
     this.accumulatorMs += elapsed;
 
-    this.visualTargetAngle = intentAngle ?? this.current.targetAngle;
-    this.visualAngle = turnTowards(
-      this.visualAngle,
-      this.visualTargetAngle,
-      this.rules.turnRate * (elapsed / 1000),
-    );
+    if (intentAngle === undefined) {
+      this.visualAngle = turnTowards(
+        this.visualAngle,
+        this.current.targetAngle,
+        this.rules.turnRate * (elapsed / 1000),
+      );
+    } else {
+      this.visualAngle = intentAngle;
+    }
 
     let processed = 0;
     while (this.accumulatorMs >= this.tickMs && processed < MAX_FRAME_CATCH_UP_TICKS) {
@@ -235,7 +230,6 @@ export class SelfPredictor {
     this.activeLeadTicks = this.configuredLeadTicks;
     this.alive = true;
     this.visualAngle = snapshot.angle;
-    this.visualTargetAngle = snapshot.targetAngle ?? snapshot.angle;
     this.statesByTick.clear();
     this.recordCurrent();
 
