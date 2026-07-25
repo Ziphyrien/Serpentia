@@ -16,7 +16,7 @@ const MAX_PARTICLES = 500;
 
 /**
  * 特效层：单个 Graphics 重绘的轻量粒子系统
- * （吃食物闪光、死亡爆裂、加速拖尾）。
+ * （吃食物反馈与死亡爆裂）。
  */
 export class FxLayer {
   readonly container = new Container();
@@ -44,21 +44,6 @@ export class FxLayer {
         drag: 0.86,
       });
     }
-  }
-
-  trail(x: number, y: number, color: number): void {
-    if (this.particles.length >= MAX_PARTICLES) return;
-    this.particles.push({
-      x: x + (Math.random() - 0.5) * 12,
-      y: y + (Math.random() - 0.5) * 12,
-      vx: (Math.random() - 0.5) * 40,
-      vy: (Math.random() - 0.5) * 40,
-      age: 0,
-      ttl: 320,
-      size: 3.5,
-      color,
-      drag: 0.9,
-    });
   }
 
   update(dtMs: number): void {

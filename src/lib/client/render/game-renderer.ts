@@ -2,7 +2,7 @@ import { Application, Container } from "pixi.js";
 import type { FoodState } from "$lib/protocol";
 import type { GameController } from "../game.svelte";
 import type { SettingsStore } from "../stores/settings.svelte";
-import { RENDER, skinForPlayer } from "../config";
+import { RENDER } from "../config";
 import { loadGameTextures } from "./assets";
 import { Camera } from "./camera";
 import { ArenaLayer } from "./arena-layer";
@@ -27,7 +27,6 @@ export class GameRenderer {
   private readonly foodSpeculation = new FoodSpeculation();
   private started = false;
   private destroyed = false;
-  private trailAccumulator = 0;
   private selfRadiusSmooth = 11;
   private lastSelfAlive = false;
   private lastBoosting = false;
@@ -177,7 +176,6 @@ export class GameRenderer {
     if (selfAlive && !this.lastSelfAlive && selfSnapshot) {
       this.camera.reset();
       this.selfRadiusSmooth = selfSnapshot.radius;
-      this.trailAccumulator = 0;
     }
     this.lastSelfAlive = selfAlive;
 
@@ -198,16 +196,6 @@ export class GameRenderer {
         isSelf: true,
       });
       selfHead = selfState.body[0];
-
-      // 加速拖尾
-      if (selfBoosting) {
-        this.trailAccumulator += deltaMS;
-        const tail = selfState.body[selfState.body.length - 1];
-        while (this.trailAccumulator > 40 && tail) {
-          this.trailAccumulator -= 40;
-          this.fx.trail(tail.x, tail.y, skinForPlayer(selfSnapshot.id).light);
-        }
-      }
     }
 
     // 3. 相机
