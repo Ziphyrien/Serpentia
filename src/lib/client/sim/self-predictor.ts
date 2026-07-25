@@ -20,6 +20,7 @@ interface PredictedStep extends SnakeMotionState {
 }
 
 export interface SelfRenderState {
+  /** C¹ presentation path through deterministic tick positions; tick endpoints remain exact. */
   readonly body: ReadonlyArray<MotionPoint>;
   /** Immediate visual heading; movement uses the scheduled authoritative input. */
   readonly angle: number;
@@ -85,8 +86,16 @@ export class SelfPredictor {
     return head === undefined ? undefined : { ...head };
   }
 
+  /**
+   * Returns the next simulation tick whose render segment has not started.
+   *
+   * Once a fractional segment is visible, rewriting its end state moves the
+   * interpolated head immediately. Reserve that segment and schedule later
+   * input on the following tick instead.
+   */
   get nextInputTick(): number {
-    return (this.current?.tick ?? this.lastServerTick + this.activeLeadTicks) + 1;
+    const baseTick = this.current?.tick ?? this.lastServerTick + this.activeLeadTicks;
+    return baseTick + (this.accumulatorMs > 0 ? 2 : 1);
   }
 
   /** Updates the lead used by the next spawn/reconnect phase. */
@@ -209,6 +218,7 @@ export class SelfPredictor {
     const current = this.current;
     if (!current) return undefined;
 
+    const previous = this.statesByTick.get(current.tick - 1);
     const next = cloneStep(current, current.tick + 1);
     this.applyScheduledInput(next.tick, next);
     advanceSnakeMotion(next, this.rules, this.tickMs / 1000);
@@ -217,7 +227,7 @@ export class SelfPredictor {
     const collisionHead = collisionState.body[0];
     if (collisionHead === undefined) return undefined;
     return {
-      body: interpolateBody(current.body, next.body, ratio),
+      body: interpolateBodyContinuously(previous?.body, current.body, next.body, ratio),
       angle: this.visualAngle,
       boosting: next.boosting,
       collisionTick: collisionState.tick,
@@ -357,19 +367,42 @@ function cloneStep(state: PredictedStep, tick: number): PredictedStep {
   };
 }
 
-function interpolateBody(
+/**
+ * Uses each segment's incoming and outgoing deterministic velocity as Hermite
+ * tangents. The curve passes through both tick positions and has a continuous
+ * derivative across a normal tick boundary.
+ */
+function interpolateBodyContinuously(
+  previous: ReadonlyArray<MotionPoint> | undefined,
   from: ReadonlyArray<MotionPoint>,
   to: ReadonlyArray<MotionPoint>,
   ratio: number,
 ): Array<MotionPoint> {
   const pointCount = Math.max(from.length, to.length);
   const body: Array<MotionPoint> = [];
+  const h00 = 2 * ratio * ratio * ratio - 3 * ratio * ratio + 1;
+  const h10 = ratio * ratio * ratio - 2 * ratio * ratio + ratio;
+  const h01 = -2 * ratio * ratio * ratio + 3 * ratio * ratio;
+  const h11 = ratio * ratio * ratio - ratio * ratio;
+
   for (let index = 0; index < pointCount; index += 1) {
-    const before = from[Math.min(index, from.length - 1)];
-    const after = to[Math.min(index, to.length - 1)];
+    const before = previous?.[Math.min(index, previous.length - 1)];
+    const current = from[Math.min(index, from.length - 1)];
+    const next = to[Math.min(index, to.length - 1)];
+    const outgoingX = next.x - current.x;
+    const outgoingY = next.y - current.y;
+    const previousX = before === undefined ? outgoingX : current.x - before.x;
+    const previousY = before === undefined ? outgoingY : current.y - before.y;
+    const previousLength = Math.hypot(previousX, previousY);
+    const outgoingLength = Math.hypot(outgoingX, outgoingY);
+    const tangentScale = previousLength === 0 ? 0 : outgoingLength / previousLength;
+    // Preserve the current deterministic segment speed while rotating from
+    // the preceding segment direction to this segment direction.
+    const incomingX = previousLength === 0 ? outgoingX : previousX * tangentScale;
+    const incomingY = previousLength === 0 ? outgoingY : previousY * tangentScale;
     body.push({
-      x: before.x + (after.x - before.x) * ratio,
-      y: before.y + (after.y - before.y) * ratio,
+      x: h00 * current.x + h10 * incomingX + h01 * next.x + h11 * outgoingX,
+      y: h00 * current.y + h10 * incomingY + h01 * next.y + h11 * outgoingY,
     });
   }
   return body;

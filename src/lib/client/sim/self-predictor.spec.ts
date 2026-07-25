@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { ClientGameRules, SnakeSnapshot } from "$lib/protocol";
-import { advanceSnakeMotion, type SnakeMotionState } from "../../game/snake-motion";
+import { advanceSnakeMotion, normalizeAngle, type SnakeMotionState } from "../../game/snake-motion";
 import { SelfPredictor } from "./self-predictor";
 
 const TICK_RATE = 20;
@@ -77,6 +77,20 @@ function expectSamePose(
   expect(right.angle).toBeCloseTo(left.angle, 8);
 }
 
+function distanceToSegment(
+  point: { readonly x: number; readonly y: number },
+  start: { readonly x: number; readonly y: number },
+  end: { readonly x: number; readonly y: number },
+): number {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared === 0) return Math.hypot(point.x - start.x, point.y - start.y);
+  const projection = ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared;
+  const ratio = Math.min(1, Math.max(0, projection));
+  return Math.hypot(point.x - (start.x + dx * ratio), point.y - (start.y + dy * ratio));
+}
+
 describe("self prediction", () => {
   it("renders movement and steering before the next server tick", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
@@ -114,6 +128,83 @@ describe("self prediction", () => {
       expect(current!.angle).toBeGreaterThan(previous!.angle);
       expect(current!.angle - previous!.angle).toBeLessThanOrEqual(0.021);
       previous = current;
+    }
+  });
+
+  it("does not rewrite an interpolation segment after it becomes visible", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
+    const firstTargetTick = predictor.nextInputTick;
+    predictor.scheduleInput({
+      sequence: 1,
+      targetTick: firstTargetTick,
+      angle: Math.PI / 2,
+      boosting: false,
+    });
+    predictor.advance(25, Math.PI / 2, false);
+    const before = predictor.renderState();
+    expect(before).toBeDefined();
+
+    const laterTargetTick = predictor.nextInputTick;
+    expect(laterTargetTick).toBe(firstTargetTick + 1);
+    predictor.scheduleInput({
+      sequence: 2,
+      targetTick: laterTargetTick,
+      angle: -Math.PI / 2,
+      boosting: false,
+    });
+    const after = predictor.renderState();
+    expect(after).toBeDefined();
+    expectSamePose(before!, after!);
+  });
+
+  it("keeps head velocity direction continuous across a turn tick", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
+    const targetTick = predictor.nextInputTick;
+    predictor.scheduleInput({
+      sequence: 1,
+      targetTick,
+      angle: Math.PI / 2,
+      boosting: false,
+    });
+    const expectedBoundary = predictor.headAtTick(targetTick);
+    expect(expectedBoundary).toBeDefined();
+
+    predictor.advance(49, Math.PI / 2, false);
+    const before = head(predictor.renderState()!);
+    predictor.advance(50, Math.PI / 2, false);
+    const boundary = head(predictor.renderState()!);
+    expect(boundary.x).toBeCloseTo(expectedBoundary!.x, 8);
+    expect(boundary.y).toBeCloseTo(expectedBoundary!.y, 8);
+    predictor.advance(51, Math.PI / 2, false);
+    const after = head(predictor.renderState()!);
+    const incomingAngle = Math.atan2(boundary.y - before.y, boundary.x - before.x);
+    const outgoingAngle = Math.atan2(after.y - boundary.y, after.x - boundary.x);
+
+    expect(Math.abs(normalizeAngle(outgoingAngle - incomingAngle))).toBeLessThan(0.02);
+  });
+
+  it("keeps the smooth turn close to its deterministic authority segment", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
+    const targetTick = predictor.nextInputTick;
+    predictor.scheduleInput({
+      sequence: 1,
+      targetTick,
+      angle: Math.PI / 2,
+      boosting: false,
+    });
+    const start = predictor.headAtTick(targetTick - 1);
+    const end = predictor.headAtTick(targetTick);
+    expect(start).toBeDefined();
+    expect(end).toBeDefined();
+    const segmentLength = Math.hypot(end!.x - start!.x, end!.y - start!.y);
+
+    for (let now = 5; now < TICK_MS; now += 5) {
+      predictor.advance(now, Math.PI / 2, false);
+      const rendered = head(predictor.renderState()!);
+      expect(distanceToSegment(rendered, start!, end!)).toBeLessThan(segmentLength * 0.04);
     }
   });
 

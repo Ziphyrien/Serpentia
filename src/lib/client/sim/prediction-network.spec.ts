@@ -57,7 +57,7 @@ describe("target-tick prediction over delayed transport", () => {
           boosting: false,
         };
         predictor.scheduleInput(input);
-        sendInput(now, input, now === 300 ? 180 : 25);
+        sendInput(now, input, now === 300 ? 230 : 25);
       }
 
       while (clientToServer[0]?.at <= now) {
@@ -99,9 +99,10 @@ describe("target-tick prediction over delayed transport", () => {
     expect(snapshotCorrections.get(2)).toBeLessThan(1e-8);
     expect(snapshotCorrections.get(4)).toBeLessThan(1e-8);
     expect(snapshotCorrections.get(6)).toBeLessThan(1e-8);
-    expect(snapshotCorrections.get(8)).toBeGreaterThan(0.01);
+    expect(snapshotCorrections.get(8)).toBeLessThan(1e-8);
+    expect(snapshotCorrections.get(10)).toBeGreaterThan(0.01);
     for (const [tick, correction] of snapshotCorrections) {
-      if (tick >= 10) expect(correction).toBeLessThan(1e-8);
+      if (tick >= 12) expect(correction).toBeLessThan(1e-8);
     }
 
     const authoritative = controller.snapshot().snakes[0].body[0];
