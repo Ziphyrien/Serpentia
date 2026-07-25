@@ -21,6 +21,31 @@ function renderedHead(predictor: SelfPredictor): { x: number; y: number } {
 }
 
 describe("target-tick prediction over delayed transport", () => {
+  it("uses the measured lead to absorb a late steering packet", () => {
+    const config = gameConfig({ arenaHalfSize: 10_000, spawnClearance: 1_000 });
+    const controller = new RoomController(new GameEngine(config, 7, false));
+    const joined = controller.join("connection", { playerId: "self", nickname: "Self" });
+    if (joined._tag !== "Accepted") throw new Error("test connection was rejected");
+    const predictor = new SelfPredictor(config, config.tickRate);
+    predictor.reconcile(joined.snapshot.snakes[0], joined.snapshot.tick, 0);
+    predictor.setPredictionLeadTicks(3);
+
+    const targetTick = predictor.nextInputTick;
+    controller.tick();
+    controller.tick();
+    controller.tick();
+    const accepted = controller.applyInput("connection", {
+      sequence: 1,
+      targetTick,
+      angle: Math.PI / 2,
+      boosting: false,
+    });
+
+    if (accepted === false) throw new Error("late steering input was rejected");
+    expect(accepted.targetTick).toBe(targetTick);
+    expect(accepted.appliedTick).toBe(targetTick);
+  });
+
   it("matches authority through continuous turns and an ordered latency spike", () => {
     const config = gameConfig({ arenaHalfSize: 10_000, spawnClearance: 1_000 });
     const controller = new RoomController(new GameEngine(config, 7, false));

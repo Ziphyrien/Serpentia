@@ -90,10 +90,11 @@ export class SelfPredictor {
    */
   get nextInputTick(): number {
     const baseTick = this.current?.tick ?? this.lastServerTick + this.activeLeadTicks;
-    return baseTick + (this.accumulatorMs > 0 ? 2 : 1);
+    const increasedLead = Math.max(0, this.configuredLeadTicks - this.activeLeadTicks);
+    return baseTick + increasedLead + (this.accumulatorMs > 0 ? 2 : 1);
   }
 
-  /** Updates the lead used by the next spawn/reconnect phase. */
+  /** Applies measured lead to future inputs without shifting the visible simulation. */
   setPredictionLeadTicks(value: number): void {
     this.configuredLeadTicks = Math.min(3, Math.max(2, Math.floor(value)));
   }

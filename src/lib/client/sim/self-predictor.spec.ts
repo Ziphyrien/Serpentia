@@ -159,6 +159,19 @@ describe("self prediction", () => {
     expectSamePose(before!, after!);
   });
 
+  it("applies a larger measured lead without moving the visible pose", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
+    predictor.advance(25, Math.PI / 2, false);
+    const before = predictor.renderState();
+    const previousTargetTick = predictor.nextInputTick;
+
+    predictor.setPredictionLeadTicks(3);
+
+    expect(predictor.nextInputTick).toBe(previousTargetTick + 1);
+    expectSamePose(before!, predictor.renderState()!);
+  });
+
   it("keeps head velocity direction continuous across a turn tick", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
