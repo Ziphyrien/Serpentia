@@ -1,5 +1,5 @@
 import { Container, Sprite, Text } from "pixi.js";
-import { skinForPlayer, type SkinDefinition } from "../config";
+import { RENDER, skinForPlayer, type SkinDefinition } from "../config";
 import type { SnakeSkinTextures } from "./assets";
 
 interface Point {
@@ -41,6 +41,18 @@ interface Bead {
   y: number;
   r: number;
 }
+
+/**
+ * 昵称贴图的栅格化倍率。
+ *
+ * Pixi 的 Text 默认按 renderer.resolution 栅格化，并不知道 world 容器上还叠了
+ * camera.zoom 的放大，所以 zoom > 1 时贴图会被放大采样而发虚。
+ * 这里取「最大设备像素比 × 最大相机缩放」，让贴图在任何缩放下都处于缩小采样区间。
+ *
+ * 必须是静态常量：Text 的 styleKey 含 resolution，常量才能保证贴图只生成一次。
+ * 若改成每帧计算，贴图会被反复重建并抖动。
+ */
+const LABEL_RESOLUTION = Math.ceil(RENDER.maxDevicePixelRatio * RENDER.zoomAtBaseRadius);
 
 /**
  * 蛇渲染层：使用 Snake-Demo 游戏场景实际引用的四套头部与身体 Sprite。
@@ -100,14 +112,12 @@ export class SnakeLayer {
 
     const label = new Text({
       text: "",
+      resolution: LABEL_RESOLUTION,
       style: {
         fontFamily: "system-ui, sans-serif",
         fontSize: 15,
         fontWeight: "600",
-        // 场地为浅色，因此字身用深色、描边用白色。
-        // 反过来（白字深描边）会让字身融进场地，只剩描边可见，看起来发糊。
         fill: 0x1c2333,
-        stroke: { color: 0xffffff, width: 4, join: "round" },
       },
     });
     label.anchor.set(0.5, 1);
