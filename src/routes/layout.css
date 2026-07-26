@@ -21,6 +21,11 @@ body {
   overscroll-behavior: none;
 }
 
+/* 首页内容约 35rem 高：矮屏按视口高度缩放根字号，让 rem 尺寸整体等比缩小 */
+:root:has([data-login-page]) {
+  font-size: min(1rem, calc(100dvh / 35));
+}
+
 :root {
   --safe-area-top: env(safe-area-inset-top, 0px);
   --safe-area-right: env(safe-area-inset-right, 0px);
