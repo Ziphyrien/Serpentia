@@ -24,7 +24,7 @@ export class AttemptLimiter {
     return true;
   }
 
-  prune(now = Date.now()): void {
+  private prune(now: number): void {
     for (const [key, window] of this.windows) {
       if (now - window.startedAt >= this.windowMilliseconds) this.windows.delete(key);
     }

@@ -5,14 +5,10 @@ import {
   encodeServerMessage,
   GAME_PROTOCOL_VERSION,
 } from "../../../protocol/game";
+import { requireCondition, type Scenario } from "../../__tests__/scenario";
 import { GameEngine } from "../engine";
 import type { GameSnapshot, SnakeSnapshot } from "../model";
 import { gameConfig } from "./game-config";
-
-export interface GameplayScenario {
-  readonly name: string;
-  readonly run: () => void | Promise<void>;
-}
 
 function requireSnake(snapshot: GameSnapshot, playerId: string): SnakeSnapshot {
   const snake = snapshot.snakes.find((candidate) => candidate.id === playerId);
@@ -20,15 +16,11 @@ function requireSnake(snapshot: GameSnapshot, playerId: string): SnakeSnapshot {
   return snake;
 }
 
-function requireCondition(condition: boolean, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-
 function approximately(actual: number, expected: number, tolerance = 0.000_001): void {
   requireCondition(Math.abs(actual - expected) <= tolerance, `${actual} != ${expected}`);
 }
 
-export const gameplayScenarios: ReadonlyArray<GameplayScenario> = [
+export const gameplayScenarios: ReadonlyArray<Scenario> = [
   {
     name: "base movement advances the authoritative head",
     run: () => {

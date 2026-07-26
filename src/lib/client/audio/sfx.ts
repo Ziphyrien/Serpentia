@@ -1,6 +1,6 @@
 import { Howl, Howler } from "howler";
 
-type SfxName = "eat" | "eat-big" | "boost" | "death" | "kill" | "respawn" | "click" | "warn";
+type SfxName = "eat" | "eat-big" | "boost" | "death" | "kill" | "respawn" | "click";
 
 /**
  * 音效管理（howler 封装）：负责加载、音量、静音与连击变调。
@@ -36,7 +36,6 @@ export class Sfx {
       kill: createSound("kill", { volume: 0.6 }),
       respawn: createSound("respawn", { volume: 0.6 }),
       click: createSound("click", { volume: 0.5 }),
-      warn: createSound("warn", { volume: 0.4 }),
     };
 
     window.addEventListener("pointerdown", this.unlock);
@@ -76,10 +75,6 @@ export class Sfx {
 
   click(): void {
     this.sounds.click.play();
-  }
-
-  warn(): void {
-    this.sounds.warn.play();
   }
 
   /** 加速风声随 boosting 状态启停。 */

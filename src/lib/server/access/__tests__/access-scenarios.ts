@@ -5,19 +5,11 @@ import { ApiRouter } from "../../http/api-router";
 import { createBackendDescriptor, createRoomMetadata } from "../../room/room-settings";
 import { loadRuntimeConfig } from "../../runtime/config";
 import { RuntimeServices } from "../../runtime/services";
+import { requireCondition, type Scenario } from "../../__tests__/scenario";
 import { AttemptLimiter } from "../attempt-limiter";
 import { SessionClaims, signSession, verifySession } from "../session";
 
-export interface SessionScenario {
-  readonly name: string;
-  readonly run: () => void | Promise<void>;
-}
-
-function requireCondition(condition: boolean, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-
-export const sessionScenarios: ReadonlyArray<SessionScenario> = [
+export const sessionScenarios: ReadonlyArray<Scenario> = [
   {
     name: "session tokens are signed, expiring, and tamper resistant",
     run: async () => {

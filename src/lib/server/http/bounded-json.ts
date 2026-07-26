@@ -1,23 +1,14 @@
-export type BoundedJsonErrorCode = "EMPTY_BODY" | "BODY_TOO_LARGE" | "INVALID_JSON";
-
-export class BoundedJsonError extends Error {
-  readonly _tag = "BoundedJsonError";
-
-  constructor(readonly code: BoundedJsonErrorCode) {
-    super(code);
-  }
-}
-
+/** 读取受大小限制的 JSON 请求体；超限、空体或格式错误一律抛出 Error。 */
 export async function readBoundedJson(request: Request, maximumBytes: number): Promise<unknown> {
   const declaredLength = request.headers.get("content-length");
   if (declaredLength !== null) {
     const length = Number(declaredLength);
     if (Number.isFinite(length) && length > maximumBytes) {
-      throw new BoundedJsonError("BODY_TOO_LARGE");
+      throw new Error("Request body is too large");
     }
   }
 
-  if (request.body === null) throw new BoundedJsonError("EMPTY_BODY");
+  if (request.body === null) throw new Error("Request body is empty");
   const reader = request.body.getReader();
   const chunks: Array<Uint8Array> = [];
   let totalBytes = 0;
@@ -29,7 +20,7 @@ export async function readBoundedJson(request: Request, maximumBytes: number): P
       totalBytes += result.value.byteLength;
       if (totalBytes > maximumBytes) {
         await reader.cancel();
-        throw new BoundedJsonError("BODY_TOO_LARGE");
+        throw new Error("Request body is too large");
       }
       chunks.push(result.value);
     }
@@ -37,7 +28,7 @@ export async function readBoundedJson(request: Request, maximumBytes: number): P
     reader.releaseLock();
   }
 
-  if (totalBytes === 0) throw new BoundedJsonError("EMPTY_BODY");
+  if (totalBytes === 0) throw new Error("Request body is empty");
   const bytes = new Uint8Array(totalBytes);
   let offset = 0;
   for (const chunk of chunks) {
@@ -48,6 +39,6 @@ export async function readBoundedJson(request: Request, maximumBytes: number): P
   try {
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
-    throw new BoundedJsonError("INVALID_JSON");
+    throw new Error("Request body is not valid JSON");
   }
 }

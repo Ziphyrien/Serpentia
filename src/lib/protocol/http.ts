@@ -49,10 +49,5 @@ export const TurnCredentialsErrorCode = Schema.Union([
 ]);
 export type TurnCredentialsErrorCode = typeof TurnCredentialsErrorCode.Type;
 
-export const TurnCredentialsErrorResponse = Schema.Struct({
-  error: TurnCredentialsErrorCode,
-});
-export type TurnCredentialsErrorResponse = typeof TurnCredentialsErrorResponse.Type;
-
 export const GameBootstrapResponse = BackendDescriptor;
 export type GameBootstrapResponse = typeof GameBootstrapResponse.Type;

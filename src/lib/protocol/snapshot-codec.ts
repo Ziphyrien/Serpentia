@@ -291,27 +291,13 @@ function decodeSnapshotDelta(
     const sections = readSnakeSections(bytes, offset);
     offset = sections.offset;
     const previousSnake = previous.snakes[index];
-    const scalars = decodeSnakeScalarsDelta(sections.scalars, previousSnake);
-    const snake: SnakeSnapshot = {
-      id: previousSnake.id,
-      nickname: previousSnake.nickname,
-      body: decodeBodyDelta(sections.body, previousSnake.body),
-      angle: decodeAngle(scalars.angle),
-      radius: dequantize(scalars.radius),
-      length: dequantize(scalars.length),
-      score: dequantize(scalars.score),
-      kills: scalars.kills,
-      boosting: (scalars.flags & 1) !== 0,
-      alive: (scalars.flags & 2) !== 0,
-      invulnerable: (scalars.flags & 4) !== 0,
-      respawnAtTick: scalars.respawnAtTick < 0 ? null : scalars.respawnAtTick,
-      lastInputSequence: scalars.lastInputSequence,
-      lastInputAppliedTick: scalars.lastInputAppliedTick,
-    };
     snakes.push(
-      scalars.targetAngle === null
-        ? snake
-        : { ...snake, targetAngle: decodeAngle(scalars.targetAngle) },
+      snakeFromScalars(
+        previousSnake.id,
+        previousSnake.nickname,
+        decodeBodyDelta(sections.body, previousSnake.body),
+        decodeSnakeScalarsDelta(sections.scalars, previousSnake),
+      ),
     );
   }
 
@@ -625,8 +611,15 @@ function encodeSnake(snake: SnakeSnapshot): CompactSnake {
 
 function decodeSnake(wire: CompactSnake): SnakeSnapshot {
   const [id, nickname, bodyBytes, scalarBytes] = wire;
-  const body = decodeBody(bodyBytes);
-  const scalars = decodeSnakeScalars(scalarBytes);
+  return snakeFromScalars(id, nickname, decodeBody(bodyBytes), decodeSnakeScalars(scalarBytes));
+}
+
+function snakeFromScalars(
+  id: string,
+  nickname: string,
+  body: ReadonlyArray<{ x: number; y: number }>,
+  scalars: DecodedSnakeScalars,
+): SnakeSnapshot {
   const snake: SnakeSnapshot = {
     id,
     nickname,
@@ -661,23 +654,33 @@ interface DecodedSnakeScalars {
   lastInputAppliedTick: number;
 }
 
-function encodeSnakeScalars(snake: SnakeSnapshot): Uint8Array {
-  const bytes: Array<number> = [];
+function snakeStateFlags(snake: SnakeSnapshot): number {
   let flags = 0;
   if (snake.boosting) flags |= 1;
   if (snake.alive) flags |= 2;
   if (snake.invulnerable) flags |= 4;
-  if (snake.respawnAtTick !== null) flags |= 8;
+  return flags;
+}
+
+/** Keeps an angle-level difference within half a turn so it varint-encodes compactly. */
+function wrapAngleLevels(delta: number): number {
+  if (delta > ANGLE_LEVELS / 2) return delta - ANGLE_LEVELS;
+  if (delta < -ANGLE_LEVELS / 2) return delta + ANGLE_LEVELS;
+  return delta;
+}
+
+function encodeSnakeScalars(snake: SnakeSnapshot): Uint8Array {
+  const bytes: Array<number> = [];
+  const flags = snakeStateFlags(snake) | (snake.respawnAtTick === null ? 0 : 8);
   const angle = encodeAngle(snake.angle);
   writeUnsignedVarint(bytes, angle);
-  if (snake.targetAngle === undefined) {
-    writeUnsignedVarint(bytes, 0);
-  } else {
-    let delta = encodeAngle(snake.targetAngle) - angle;
-    if (delta > ANGLE_LEVELS / 2) delta -= ANGLE_LEVELS;
-    if (delta < -ANGLE_LEVELS / 2) delta += ANGLE_LEVELS;
-    writeUnsignedVarint(bytes, zigzagEncode(delta) + 1);
-  }
+  writeUnsignedVarint(
+    bytes,
+    encodeTargetAngleCode(
+      angle,
+      snake.targetAngle === undefined ? null : encodeAngle(snake.targetAngle),
+    ),
+  );
   writeUnsignedVarint(bytes, quantizeUnsigned(snake.radius));
   writeUnsignedVarint(bytes, quantizeUnsigned(snake.length));
   writeUnsignedVarint(bytes, quantizeUnsigned(snake.score));
@@ -728,10 +731,6 @@ function decodeSnakeScalars(bytes: Uint8Array): DecodedSnakeScalars {
 }
 
 function scalarValues(snake: SnakeSnapshot): DecodedSnakeScalars {
-  let flags = 0;
-  if (snake.boosting) flags |= 1;
-  if (snake.alive) flags |= 2;
-  if (snake.invulnerable) flags |= 4;
   return {
     angle: encodeAngle(snake.angle),
     targetAngle: snake.targetAngle === undefined ? null : encodeAngle(snake.targetAngle),
@@ -739,7 +738,7 @@ function scalarValues(snake: SnakeSnapshot): DecodedSnakeScalars {
     length: quantizeUnsigned(snake.length),
     score: quantizeUnsigned(snake.score),
     kills: snake.kills,
-    flags,
+    flags: snakeStateFlags(snake),
     respawnAtTick: snake.respawnAtTick === null ? -1 : snake.respawnAtTick,
     lastInputSequence: snake.lastInputSequence,
     lastInputAppliedTick: snake.lastInputAppliedTick,
@@ -748,10 +747,7 @@ function scalarValues(snake: SnakeSnapshot): DecodedSnakeScalars {
 
 function encodeTargetAngleCode(angle: number, targetAngle: number | null): number {
   if (targetAngle === null) return 0;
-  let delta = targetAngle - angle;
-  if (delta > ANGLE_LEVELS / 2) delta -= ANGLE_LEVELS;
-  if (delta < -ANGLE_LEVELS / 2) delta += ANGLE_LEVELS;
-  return zigzagEncode(delta) + 1;
+  return zigzagEncode(wrapAngleLevels(targetAngle - angle)) + 1;
 }
 
 function encodeSnakeScalarsDelta(current: SnakeSnapshot, previous: SnakeSnapshot): Uint8Array {
@@ -775,12 +771,7 @@ function encodeSnakeScalarsDelta(current: SnakeSnapshot, previous: SnakeSnapshot
 
   const delta: Array<number> = [];
   writeUnsignedVarint(delta, mask + 1);
-  if ((mask & 1) !== 0) {
-    let angleDelta = next.angle - prior.angle;
-    if (angleDelta > ANGLE_LEVELS / 2) angleDelta -= ANGLE_LEVELS;
-    if (angleDelta < -ANGLE_LEVELS / 2) angleDelta += ANGLE_LEVELS;
-    writeSignedVarint(delta, angleDelta);
-  }
+  if ((mask & 1) !== 0) writeSignedVarint(delta, wrapAngleLevels(next.angle - prior.angle));
   if ((mask & 2) !== 0) {
     writeUnsignedVarint(delta, encodeTargetAngleCode(next.angle, next.targetAngle));
   }
@@ -965,9 +956,7 @@ function encodeFoods(foods: ReadonlyArray<FoodState>): Uint8Array {
   for (const food of foods) {
     writeSignedVarint(bytes, food.id - previousId);
     previousId = food.id;
-    writeSignedVarint(bytes, quantizeSigned(food.position.x));
-    writeSignedVarint(bytes, quantizeSigned(food.position.y));
-    writeUnsignedVarint(bytes, quantizeUnsigned(food.value) * 3 + encodeFoodKind(food.kind));
+    writeFoodPayload(bytes, food);
   }
   return Uint8Array.from(bytes);
 }
@@ -985,18 +974,9 @@ function decodeFoods(bytes: Uint8Array): Array<FoodState> {
     const id = previousId + idDelta.value;
     if (!Number.isSafeInteger(id) || id < 0) throw new Error("Invalid compact food ID");
     previousId = id;
-    const x = readSignedVarint(bytes, offset);
-    offset = x.offset;
-    const y = readSignedVarint(bytes, offset);
-    offset = y.offset;
-    const valueAndKind = readUnsignedVarint(bytes, offset);
-    offset = valueAndKind.offset;
-    foods.push({
-      id,
-      position: { x: dequantize(x.value), y: dequantize(y.value) },
-      value: dequantize(Math.floor(valueAndKind.value / 3)),
-      kind: decodeFoodKind(valueAndKind.value % 3),
-    });
+    const payload = readFoodPayload(bytes, offset, id);
+    offset = payload.offset;
+    foods.push(payload.food);
   }
   if (offset !== bytes.length) throw new Error("Trailing compact food data");
   return foods;
@@ -1075,6 +1055,10 @@ function sameFood(left: FoodState, right: FoodState): boolean {
 
 function writeFoodRecord(target: Array<number>, food: FoodState): void {
   writeUnsignedVarint(target, food.id);
+  writeFoodPayload(target, food);
+}
+
+function writeFoodPayload(target: Array<number>, food: FoodState): void {
   writeSignedVarint(target, quantizeSigned(food.position.x));
   writeSignedVarint(target, quantizeSigned(food.position.y));
   writeUnsignedVarint(target, quantizeUnsigned(food.value) * 3 + encodeFoodKind(food.kind));
@@ -1082,15 +1066,20 @@ function writeFoodRecord(target: Array<number>, food: FoodState): void {
 
 function readFoodRecord(bytes: Uint8Array, offset: number): { food: FoodState; offset: number } {
   const id = readUnsignedVarint(bytes, offset);
-  offset = id.offset;
+  return readFoodPayload(bytes, id.offset, id.value);
+}
+
+function readFoodPayload(
+  bytes: Uint8Array,
+  offset: number,
+  id: number,
+): { food: FoodState; offset: number } {
   const x = readSignedVarint(bytes, offset);
-  offset = x.offset;
-  const y = readSignedVarint(bytes, offset);
-  offset = y.offset;
-  const valueAndKind = readUnsignedVarint(bytes, offset);
+  const y = readSignedVarint(bytes, x.offset);
+  const valueAndKind = readUnsignedVarint(bytes, y.offset);
   return {
     food: {
-      id: id.value,
+      id,
       position: { x: dequantize(x.value), y: dequantize(y.value) },
       value: dequantize(Math.floor(valueAndKind.value / 3)),
       kind: decodeFoodKind(valueAndKind.value % 3),
@@ -1133,13 +1122,7 @@ function decodeLeaderboards(
   for (let index = 0; index < count.value; index += 1) {
     const player = readUnsignedVarint(bytes, offset);
     offset = player.offset;
-    const snake = requireSnake(player.value, snakes);
-    entries.push({
-      playerId: snake.id,
-      nickname: snake.nickname,
-      length: snake.length,
-      kills: snake.kills,
-    });
+    entries.push(toLeaderboardEntry(requireSnake(player.value, snakes)));
   }
   if (offset !== bytes.length) throw new Error("Trailing compact leaderboard data");
   return entries;
@@ -1187,14 +1170,17 @@ function deriveLeaderboard(
   return previous.map((entry) => {
     const index = indexes.get(entry.playerId);
     if (index === undefined) throw new Error("Missing unchanged leaderboard player");
-    const snake = snakes[index];
-    return {
-      playerId: snake.id,
-      nickname: snake.nickname,
-      length: snake.length,
-      kills: snake.kills,
-    };
+    return toLeaderboardEntry(snakes[index]);
   });
+}
+
+function toLeaderboardEntry(snake: SnakeSnapshot): LeaderboardEntry {
+  return {
+    playerId: snake.id,
+    nickname: snake.nickname,
+    length: snake.length,
+    kills: snake.kills,
+  };
 }
 
 function encodeEventsDelta(

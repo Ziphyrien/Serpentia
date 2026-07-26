@@ -3,7 +3,7 @@ import { PlayerId } from "../../protocol/state";
 
 export const SESSION_COOKIE_NAME = "serpentia_session";
 export const SESSION_TTL_SECONDS = 12 * 60 * 60;
-export const MINIMUM_SESSION_SIGNING_SECRET_LENGTH = 32;
+const MINIMUM_SESSION_SIGNING_SECRET_LENGTH = 32;
 
 export class SessionClaims extends Schema.Class<SessionClaims>("SessionClaims")({
   playerId: PlayerId,

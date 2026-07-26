@@ -1,6 +1,5 @@
 import type { Point } from "../../protocol/state";
 
-export { normalizeAngle, turnTowards } from "../../game/snake-motion";
 export type { Point } from "../../protocol/state";
 
 export function distanceSquared(left: Point, right: Point): number {

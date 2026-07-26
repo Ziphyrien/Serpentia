@@ -149,9 +149,6 @@ def main() -> None:
     # UI 点击：极短滴答
     write_wav("click", tone(0.045, 900, 700, volume=0.35, attack=0.005, release=0.6))
 
-    # 警告（接近边界）：低频脉冲
-    write_wav("warn", tone(0.16, 180, 160, volume=0.4, shape="square", attack=0.02, release=0.4))
-
 
 if __name__ == "__main__":
     main()

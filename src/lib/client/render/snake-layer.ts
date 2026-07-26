@@ -135,11 +135,7 @@ export class SnakeLayer {
     return nodes;
   }
 
-  private collectBeads(
-    body: ReadonlyArray<Point>,
-    radius: number,
-    view: ViewBounds,
-  ): Array<Bead> {
+  private collectBeads(body: ReadonlyArray<Point>, radius: number, view: ViewBounds): Array<Bead> {
     const beads = this.beads;
     beads.length = 0;
 

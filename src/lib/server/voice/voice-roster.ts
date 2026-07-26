@@ -1,7 +1,5 @@
 import type { VoiceParticipant } from "../../protocol/state";
 
-export type { VoiceParticipant } from "../../protocol/state";
-
 /** Active voice listeners; microphone publication is independent membership metadata. */
 export class VoiceRoster {
   private readonly participants = new Map<string, VoiceParticipant>();

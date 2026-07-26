@@ -1,18 +1,10 @@
 import { Effect } from "effect";
 import { decodeClientMessage, GAME_PROTOCOL_VERSION } from "../../../protocol/game";
+import { requireCondition, type Scenario } from "../../__tests__/scenario";
 import { createCoturnCredentials } from "../coturn";
 import { VoiceRoster } from "../voice-roster";
 
-export interface VoiceScenario {
-  readonly name: string;
-  readonly run: () => void | Promise<void>;
-}
-
-function requireCondition(condition: boolean, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-
-export const voiceScenarios: ReadonlyArray<VoiceScenario> = [
+export const voiceScenarios: ReadonlyArray<Scenario> = [
   {
     name: "voice roster separates listeners from microphone publishers",
     run: () => {

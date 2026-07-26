@@ -120,12 +120,6 @@ export class GameEngine {
     return id;
   }
 
-  clearFoods(): void {
-    this.foods.clear();
-    this.foodIndex.clear();
-    this.ambientFoodCount = 0;
-  }
-
   applyInput(input: PlayerInput): boolean {
     const snake = this.snakes.get(input.playerId);
     if (!snake || !snake.alive || input.sequence <= snake.lastInputSequence) return false;

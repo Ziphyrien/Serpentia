@@ -1,19 +1,11 @@
 import { turnTowards } from "../../../game/snake-motion";
+import { requireCondition, type Scenario } from "../../__tests__/scenario";
 import { GameEngine } from "../../game/engine";
 import { gameConfig } from "../../game/__tests__/game-config";
 import { ConnectionTrafficGuard } from "../connection-traffic-guard";
 import { RoomController } from "../room-controller";
 
-export interface RoomScenario {
-  readonly name: string;
-  readonly run: () => void | Promise<void>;
-}
-
-function requireCondition(condition: boolean, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-
-export const roomScenarios: ReadonlyArray<RoomScenario> = [
+export const roomScenarios: ReadonlyArray<Scenario> = [
   {
     name: "one session controls only one live snake connection",
     run: () => {

@@ -34,8 +34,4 @@ export class ClockSync {
   serverNow(): number | undefined {
     return this.offsetMs === undefined ? undefined : Date.now() + this.offsetMs;
   }
-
-  get rttMs(): number {
-    return this.bestRttMs === Number.POSITIVE_INFINITY ? 0 : this.bestRttMs;
-  }
 }

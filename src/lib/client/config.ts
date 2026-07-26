@@ -2,15 +2,14 @@ export interface SkinDefinition {
   readonly id: string;
   readonly body: number;
   readonly dark: number;
-  readonly light: number;
 }
 
 export const SKINS: ReadonlyArray<SkinDefinition> = [
-  { id: "green", body: 0x86d94e, dark: 0x4c9a33, light: 0xd0f5a8 },
-  { id: "blue", body: 0x4db8f0, dark: 0x2a6fb8, light: 0xb3e2fa },
-  { id: "purple", body: 0xa86ef0, dark: 0x6a3ab8, light: 0xdcc4fa },
-  { id: "orange", body: 0xf5a53c, dark: 0xc06a1d, light: 0xfad6a0 },
-  { id: "red", body: 0xf26d5f, dark: 0xb83a2e, light: 0xfabcb3 },
+  { id: "green", body: 0x86d94e, dark: 0x4c9a33 },
+  { id: "blue", body: 0x4db8f0, dark: 0x2a6fb8 },
+  { id: "purple", body: 0xa86ef0, dark: 0x6a3ab8 },
+  { id: "orange", body: 0xf5a53c, dark: 0xc06a1d },
+  { id: "red", body: 0xf26d5f, dark: 0xb83a2e },
 ];
 
 /** 由 playerId 稳定推导皮肤，保证所有客户端看到的一致。 */
@@ -46,5 +45,4 @@ export const INPUT = {
 
 export const ARENA_COLORS = {
   border: 0x3ddc84,
-  danger: 0xf26d5f,
 } as const;
