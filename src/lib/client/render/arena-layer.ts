@@ -8,12 +8,9 @@ const MAJOR_EVERY = 4;
 const MINOR_WIDTH = 1.5;
 const MAJOR_WIDTH = 3;
 
-/** 墙体厚度，画在场地外侧，不占用可行走区域。 */
-const WALL_WIDTH = 7;
-
 /**
  * 场地层：全部由矢量几何绘制，任意相机缩放下都保持锐利。
- * 场外是深色虚空，红色只用于场地边界墙体。
+ * 边界靠亮色场地与深色场外的对比呈现，不额外画墙线。
  */
 export class ArenaLayer {
   readonly screenContainer = new Container();
@@ -37,7 +34,6 @@ function buildField(halfSize: number): Graphics {
 
   gfx.rect(-halfSize, -halfSize, halfSize * 2, halfSize * 2).fill(ARENA_COLORS.floor);
   drawGrid(gfx, halfSize);
-  drawWall(gfx, halfSize);
 
   return gfx;
 }
@@ -66,14 +62,4 @@ function drawGrid(gfx: Graphics, halfSize: number): void {
     for (const sign of [-1, 1]) addLine(sign * step * MINOR_CELL, MAJOR_WIDTH);
   }
   gfx.fill(ARENA_COLORS.gridMajor);
-}
-
-/** 墙体用居中描边贴在场地外侧，不占用可行走区域。 */
-function drawWall(gfx: Graphics, halfSize: number): void {
-  const half = halfSize + WALL_WIDTH / 2;
-  gfx.rect(-half, -half, half * 2, half * 2).stroke({
-    width: WALL_WIDTH,
-    color: ARENA_COLORS.wall,
-    alignment: 0.5,
-  });
 }

@@ -81,8 +81,6 @@ export const ARENA_COLORS = {
   floor: 0xeef0f6,
   gridMinor: 0xd8dce9,
   gridMajor: 0xc4cade,
-  /** 原版场地红（Resources/bj.png），现只用于墙体与贴墙警示。 */
-  wall: 0xed1c24,
 } as const;
 
 /** 吃食物的粒子色：浅色场地上需要足够深才看得见。 */
