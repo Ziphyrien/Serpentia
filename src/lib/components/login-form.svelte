@@ -22,7 +22,7 @@
   }
 </script>
 
-<div class="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-night-950 px-6">
+<div class="relative flex h-dvh flex-col items-center justify-center overflow-hidden bg-night-950 px-6">
   <div
     class="absolute inset-0 bg-cover bg-center opacity-90"
     style="background-image: url({ASSET_PATHS.bgTile})"
