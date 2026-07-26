@@ -43,14 +43,6 @@ interface Bead {
 }
 
 /**
- * 昵称贴图的光栅字号，远大于实际显示字号。
- * 配合按 1/zoom 的反向缩放，让文字贴图始终被缩小采样而不是放大（放大会发虚）。
- */
-const LABEL_RASTER_SIZE = 36;
-/** 昵称的目标屏幕字号，不随相机缩放变化。 */
-const LABEL_SCREEN_SIZE = 15;
-
-/**
  * 蛇渲染层：使用 Snake-Demo 游戏场景实际引用的四套头部与身体 Sprite。
  * 尺寸关系、朝向和离散身体间距沿用原 Unity 实现。
  */
@@ -73,13 +65,12 @@ export class SnakeLayer {
     view: ViewBounds,
     showNicknames: boolean,
     nowMs: number,
-    zoom: number,
   ): void {
     const seen = new Set<string>();
     for (const snake of views) {
       seen.add(snake.id);
       const nodes = this.ensureNodes(snake.id);
-      this.drawSnake(nodes, snake, view, showNicknames, nowMs, zoom);
+      this.drawSnake(nodes, snake, view, showNicknames, nowMs);
     }
     for (const [id, nodes] of this.snakes) {
       if (!seen.has(id)) {
@@ -111,12 +102,10 @@ export class SnakeLayer {
       text: "",
       style: {
         fontFamily: "system-ui, sans-serif",
-        fontSize: LABEL_RASTER_SIZE,
+        fontSize: 15,
         fontWeight: "600",
         fill: 0xffffff,
-        // 深色描边：白字压在任何蛇身或场地颜色上都可读
-        // 宽度按光栅字号等比放大（原为 15px 字号配 4px 描边）
-        stroke: { color: 0x0b1020, width: LABEL_RASTER_SIZE * (4 / 15), join: "round" },
+        stroke: { color: 0x0b1020, width: 4, join: "round" },
       },
     });
     label.anchor.set(0.5, 1);
@@ -208,7 +197,6 @@ export class SnakeLayer {
     view: ViewBounds,
     showNicknames: boolean,
     nowMs: number,
-    zoom: number,
   ): void {
     const { body } = snake;
     if (body.length === 0) {
@@ -241,7 +229,13 @@ export class SnakeLayer {
 
     this.syncBeads(nodes, this.collectBeads(body, snake.radius, view));
     this.syncHead(nodes, snake);
-    this.syncLabel(nodes, snake, showNicknames, zoom);
+
+    nodes.label.visible = showNicknames;
+    if (showNicknames) {
+      const head = body[0];
+      nodes.label.text = snake.nickname;
+      nodes.label.position.set(head.x, head.y - snake.radius * 2.3);
+    }
 
     nodes.root.alpha = snake.invulnerable ? 0.55 + Math.sin(nowMs * 0.02) * 0.2 : 1;
   }
@@ -254,24 +248,5 @@ export class SnakeLayer {
     // 原 Sprite 朝上；当前引擎的 angle=0 朝右，因此顺时针补偿 90°。
     nodes.head.rotation = snake.angle + Math.PI / 2;
     nodes.head.scale.set(scale);
-  }
-
-  /**
-   * 昵称按 1/zoom 反向缩放，抵消世界容器的相机缩放：
-   * 屏幕字号恒为 LABEL_SCREEN_SIZE，且贴图永远处于缩小采样区间。
-   */
-  private syncLabel(
-    nodes: SnakeNodes,
-    snake: SnakeRenderView,
-    showNicknames: boolean,
-    zoom: number,
-  ): void {
-    nodes.label.visible = showNicknames;
-    if (!showNicknames) return;
-
-    const head = snake.body[0];
-    nodes.label.text = snake.nickname;
-    nodes.label.scale.set(LABEL_SCREEN_SIZE / LABEL_RASTER_SIZE / zoom);
-    nodes.label.position.set(head.x, head.y - snake.radius * 2.3);
   }
 }
