@@ -43,6 +43,7 @@ export function installTouchFullscreen(): () => void {
       return;
     }
     void requested
+      .then(() => screen.orientation.lock("landscape"))
       .catch(() => undefined)
       .finally(() => {
         requestPending = false;
