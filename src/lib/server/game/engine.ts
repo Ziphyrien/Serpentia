@@ -72,7 +72,6 @@ export class GameEngine {
       score: 0,
       kills: 0,
       boosting: false,
-      boostShed: 0,
       alive: true,
       respawnAtTick: undefined,
       invulnerableUntilTick: this.currentTick + (options.invulnerabilityTicks ?? 0),
@@ -199,20 +198,7 @@ export class GameEngine {
     for (const snake of this.orderedSnakes) {
       if (!snake.alive) continue;
 
-      const drained = advanceSnakeMotion(snake, this.config, secondsPerTick);
-      if (drained > 0) this.releaseBoostFood(snake, drained);
-    }
-  }
-
-  private releaseBoostFood(snake: SnakeState, drained: number): void {
-    snake.boostShed += drained;
-
-    while (snake.boostShed >= this.config.boostDropValue) {
-      const tail = snake.body[snake.body.length - 1];
-      const scatterAngle = this.random.angle();
-      const position = move(tail, scatterAngle, this.random.between(0, this.config.foodRadius * 2));
-      this.addFood(position, this.config.boostDropValue, "boost");
-      snake.boostShed -= this.config.boostDropValue;
+      advanceSnakeMotion(snake, this.config, secondsPerTick);
     }
   }
 
@@ -351,7 +337,6 @@ export class GameEngine {
       snake.length = this.config.initialLength;
       snake.score = 0;
       snake.boosting = false;
-      snake.boostShed = 0;
       snake.alive = true;
       snake.respawnAtTick = undefined;
       snake.invulnerableUntilTick = this.currentTick + this.config.respawnInvulnerabilityTicks;

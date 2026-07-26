@@ -1061,7 +1061,7 @@ function writeFoodRecord(target: Array<number>, food: FoodState): void {
 function writeFoodPayload(target: Array<number>, food: FoodState): void {
   writeSignedVarint(target, quantizeSigned(food.position.x));
   writeSignedVarint(target, quantizeSigned(food.position.y));
-  writeUnsignedVarint(target, quantizeUnsigned(food.value) * 3 + encodeFoodKind(food.kind));
+  writeUnsignedVarint(target, quantizeUnsigned(food.value) * 2 + encodeFoodKind(food.kind));
 }
 
 function readFoodRecord(bytes: Uint8Array, offset: number): { food: FoodState; offset: number } {
@@ -1081,8 +1081,8 @@ function readFoodPayload(
     food: {
       id,
       position: { x: dequantize(x.value), y: dequantize(y.value) },
-      value: dequantize(Math.floor(valueAndKind.value / 3)),
-      kind: decodeFoodKind(valueAndKind.value % 3),
+      value: dequantize(Math.floor(valueAndKind.value / 2)),
+      kind: decodeFoodKind(valueAndKind.value % 2),
     },
     offset: valueAndKind.offset,
   };
@@ -1319,14 +1319,11 @@ function decodeAngle(value: number): number {
 }
 
 function encodeFoodKind(kind: FoodKind): number {
-  if (kind === "ambient") return 0;
-  if (kind === "boost") return 1;
-  return 2;
+  return kind === "ambient" ? 0 : 1;
 }
 
 function decodeFoodKind(kind: number): FoodKind {
   if (kind === 0) return "ambient";
-  if (kind === 1) return "boost";
-  if (kind === 2) return "remains";
+  if (kind === 1) return "remains";
   throw new Error(`Invalid food kind: ${kind}`);
 }

@@ -19,7 +19,6 @@ export type Point = typeof Point.Type;
 
 export const FoodKind = Schema.Union([
   Schema.Literal("ambient"),
-  Schema.Literal("boost"),
   Schema.Literal("remains"),
 ]);
 export type FoodKind = typeof FoodKind.Type;

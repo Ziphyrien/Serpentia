@@ -8,7 +8,6 @@ export interface GameConfig {
   readonly minimumLength: number;
   readonly boostMinimumLength: number;
   readonly boostDrainPerSecond: number;
-  readonly boostDropValue: number;
   readonly bodyPointSpacing: number;
   readonly baseRadius: number;
   readonly maximumRadius: number;
@@ -34,7 +33,6 @@ export const defaultGameConfig: GameConfig = Object.freeze({
   minimumLength: 72,
   boostMinimumLength: 96,
   boostDrainPerSecond: 15,
-  boostDropValue: 3,
   bodyPointSpacing: 8,
   baseRadius: 11,
   maximumRadius: 30,

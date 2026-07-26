@@ -86,6 +86,5 @@ export const ARENA_COLORS = {
 /** 吃食物的粒子色：浅色场地上需要足够深才看得见。 */
 export const FOOD_FX_COLORS = {
   ambient: 0x6b7488,
-  boost: 0xd8930f,
   remains: 0xb43ad0,
 } as const;

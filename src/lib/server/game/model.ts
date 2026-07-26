@@ -21,7 +21,6 @@ export interface SnakeState {
   score: number;
   kills: number;
   boosting: boolean;
-  boostShed: number;
   alive: boolean;
   respawnAtTick: number | undefined;
   invulnerableUntilTick: number;
