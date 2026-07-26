@@ -95,13 +95,44 @@ describe("self prediction", () => {
   it("responds to local steering without snapping to the target", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
+    predictor.scheduleInput({
+      sequence: 1,
+      targetTick: predictor.nextInputTick,
+      angle: Math.PI / 2,
+      boosting: false,
+    });
 
-    predictor.advance(20, Math.PI / 2, false);
+    predictor.advance(20);
     const rendered = predictor.renderState();
     expect(rendered).toBeDefined();
     expect(head(rendered!).x).toBeGreaterThan(0);
-    expect(rendered!.angle).toBeGreaterThan(rules.turnRate * 0.02);
+    expect(rendered!.angle).toBeGreaterThan(0);
     expect(rendered!.angle).toBeLessThan(Math.PI / 2);
+  });
+
+  it("keeps the rendered heading on the path the body actually takes", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
+    predictor.scheduleInput({
+      sequence: 1,
+      targetTick: predictor.nextInputTick,
+      angle: Math.PI,
+      boosting: false,
+    });
+
+    // A U-turn is where a decoupled visual angle used to run far ahead of the body.
+    for (let now = 10; now <= 400; now += 10) {
+      predictor.advance(now);
+      const rendered = predictor.renderState();
+      expect(rendered).toBeDefined();
+      const body = rendered!.body;
+      const neck = body[1];
+      if (neck === undefined) continue;
+      const travelled = Math.hypot(head(rendered!).x - neck.x, head(rendered!).y - neck.y);
+      if (travelled < 1e-6) continue;
+      const bodyHeading = Math.atan2(head(rendered!).y - neck.y, head(rendered!).x - neck.x);
+      expect(Math.abs(normalizeAngle(rendered!.angle - bodyHeading))).toBeLessThan(0.2);
+    }
   });
 
   it("keeps local movement and boost smooth across fixed ticks", () => {
@@ -117,7 +148,7 @@ describe("self prediction", () => {
     let previous = predictor.renderState();
     expect(previous).toBeDefined();
     for (let now = 5; now <= 200; now += 5) {
-      predictor.advance(now, Math.PI / 2, true);
+      predictor.advance(now);
       const current = predictor.renderState();
       expect(current).toBeDefined();
       const distance = Math.hypot(
@@ -142,7 +173,7 @@ describe("self prediction", () => {
       angle: Math.PI / 2,
       boosting: false,
     });
-    predictor.advance(25, Math.PI / 2, false);
+    predictor.advance(25);
     const before = predictor.renderState();
     expect(before).toBeDefined();
 
@@ -162,7 +193,7 @@ describe("self prediction", () => {
   it("applies a larger measured lead without moving the visible pose", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
-    predictor.advance(25, Math.PI / 2, false);
+    predictor.advance(25);
     const before = predictor.renderState();
     const previousTargetTick = predictor.nextInputTick;
 
@@ -185,13 +216,13 @@ describe("self prediction", () => {
     const expectedBoundary = predictor.headAtTick(targetTick);
     expect(expectedBoundary).toBeDefined();
 
-    predictor.advance(49, Math.PI / 2, false);
+    predictor.advance(49);
     const before = head(predictor.renderState()!);
-    predictor.advance(50, Math.PI / 2, false);
+    predictor.advance(50);
     const boundary = head(predictor.renderState()!);
     expect(boundary.x).toBeCloseTo(expectedBoundary!.x, 8);
     expect(boundary.y).toBeCloseTo(expectedBoundary!.y, 8);
-    predictor.advance(51, Math.PI / 2, false);
+    predictor.advance(51);
     const after = head(predictor.renderState()!);
     const incomingAngle = Math.atan2(boundary.y - before.y, boundary.x - before.x);
     const outgoingAngle = Math.atan2(after.y - boundary.y, after.x - boundary.x);
@@ -216,7 +247,7 @@ describe("self prediction", () => {
     const segmentLength = Math.hypot(end!.x - start!.x, end!.y - start!.y);
 
     for (let now = 5; now < TICK_MS; now += 5) {
-      predictor.advance(now, Math.PI / 2, false);
+      predictor.advance(now);
       const rendered = head(predictor.renderState()!);
       expect(distanceToSegment(rendered, start!, end!)).toBeLessThan(segmentLength * 0.04);
     }
@@ -226,7 +257,7 @@ describe("self prediction", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     const server = initialMotion();
     predictor.reconcile(snapshotOf(server), 0, 0);
-    predictor.advance(120, Math.PI / 2, true);
+    predictor.advance(120);
     const before = predictor.renderState();
     expect(before).toBeDefined();
 
@@ -261,8 +292,8 @@ describe("self prediction", () => {
       if (now % TICK_MS === 0) {
         stepMotion(server, now <= 100 ? 0 : Math.PI / 2, false);
       }
-      withSnapshots.advance(now, Math.PI / 2, false);
-      withoutSnapshots.advance(now, Math.PI / 2, false);
+      withSnapshots.advance(now);
+      withoutSnapshots.advance(now);
       if (now % 100 === 0) {
         withSnapshots.reconcile(snapshotOf(server), now / TICK_MS, now);
       }
@@ -283,14 +314,14 @@ describe("self prediction", () => {
         angle: Math.PI / 2,
         boosting: false,
       });
-      predictor.advance(100, undefined, false);
+      predictor.advance(100);
     }
     stepMotion(server, 0, false);
     stepMotion(server, 0, false);
     withSnapshot.reconcile(snapshotOf(server), 2, 100);
 
-    withSnapshot.advance(150, undefined, false);
-    baseline.advance(150, undefined, false);
+    withSnapshot.advance(150);
+    baseline.advance(150);
     expectSamePose(baseline.renderState()!, withSnapshot.renderState()!);
   });
 
@@ -304,7 +335,7 @@ describe("self prediction", () => {
       angle: Math.PI / 2,
       boosting: false,
     });
-    predictor.advance(100, Math.PI / 2, false);
+    predictor.advance(100);
     const before = predictor.renderState();
     stepMotion(server, 0, false);
     stepMotion(server, 0, false);
@@ -322,7 +353,7 @@ describe("self prediction", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     predictor.reconcile(snapshotOf(server), 0, 0);
 
-    predictor.advance(55, undefined, false);
+    predictor.advance(55);
     const rendered = predictor.renderState();
     expect(rendered).toBeDefined();
     expect(rendered!.angle).toBeGreaterThan(0);
@@ -352,7 +383,7 @@ describe("self prediction", () => {
       boosting: false,
     });
     predictor.acknowledgeInput(1, targetTick, targetTick);
-    predictor.advance(50, Math.PI / 2, false);
+    predictor.advance(50);
 
     stepMotion(server, 0, false);
     stepMotion(server, 0, false);
@@ -371,7 +402,7 @@ describe("self prediction", () => {
       angle: Math.PI / 2,
       boosting: false,
     });
-    predictor.advance(100, Math.PI / 2, false);
+    predictor.advance(100);
 
     stepMotion(server, 0, false);
     stepMotion(server, 0, false);
@@ -412,7 +443,7 @@ describe("self prediction", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     const original = initialMotion();
     predictor.reconcile(snapshotOf(original), 0, 0);
-    predictor.advance(100, Math.PI / 2, true);
+    predictor.advance(100);
 
     predictor.reconcile({ ...snapshotOf(original), alive: false }, 2, 100);
     expect(predictor.renderState()).toBeUndefined();

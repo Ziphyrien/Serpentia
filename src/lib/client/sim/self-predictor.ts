@@ -3,7 +3,6 @@ import {
   advanceSnakeMotion,
   normalizeAngle,
   trimBody,
-  turnTowards,
   type MotionPoint,
   type SnakeMotionState,
 } from "../../game/snake-motion";
@@ -22,7 +21,13 @@ interface PredictedStep extends SnakeMotionState {
 export interface SelfRenderState {
   /** C¹ presentation path through deterministic tick positions; tick endpoints remain exact. */
   readonly body: ReadonlyArray<MotionPoint>;
-  /** Responsive visual heading; movement uses the scheduled authoritative input. */
+  /**
+   * Deterministic heading interpolated across the tick fraction.
+   *
+   * Must stay derived from the simulated angle: the head sprite has to point
+   * along the path the body actually took, or it detaches from the neck on a
+   * sharp turn. Remote snakes interpolate their authoritative angle the same way.
+   */
   readonly angle: number;
   readonly boosting: boolean;
   readonly collisionTick: number;
@@ -30,7 +35,6 @@ export interface SelfRenderState {
 }
 
 const MAX_FRAME_CATCH_UP_TICKS = 8;
-const VISUAL_TURN_RATE_MULTIPLIER = 3;
 const MAX_REPLAY_TICKS = 64;
 const DEFAULT_PREDICTION_LEAD_TICKS = 2;
 const POSITION_MATCH_TOLERANCE = 0.5;
@@ -50,7 +54,6 @@ export class SelfPredictor {
   private accumulatorMs = 0;
   private lastLocalTime: number | undefined;
   private alive = false;
-  private visualAngle = 0;
   private configuredLeadTicks = DEFAULT_PREDICTION_LEAD_TICKS;
   private activeLeadTicks = DEFAULT_PREDICTION_LEAD_TICKS;
   private lastServerTick = 0;
@@ -162,7 +165,6 @@ export class SelfPredictor {
     this.current = undefined;
     this.accumulatorMs = 0;
     this.lastLocalTime = undefined;
-    this.visualAngle = 0;
     this.alive = false;
     this.activeLeadTicks = this.configuredLeadTicks;
     this.lastServerTick = 0;
@@ -171,7 +173,14 @@ export class SelfPredictor {
     this.statesByTick.clear();
   }
 
-  advance(localNow: number, intentAngle: number | undefined, _intentBoosting: boolean): void {
+  /**
+   * Advances simulation time only.
+   *
+   * Steering intent deliberately does not enter here. It reaches the simulation
+   * through {@link scheduleInput}, which keeps the rendered heading tied to the
+   * path the body actually takes.
+   */
+  advance(localNow: number): void {
     if (!this.alive || !this.current) {
       this.lastLocalTime = localNow;
       return;
@@ -181,13 +190,6 @@ export class SelfPredictor {
     const elapsed = Math.min(250, Math.max(0, localNow - this.lastLocalTime));
     this.lastLocalTime = localNow;
     this.accumulatorMs += elapsed;
-
-    const visualTargetAngle = intentAngle ?? this.current.targetAngle;
-    this.visualAngle = turnTowards(
-      this.visualAngle,
-      visualTargetAngle,
-      this.rules.turnRate * VISUAL_TURN_RATE_MULTIPLIER * (elapsed / 1000),
-    );
 
     let processed = 0;
     while (this.accumulatorMs >= this.tickMs && processed < MAX_FRAME_CATCH_UP_TICKS) {
@@ -214,7 +216,7 @@ export class SelfPredictor {
     if (collisionHead === undefined) return undefined;
     return {
       body: interpolateBodyContinuously(previous?.body, current.body, next.body, ratio),
-      angle: this.visualAngle,
+      angle: normalizeAngle(current.angle + normalizeAngle(next.angle - current.angle) * ratio),
       boosting: next.boosting,
       collisionTick: collisionState.tick,
       collisionHead: { ...collisionHead },
@@ -228,7 +230,6 @@ export class SelfPredictor {
     this.lastServerTick = snapshotTick;
     this.activeLeadTicks = this.configuredLeadTicks;
     this.alive = true;
-    this.visualAngle = snapshot.angle;
     this.statesByTick.clear();
     this.recordCurrent();
 

@@ -118,7 +118,7 @@ describe("target-tick prediction over delayed transport", () => {
         snapshotCorrections.set(snapshot.tick, Math.hypot(after.x - before.x, after.y - before.y));
       }
 
-      predictor.advance(now, intentAngle, false);
+      predictor.advance(now);
     }
 
     expect(snapshotCorrections.get(2)).toBeLessThan(1e-8);

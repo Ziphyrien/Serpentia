@@ -143,12 +143,8 @@ export class GameRenderer {
     const localNow = performance.now();
 
     // 1. 推进自我预测
-    // 无方向输入时传 undefined，避免把出生朝向往 angle=0（正东）拽
-    controller.selfPredictor.advance(
-      localNow,
-      controller.input.hasDirection ? controller.input.angle : undefined,
-      controller.input.boosting,
-    );
+    // 转向意图只经 scheduleInput 进入模拟，保证蛇头朝向与躯干实际路径一致
+    controller.selfPredictor.advance(localNow);
 
     // 2. 组装本帧蛇视图
     // 加速意图不等于加速生效：长度低于阈值时速度不变，不该显示加速光晕
