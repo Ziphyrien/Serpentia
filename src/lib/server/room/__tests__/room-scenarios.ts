@@ -198,6 +198,33 @@ export const roomScenarios: ReadonlyArray<Scenario> = [
     },
   },
   {
+    name: "signing out frees the nickname regardless of socket close order",
+    run: () => {
+      for (const disconnectFirst of [false, true]) {
+        const controller = new RoomController(new GameEngine(gameConfig(), 1, false), 100);
+        const first = controller.join("connection-a", {
+          playerId: "session-1",
+          nickname: "Alpha",
+        });
+        requireCondition(first._tag === "Accepted", "first connection was rejected");
+
+        if (disconnectFirst) requireCondition(controller.leave("connection-a"), "close was ignored");
+        requireCondition(controller.release("session-1"), "sign-out did not release the player");
+
+        const rejoined = controller.join("connection-b", {
+          playerId: "session-2",
+          nickname: "Alpha",
+        });
+        requireCondition(
+          rejoined._tag === "Accepted",
+          "nickname stayed locked to the signed-out session",
+        );
+        requireCondition(!controller.leave("connection-a"), "stale close affected the new player");
+        requireCondition(controller.snapshot().snakes.length === 1, "signed-out snake lingered");
+      }
+    },
+  },
+  {
     name: "reconnect grace resumes the same snake and input sequence",
     run: () => {
       const controller = new RoomController(new GameEngine(gameConfig(), 1, false), 3);

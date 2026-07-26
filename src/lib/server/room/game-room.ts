@@ -153,6 +153,25 @@ export class GameRoom {
     if (!this.controller.shouldRun) this.stopLoop();
   }
 
+  /** 会话被显式作废时，立即释放玩家而不保留重连状态。 */
+  release(playerId: string): void {
+    const connectionId = this.controller.connectionIdForPlayer(playerId);
+    if (!this.controller.release(playerId)) return;
+
+    if (connectionId !== undefined) {
+      const connection = this.connections.get(connectionId);
+      this.connections.delete(connectionId);
+      this.snapshotDelivery.forget(connectionId);
+      this.trafficGuard.forget(connectionId);
+      connection?.close(4401, "Session signed out");
+    }
+    this.snapshotStream.reset();
+    this.latestSnapshotMessage = undefined;
+
+    if (this.voiceRoster.leave(playerId)) this.broadcastVoiceRoster();
+    if (!this.controller.shouldRun) this.stopLoop();
+  }
+
   drain(connectionId: string): void {
     const connection = this.connections.get(connectionId);
     if (connection === undefined) {

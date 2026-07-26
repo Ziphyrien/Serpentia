@@ -121,6 +121,20 @@ export class RoomController {
     return true;
   }
 
+  /** 立即释放玩家，不经过断线重连宽限期。 */
+  release(playerId: string): boolean {
+    const connectionId = this.connectionByPlayer.get(playerId);
+    if (connectionId !== undefined) this.playerByConnection.delete(connectionId);
+    this.connectionByPlayer.delete(playerId);
+
+    const hadNickname = this.nicknameByPlayer.delete(playerId);
+    const hadDeadline = this.disconnectDeadlineByPlayer.delete(playerId);
+    this.pendingInputs.delete(playerId);
+    this.lastQueuedSequence.delete(playerId);
+    this.engine.removeSnake(playerId);
+    return hadNickname || hadDeadline;
+  }
+
   applyInput(connectionId: string, input: RoomPlayerInput): InputAcceptance | false {
     const playerId = this.playerByConnection.get(connectionId);
     if (playerId === undefined || this.connectionByPlayer.get(playerId) !== connectionId) {

@@ -61,6 +61,13 @@ export class ApiRouter {
     if (request.method === "GET") return this.readSession(request);
     if (request.method === "POST") return this.createSession(request, clientAddress);
     if (request.method === "DELETE") {
+      const token = readCookie(request, SESSION_COOKIE_NAME);
+      const claims =
+        token === undefined
+          ? undefined
+          : await verifySession(token, this.config.sessionSigningSecret);
+      if (claims !== undefined) this.services.gameRoom.release(claims.playerId);
+
       return new Response(null, {
         status: 204,
         headers: {
