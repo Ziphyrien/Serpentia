@@ -30,7 +30,7 @@
 <div bind:this={zone} class="absolute inset-y-0 left-0 z-10 w-3/5" data-ui></div>
 
 <button
-  class="absolute right-[max(1.5rem,env(safe-area-inset-right))] bottom-[max(2.5rem,env(safe-area-inset-bottom))] z-10 flex size-24 touch-none items-center justify-center rounded-full border-4 font-black transition select-none landscape-short:size-20 {buttonClass} {canBoost
+  class="absolute right-[max(1.5rem,var(--hud-safe-right))] bottom-[max(2.5rem,var(--hud-safe-bottom))] z-10 flex size-24 touch-none items-center justify-center rounded-full border-4 font-black transition select-none landscape-short:size-20 {buttonClass} {canBoost
     ? ''
     : 'opacity-50'}"
   style="text-shadow: none;"

@@ -21,6 +21,23 @@ body {
   overscroll-behavior: none;
 }
 
+:root {
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --hud-safe-top: var(--safe-area-top);
+  --hud-safe-right: var(--safe-area-right);
+  --hud-safe-bottom: var(--safe-area-bottom);
+  --hud-safe-left: var(--safe-area-left);
+}
+
+/* 部分 Android Chrome 已从视口裁掉横向刘海区，避免 HUD 再重复留出同样宽度 */
+:root[data-inline-safe-area-contained] {
+  --hud-safe-right: 0px;
+  --hud-safe-left: 0px;
+}
+
 body {
   background: var(--color-night-950);
   color: white;
@@ -38,10 +55,10 @@ canvas {
 /* HUD 安全区内边距：避开刘海 / 灵动岛 / Home 指示条 */
 @utility p-hud {
   padding: 0.75rem;
-  padding-top: max(0.75rem, env(safe-area-inset-top));
-  padding-right: max(0.75rem, env(safe-area-inset-right));
-  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
-  padding-left: max(0.75rem, env(safe-area-inset-left));
+  padding-top: max(0.75rem, var(--hud-safe-top));
+  padding-right: max(0.75rem, var(--hud-safe-right));
+  padding-bottom: max(0.75rem, var(--hud-safe-bottom));
+  padding-left: max(0.75rem, var(--hud-safe-left));
 }
 
 /* 虚拟摇杆皮肤：半透明底盘 + 白色旋钮（nipplejs 内联样式需 !important 覆盖） */
