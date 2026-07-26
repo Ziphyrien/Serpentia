@@ -48,7 +48,7 @@ interface Bead {
  */
 const LABEL_RASTER_SIZE = 36;
 /** 昵称的目标屏幕字号，不随相机缩放变化。 */
-const LABEL_SCREEN_SIZE = 13;
+const LABEL_SCREEN_SIZE = 15;
 
 /**
  * 蛇渲染层：使用 Snake-Demo 游戏场景实际引用的四套头部与身体 Sprite。
@@ -110,12 +110,13 @@ export class SnakeLayer {
     const label = new Text({
       text: "",
       style: {
-        fontFamily: "Arial, sans-serif",
+        fontFamily: "system-ui, sans-serif",
         fontSize: LABEL_RASTER_SIZE,
-        fontWeight: "700",
-        fill: 0x2f2f2f,
-        // 白色描边保证名字压在深色蛇身上时依然可读
-        stroke: { color: 0xffffff, width: 5, join: "round" },
+        fontWeight: "600",
+        fill: 0xffffff,
+        // 深色描边：白字压在任何蛇身或场地颜色上都可读
+        // 宽度按光栅字号等比放大（原为 15px 字号配 4px 描边）
+        stroke: { color: 0x0b1020, width: LABEL_RASTER_SIZE * (4 / 15), join: "round" },
       },
     });
     label.anchor.set(0.5, 1);
@@ -271,6 +272,6 @@ export class SnakeLayer {
     const head = snake.body[0];
     nodes.label.text = snake.nickname;
     nodes.label.scale.set(LABEL_SCREEN_SIZE / LABEL_RASTER_SIZE / zoom);
-    nodes.label.position.set(head.x, head.y - snake.radius * 1.5);
+    nodes.label.position.set(head.x, head.y - snake.radius * 2.3);
   }
 }
