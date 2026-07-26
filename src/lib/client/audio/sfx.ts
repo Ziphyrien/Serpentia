@@ -1,16 +1,13 @@
 import { Howl, Howler } from "howler";
 
-type SfxName = "eat" | "eat-big" | "boost" | "death" | "kill" | "respawn" | "click";
+type SfxName = "eat-remains" | "death" | "kill" | "respawn" | "click";
 
 /**
- * 音效管理（howler 封装）：负责加载、音量、静音与连击变调。
+ * 音效管理（howler 封装）：负责加载、音量与静音。
  * 不知道游戏逻辑，只暴露语义化播放接口。
  */
 export class Sfx {
   private readonly sounds: Record<SfxName, Howl>;
-  private boostSoundId: number | undefined;
-  private eatChainAt = 0;
-  private eatChainCount = 0;
   private unlocked = false;
   private readonly unlock = (): void => {
     if (this.unlocked) return;
@@ -20,22 +17,19 @@ export class Sfx {
   };
 
   constructor() {
-    const createSound = (name: SfxName, options: { loop?: boolean; volume?: number } = {}) =>
+    const createSound = (name: SfxName, volume: number) =>
       new Howl({
         src: [`/assets/sfx/${name}.wav`],
         format: ["wav"],
-        loop: options.loop ?? false,
-        volume: options.volume ?? 1,
+        volume,
         preload: true,
       });
     this.sounds = {
-      eat: createSound("eat", { volume: 0.5 }),
-      "eat-big": createSound("eat-big", { volume: 0.55 }),
-      boost: createSound("boost", { loop: true, volume: 0.35 }),
-      death: createSound("death", { volume: 0.7 }),
-      kill: createSound("kill", { volume: 0.6 }),
-      respawn: createSound("respawn", { volume: 0.6 }),
-      click: createSound("click", { volume: 0.5 }),
+      "eat-remains": createSound("eat-remains", 0.55),
+      death: createSound("death", 0.7),
+      kill: createSound("kill", 0.6),
+      respawn: createSound("respawn", 0.6),
+      click: createSound("click", 0.5),
     };
 
     window.addEventListener("pointerdown", this.unlock);
@@ -50,15 +44,14 @@ export class Sfx {
     Howler.mute(muted);
   }
 
-  /** 吃食物：短时间内连续吃会升调形成连击感。 */
-  eat(big = false): void {
-    const now = performance.now();
-    if (now - this.eatChainAt > 800) this.eatChainCount = 0;
-    this.eatChainAt = now;
-    this.eatChainCount = Math.min(this.eatChainCount + 1, 8);
-    const name: SfxName = big ? "eat-big" : "eat";
-    const id = this.sounds[name].play();
-    this.sounds[name].rate(1 + this.eatChainCount * 0.06, id);
+  /**
+   * 吃到尸体食物。普通食物不发声，避免持续进食时音效连成一片。
+   *
+   * 以固定音高播放：尸体是成片散落的，重叠触发只会变响而不会走音，
+   * 因此不需要连击变调。
+   */
+  eatRemains(): void {
+    this.sounds["eat-remains"].play();
   }
 
   death(): void {
@@ -75,20 +68,6 @@ export class Sfx {
 
   click(): void {
     this.sounds.click.play();
-  }
-
-  /** 加速风声随 boosting 状态启停。 */
-  setBoosting(active: boolean): void {
-    const sound = this.sounds.boost;
-    if (active && this.boostSoundId === undefined) {
-      this.boostSoundId = sound.play();
-      sound.fade(0, 0.35, 150, this.boostSoundId);
-    } else if (!active && this.boostSoundId !== undefined) {
-      sound.fade(0.35, 0, 200, this.boostSoundId);
-      const fading = this.boostSoundId;
-      window.setTimeout(() => sound.stop(fading), 220);
-      this.boostSoundId = undefined;
-    }
   }
 
   dispose(): void {

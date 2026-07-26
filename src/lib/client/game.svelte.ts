@@ -408,7 +408,6 @@ export class GameController {
 
   private enterTerminalState(notice: string): void {
     this.voice.leave();
-    this.sfx.setBoosting(false);
     this.clearRespawnCountdown();
     this.status = "closed";
     this.notice = notice;

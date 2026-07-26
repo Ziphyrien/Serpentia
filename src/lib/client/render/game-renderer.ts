@@ -29,7 +29,6 @@ export class GameRenderer {
   private destroyed = false;
   private selfRadiusSmooth = 11;
   private lastSelfAlive = false;
-  private lastBoosting = false;
   private readonly handleResize = (): void => this.resize();
   private readonly unsubscribeSettings: () => void;
 
@@ -238,13 +237,6 @@ export class GameRenderer {
     }
     this.snakes.update(views, viewBounds, this.settings.showNicknames, nowMs);
     this.fx.update(deltaMS);
-
-    // 5. 加速音效状态（同样以生效为准，长度不足时不发声）
-    const boosting = Boolean(selfSnapshot?.alive && selfBoosting);
-    if (boosting !== this.lastBoosting) {
-      this.lastBoosting = boosting;
-      controller.sfx.setBoosting(boosting);
-    }
   }
 
   private playFoodFeedback(
@@ -257,7 +249,8 @@ export class GameRenderer {
     if (distance >= 720) return;
     const color = FOOD_FX_COLORS[position.kind];
     this.fx?.burst(position.x, position.y, color, position.kind === "ambient" ? 8 : 14, 200, 3.5);
-    if (distance < 400) this.controller.sfx.eat(position.kind !== "ambient");
+    // 普通食物不发声：吃豆是持续行为，逐颗发声会连成一片噪音。
+    if (position.kind === "remains" && distance < 400) this.controller.sfx.eatRemains();
   }
 
   private selfHead(): { x: number; y: number } | undefined {
