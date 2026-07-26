@@ -29,7 +29,7 @@ export const defaultGameConfig: GameConfig = Object.freeze({
   arenaHalfSize: 667,
   baseSpeed: 132,
   boostSpeed: 218,
-  turnRate: 3.8,
+  turnRate: 8,
   initialLength: 180,
   minimumLength: 72,
   boostMinimumLength: 96,
