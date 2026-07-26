@@ -104,8 +104,10 @@ export class SnakeLayer {
         fontFamily: "system-ui, sans-serif",
         fontSize: 15,
         fontWeight: "600",
-        fill: 0xffffff,
-        stroke: { color: 0x0b1020, width: 4, join: "round" },
+        // 场地为浅色，因此字身用深色、描边用白色。
+        // 反过来（白字深描边）会让字身融进场地，只剩描边可见，看起来发糊。
+        fill: 0x1c2333,
+        stroke: { color: 0xffffff, width: 4, join: "round" },
       },
     });
     label.anchor.set(0.5, 1);
