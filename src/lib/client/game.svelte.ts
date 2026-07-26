@@ -61,8 +61,6 @@ export class GameController {
   voiceLevel = $state(0);
   voiceError = $state<string | undefined>(undefined);
   notice = $state<string | undefined>(undefined);
-  /** 蛇头接近场地边界（渲染层每帧更新，HUD 显示红晕警告）。 */
-  nearBoundary = $state(false);
 
   /** 渲染层直读的最新快照（非响应式，避免 10Hz 大对象进入依赖图）。 */
   latestSnapshot: GameSnapshot | undefined;

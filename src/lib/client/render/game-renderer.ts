@@ -249,15 +249,6 @@ export class GameRenderer {
       this.lastBoosting = boosting;
       controller.sfx.setBoosting(boosting);
     }
-
-    // 6. 边界接近提示
-    if (selfHead && selfSnapshot?.alive) {
-      const limit = controller.descriptor.rules.arenaHalfSize;
-      const distanceToBorder = limit - Math.max(Math.abs(selfHead.x), Math.abs(selfHead.y));
-      controller.nearBoundary = distanceToBorder < 220;
-    } else {
-      controller.nearBoundary = false;
-    }
   }
 
   private playFoodFeedback(

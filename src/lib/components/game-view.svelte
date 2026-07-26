@@ -31,13 +31,6 @@
 <div class="fixed inset-0 overflow-hidden bg-night-950">
   <div bind:this={canvasHost} class="absolute inset-0"></div>
 
-  {#if controller.nearBoundary}
-    <div
-      class="pointer-events-none absolute inset-0 transition-opacity duration-300"
-      style="box-shadow: inset 0 0 120px 30px rgba(242, 109, 95, 0.45);"
-    ></div>
-  {/if}
-
   {#if controller.status === "connecting" || controller.status === "reconnecting"}
     <div class="absolute inset-x-0 top-0 z-30 flex justify-center pt-20 landscape-short:pt-12">
       <div class="rounded-full bg-panel px-6 py-2 text-sm font-bold text-white/90 backdrop-blur-sm">
