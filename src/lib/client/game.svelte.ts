@@ -82,6 +82,17 @@ export class GameController {
   private lastSentBoosting = false;
   private inputSendTimer: ReturnType<typeof setTimeout> | undefined;
   private lastInputSentAt = Number.NEGATIVE_INFINITY;
+  /**
+   * One input per simulation tick.
+   *
+   * The simulation only applies the last input scheduled on a tick, so sending
+   * faster than the tick rate discards messages and, worse, makes the number of
+   * inputs landing per tick alternate whenever the send period does not divide
+   * the tick period. That beat turns a steady turn into uneven angle steps.
+   */
+  private get inputSendIntervalMs(): number {
+    return 1000 / this.descriptor.tickRate;
+  }
   private readonly unsubscribeInput: () => void;
   private pingTimer: ReturnType<typeof setInterval> | undefined;
   private pingNonce = 0;
@@ -432,7 +443,7 @@ export class GameController {
     if (this.inputSendTimer) return;
 
     const elapsed = performance.now() - this.lastInputSentAt;
-    const delay = Math.max(0, INPUT.sendIntervalMs - elapsed);
+    const delay = Math.max(0, this.inputSendIntervalMs - elapsed);
     if (delay === 0) {
       this.flushInput();
       return;

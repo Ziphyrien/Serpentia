@@ -70,7 +70,6 @@ export const RENDER = {
 } as const;
 
 export const INPUT = {
-  sendIntervalMs: 33,
   angleEpsilon: 0.02,
   pingIntervalMs: 5_000,
 } as const;
