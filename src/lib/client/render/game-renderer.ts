@@ -240,7 +240,7 @@ export class GameRenderer {
     } else {
       this.foodSpeculation.reset();
     }
-    this.snakes.update(views, viewBounds, this.settings.showNicknames, nowMs);
+    this.snakes.update(views, viewBounds, this.settings.showNicknames, nowMs, this.camera.zoom);
     this.fx.update(deltaMS);
 
     // 5. 加速音效状态（同样以生效为准，长度不足时不发声）
