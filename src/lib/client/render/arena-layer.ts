@@ -1,57 +1,40 @@
 import { Container, Graphics, TilingSprite, type Texture } from "pixi.js";
 import { ARENA_COLORS } from "../config";
-import type { Camera } from "./camera";
 
 /**
- * 场地层：屏幕空间的星空平铺背景 + 世界空间的边界墙。
- * 背景随相机平移制造视差，边界只在初始化时绘制一次。
+ * Snake-Demo 场地：原版浅灰三角纹理铺在世界空间，场地外使用原版纯红底色。
+ * 不再叠加当前项目原有的星空、绿色边框或视差效果。
  */
 export class ArenaLayer {
   readonly screenContainer = new Container();
   readonly worldContainer = new Container();
 
-  private background: TilingSprite | undefined;
-  private fallbackBackground: Graphics | undefined;
-  private boundary: Graphics;
+  private readonly outside = new Graphics();
+  private readonly background: TilingSprite | Graphics;
 
-  constructor(
-    bgTile: Texture | undefined,
-    private readonly halfSize: number,
-  ) {
-    if (bgTile) {
-      this.background = new TilingSprite({ texture: bgTile, width: 1, height: 1 });
-      this.background.tileScale.set(0.5);
-      this.screenContainer.addChild(this.background);
-    } else {
-      this.fallbackBackground = new Graphics().rect(0, 0, 1, 1).fill(0x101736);
-      this.screenContainer.addChild(this.fallbackBackground);
-    }
+  constructor(arenaBackground: Texture | undefined, halfSize: number) {
+    this.screenContainer.addChild(this.outside);
 
-    this.boundary = new Graphics();
     const size = halfSize * 2;
-    // 场内微亮底色，让场内/场外有区分
-    this.boundary.rect(-halfSize, -halfSize, size, size).fill({ color: 0x151d3d, alpha: 0.35 });
-    this.boundary
-      .rect(-halfSize, -halfSize, size, size)
-      .stroke({ width: 6, color: ARENA_COLORS.border, alpha: 0.95 });
-    this.worldContainer.addChild(this.boundary);
+    if (arenaBackground) {
+      const background = new TilingSprite({
+        texture: arenaBackground,
+        width: size,
+        height: size,
+      });
+      background.position.set(-halfSize, -halfSize);
+      // 原工程为 100 PPU、场地宽 27.32；按当前场地宽度等比映射后保持原纹理比例。
+      background.tileScale.set(size / arenaBackground.width);
+      this.background = background;
+    } else {
+      this.background = new Graphics()
+        .rect(-halfSize, -halfSize, size, size)
+        .fill(ARENA_COLORS.fallback);
+    }
+    this.worldContainer.addChild(this.background);
   }
 
   resize(width: number, height: number): void {
-    if (this.background) {
-      this.background.width = width;
-      this.background.height = height;
-    }
-    if (this.fallbackBackground) {
-      this.fallbackBackground.clear().rect(0, 0, width, height).fill(0x101736);
-    }
-  }
-
-  update(camera: Camera): void {
-    if (this.background) {
-      // 轻微视差：背景以 0.5 倍速率跟随相机
-      this.background.tilePosition.x = -camera.x * camera.zoom * 0.5;
-      this.background.tilePosition.y = -camera.y * camera.zoom * 0.5;
-    }
+    this.outside.clear().rect(0, 0, width, height).fill(ARENA_COLORS.outside);
   }
 }

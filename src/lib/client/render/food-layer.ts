@@ -1,4 +1,4 @@
-import { Container, Graphics, GraphicsContext } from "pixi.js";
+import { Container, Sprite, type Texture } from "pixi.js";
 import type { FoodState } from "$lib/protocol";
 
 interface ViewBounds {
@@ -9,38 +9,29 @@ interface ViewBounds {
 }
 
 interface FoodRecord {
-  node: Graphics;
+  node: Sprite;
   x: number;
   y: number;
   kind: FoodState["kind"];
 }
 
-interface FoodPalette {
-  /** 外圈光晕 */
-  glow: number;
-  /** 球体主色 */
-  base: number;
-  /** 底部暗面 */
-  shade: number;
-}
-
 const NO_HIDDEN_FOODS: ReadonlySet<number> = new Set();
-const PALETTES: Record<FoodState["kind"], FoodPalette> = {
-  ambient: { glow: 0xffc9e2, base: 0xfff3f8, shade: 0xf0a8cd },
-  boost: { glow: 0xffe9a8, base: 0xffd75e, shade: 0xeda03a },
-  remains: { glow: 0xffd2a0, base: 0xffc27a, shade: 0xe88a3c },
-};
 
 /**
- * 食物层：程序化绘制的固定尺寸糖珠，保留柔和暗面但不带高光与缩放动画。
- * 加速食物（boost）通过倾斜光环区分。
+ * 食物层：直接使用 Snake-Demo 的 8 张 node Sprite；尸体食物使用原版 deadfood Sprite。
+ * 普通食物与死亡食物的 1:1.875 尺寸比来自原 Unity Prefab。
  */
 export class FoodLayer {
   readonly container = new Container();
-  private records = new Map<number, FoodRecord>();
-  private contexts = new Map<string, GraphicsContext>();
+  private readonly records = new Map<number, FoodRecord>();
 
-  constructor(private readonly foodRadius: number) {}
+  constructor(
+    private readonly foodRadius: number,
+    private readonly foodTextures: ReadonlyArray<Texture>,
+    private readonly remainsTexture: Texture,
+  ) {
+    if (foodTextures.length === 0) throw new Error("Snake-Demo food textures are missing");
+  }
 
   /** 供特效/音效查询食物最后已知位置。 */
   positionOf(foodId: number): { x: number; y: number; kind: FoodState["kind"] } | undefined {
@@ -57,21 +48,25 @@ export class FoodLayer {
     for (const food of foods) {
       seen.add(food.id);
       let record = this.records.get(food.id);
-      if (!record) {
+      if (!record || record.kind !== food.kind) {
+        record?.node.destroy();
         record = this.createRecord(food);
         this.records.set(food.id, record);
       }
+
       record.x = food.position.x;
       record.y = food.position.y;
+      const margin = food.kind === "remains" ? this.foodRadius * 2 : this.foodRadius;
       const visible =
         !hiddenFoodIds.has(food.id) &&
-        food.position.x > view.left &&
-        food.position.x < view.right &&
-        food.position.y > view.top &&
-        food.position.y < view.bottom;
+        food.position.x > view.left - margin &&
+        food.position.x < view.right + margin &&
+        food.position.y > view.top - margin &&
+        food.position.y < view.bottom + margin;
       record.node.visible = visible;
       if (visible) record.node.position.set(food.position.x, food.position.y);
     }
+
     for (const [id, record] of this.records) {
       if (!seen.has(id)) {
         record.node.destroy();
@@ -90,18 +85,16 @@ export class FoodLayer {
   destroy(): void {
     for (const record of this.records.values()) record.node.destroy();
     this.records.clear();
-    for (const context of this.contexts.values()) context.destroy();
-    this.contexts.clear();
   }
 
   private createRecord(food: FoodState): FoodRecord {
-    // 尺寸随价值增大；尸体食物（remains）偏暖色
-    const sizeFactor = Math.min(1.9, 0.75 + food.value * 0.09);
-    const radius = this.foodRadius * sizeFactor;
-    const node = new Graphics(this.contextFor(food.kind, radius));
-    if (food.kind === "boost") node.rotation = -0.5;
-
+    const texture = this.textureFor(food);
+    const node = new Sprite({ texture, anchor: 0.5 });
+    // 原版普通食物为 16×16；deadfood 为约 60×62 并以 0.5 倍生成。
+    const diameter = this.foodRadius * (food.kind === "remains" ? 3.75 : 2);
+    node.scale.set(diameter / Math.max(texture.width, texture.height));
     this.container.addChild(node);
+
     return {
       node,
       x: food.position.x,
@@ -110,27 +103,10 @@ export class FoodLayer {
     };
   }
 
-  private contextFor(kind: FoodState["kind"], radius: number): GraphicsContext {
-    const key = `${kind}:${radius}`;
-    const existing = this.contexts.get(key);
-    if (existing) return existing;
-
-    const palette = PALETTES[kind];
-    const context = new GraphicsContext();
-    // 光晕
-    context.circle(0, 0, radius * 2).fill({ color: palette.glow, alpha: 0.14 });
-    context.circle(0, 0, radius * 1.45).fill({ color: palette.glow, alpha: 0.22 });
-    // 球体：主色 + 底部暗面
-    context.circle(0, 0, radius).fill(palette.base);
-    context.circle(0, radius * 0.22, radius * 0.8).fill({ color: palette.shade, alpha: 0.5 });
-    // 加速食物：倾斜光环
-    if (kind === "boost") {
-      context
-        .ellipse(0, 0, radius * 1.7, radius * 0.62)
-        .stroke({ width: Math.max(1.5, radius * 0.16), color: 0xffedb0, alpha: 0.85 });
-    }
-
-    this.contexts.set(key, context);
-    return context;
+  private textureFor(food: FoodState): Texture {
+    if (food.kind === "remains") return this.remainsTexture;
+    const texture = this.foodTextures[food.id % this.foodTextures.length];
+    if (!texture) throw new Error("Snake-Demo food texture lookup failed");
+    return texture;
   }
 }

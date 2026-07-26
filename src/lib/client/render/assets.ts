@@ -1,16 +1,34 @@
-import { Assets, Texture } from "pixi.js";
+import { Assets, type Texture } from "pixi.js";
 import { ASSET_PATHS } from "../config";
 
-export interface GameTextures {
-  /** 背景地砖；蛇与食物均为程序化绘制，无需纹理。 */
-  bgTile: Texture | undefined;
+export interface SnakeSkinTextures {
+  readonly head: Texture;
+  readonly body: Texture;
 }
 
-/** 加载游戏纹理；失败时降级为纯色背景，不阻塞进入游戏。 */
+export interface GameTextures {
+  readonly arenaBackground: Texture;
+  readonly snakeSkins: ReadonlyArray<SnakeSkinTextures>;
+  readonly foods: ReadonlyArray<Texture>;
+  readonly remainsFood: Texture;
+}
+
+/** 加载从 Snake-Demo 原工程按 Unity GUID 对应出的游戏 Sprite。 */
 export async function loadGameTextures(): Promise<GameTextures> {
-  try {
-    return { bgTile: await Assets.load<Texture>(ASSET_PATHS.bgTile) };
-  } catch {
-    return { bgTile: undefined };
-  }
+  const [arenaBackground, snakeSkins, foods, remainsFood] = await Promise.all([
+    Assets.load<Texture>(ASSET_PATHS.snakeDemo.arenaBackground),
+    Promise.all(
+      ASSET_PATHS.snakeDemo.snakeSkins.map(async (skin) => {
+        const [head, body] = await Promise.all([
+          Assets.load<Texture>(skin.head),
+          Assets.load<Texture>(skin.body),
+        ]);
+        return { head, body };
+      }),
+    ),
+    Promise.all(ASSET_PATHS.snakeDemo.foods.map((path) => Assets.load<Texture>(path))),
+    Assets.load<Texture>(ASSET_PATHS.snakeDemo.remainsFood),
+  ]);
+
+  return { arenaBackground, snakeSkins, foods, remainsFood };
 }

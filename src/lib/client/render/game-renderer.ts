@@ -2,7 +2,7 @@ import { Application, Container } from "pixi.js";
 import type { FoodState } from "$lib/protocol";
 import type { GameController } from "../game.svelte";
 import type { SettingsStore } from "../stores/settings.svelte";
-import { RENDER } from "../config";
+import { RENDER, ARENA_COLORS } from "../config";
 import { loadGameTextures } from "./assets";
 import { Camera } from "./camera";
 import { ArenaLayer } from "./arena-layer";
@@ -46,7 +46,7 @@ export class GameRenderer {
       preference: "webgl",
       antialias: true,
       resizeTo: host,
-      background: 0x0b1020,
+      background: ARENA_COLORS.outside,
       resolution: this.renderResolution(),
       autoDensity: true,
     });
@@ -55,7 +55,7 @@ export class GameRenderer {
       return;
     }
     this.app = app;
-    // resizeTo 只负责画布尺寸，星空背景要跟着屏幕旋转/缩放联动
+    // resizeTo 只负责画布尺寸，场外红色底图仍需同步屏幕尺寸
     app.renderer.on("resize", this.handleResize);
     host.appendChild(app.canvas);
 
@@ -63,9 +63,9 @@ export class GameRenderer {
     if (this.destroyed) return;
 
     const rules = this.controller.descriptor.rules;
-    this.arena = new ArenaLayer(textures.bgTile, rules.arenaHalfSize);
-    this.food = new FoodLayer(rules.foodRadius);
-    this.snakes = new SnakeLayer();
+    this.arena = new ArenaLayer(textures.arenaBackground, rules.arenaHalfSize);
+    this.food = new FoodLayer(rules.foodRadius, textures.foods, textures.remainsFood);
+    this.snakes = new SnakeLayer(textures.snakeSkins);
     this.fx = new FxLayer();
 
     app.stage.addChild(this.arena.screenContainer);
@@ -208,7 +208,6 @@ export class GameRenderer {
       width / 2 - this.camera.x * this.camera.zoom,
       height / 2 - this.camera.y * this.camera.zoom,
     );
-    this.arena.update(this.camera);
 
     // 4. 图层同步
     const viewBounds = this.camera.viewBounds(width, height);
