@@ -27,7 +27,6 @@ export const ASSET_PATHS = {
   logo: "/assets/art/logo.png",
   loginHero: "/assets/art/login-hero.webp",
   snakeDemo: {
-    arenaBackground: "/assets/art/snake-demo/arena-background.png",
     snakeSkins: [
       {
         head: "/assets/art/snake-demo/snake-1-head.png",
@@ -77,8 +76,19 @@ export const INPUT = {
 } as const;
 
 export const ARENA_COLORS = {
-  /** 原版场地贴图外侧的纯红底图（Resources/bj.png）。 */
-  outside: 0xed1c24,
-  /** 原图加载失败时使用的主背景色。 */
-  fallback: 0xebecf4,
+  /** 场外虚空：深色收边，让亮色场地更突出。 */
+  surround: 0x161a26,
+  /** 场地底色，取自原版背景主色 #ebecf4。 */
+  floor: 0xeef0f6,
+  gridMinor: 0xd8dce9,
+  gridMajor: 0xc4cade,
+  /** 原版场地红（Resources/bj.png），现只用于墙体与贴墙警示。 */
+  wall: 0xed1c24,
+} as const;
+
+/** 吃食物的粒子色：浅色场地上需要足够深才看得见。 */
+export const FOOD_FX_COLORS = {
+  ambient: 0x6b7488,
+  boost: 0xd8930f,
+  remains: 0xb43ad0,
 } as const;

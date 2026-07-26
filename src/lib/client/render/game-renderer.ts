@@ -2,7 +2,7 @@ import { Application, Container } from "pixi.js";
 import type { FoodState } from "$lib/protocol";
 import type { GameController } from "../game.svelte";
 import type { SettingsStore } from "../stores/settings.svelte";
-import { RENDER, ARENA_COLORS } from "../config";
+import { RENDER, ARENA_COLORS, FOOD_FX_COLORS } from "../config";
 import { loadGameTextures } from "./assets";
 import { Camera } from "./camera";
 import { ArenaLayer } from "./arena-layer";
@@ -46,7 +46,7 @@ export class GameRenderer {
       preference: "webgl",
       antialias: true,
       resizeTo: host,
-      background: ARENA_COLORS.outside,
+      background: ARENA_COLORS.surround,
       resolution: this.renderResolution(),
       autoDensity: true,
     });
@@ -55,7 +55,7 @@ export class GameRenderer {
       return;
     }
     this.app = app;
-    // resizeTo 只负责画布尺寸，场外红色底图仍需同步屏幕尺寸
+    // resizeTo 只负责画布尺寸，场外底色仍需同步屏幕尺寸
     app.renderer.on("resize", this.handleResize);
     host.appendChild(app.canvas);
 
@@ -63,7 +63,7 @@ export class GameRenderer {
     if (this.destroyed) return;
 
     const rules = this.controller.descriptor.rules;
-    this.arena = new ArenaLayer(textures.arenaBackground, rules.arenaHalfSize);
+    this.arena = new ArenaLayer(rules.arenaHalfSize);
     this.food = new FoodLayer(rules.foodRadius, textures.foods, textures.remainsFood);
     this.snakes = new SnakeLayer(textures.snakeSkins);
     this.fx = new FxLayer();
@@ -268,7 +268,7 @@ export class GameRenderer {
       ? Math.hypot(position.x - selfHead.x, position.y - selfHead.y)
       : Infinity;
     if (distance >= 720) return;
-    const color = position.kind === "boost" ? 0xffd75e : 0xfff3f8;
+    const color = FOOD_FX_COLORS[position.kind];
     this.fx?.burst(position.x, position.y, color, position.kind === "ambient" ? 8 : 14, 200, 3.5);
     if (distance < 400) this.controller.sfx.eat(position.kind !== "ambient");
   }
