@@ -85,9 +85,3 @@ export const ARENA_COLORS = {
   gridMinor: 0xd8dce9,
   gridMajor: 0xc4cade,
 } as const;
-
-/** 吃食物的粒子色：浅色场地上需要足够深才看得见。 */
-export const FOOD_FX_COLORS = {
-  ambient: 0x6b7488,
-  remains: 0xb43ad0,
-} as const;

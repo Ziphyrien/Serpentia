@@ -14,10 +14,7 @@ interface Particle {
 
 const MAX_PARTICLES = 500;
 
-/**
- * 特效层：单个 Graphics 重绘的轻量粒子系统
- * （吃食物反馈与死亡爆裂）。
- */
+/** 蛇死亡爆裂使用的轻量粒子层。 */
 export class FxLayer {
   readonly container = new Container();
   private readonly gfx = new Graphics();

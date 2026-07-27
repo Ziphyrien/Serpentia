@@ -2,7 +2,7 @@ import { Application, Container } from "pixi.js";
 import type { FoodState } from "$lib/protocol";
 import type { GameController } from "../game.svelte";
 import type { SettingsStore } from "../stores/settings.svelte";
-import { RENDER, ARENA_COLORS, FOOD_FX_COLORS } from "../config";
+import { RENDER, ARENA_COLORS } from "../config";
 import { loadGameTextures } from "./assets";
 import { Camera } from "./camera";
 import { ArenaLayer } from "./arena-layer";
@@ -83,11 +83,11 @@ export class GameRenderer {
     this.app.ticker.add(({ deltaMS }) => this.frame(deltaMS));
   }
 
-  /** 食物被吃：闪光 + 就近音效（由控制器在事件到达时调用）。 */
+  /** 食物被吃：移除实体，并在附近播放尸体食物音效。 */
   foodConsumed(foodId: number): void {
     const alreadyPresented = this.foodSpeculation.confirm(foodId);
     const position = this.food?.positionOf(foodId);
-    if (position && !alreadyPresented) this.playFoodFeedback(position, this.selfHead());
+    if (position && !alreadyPresented) this.playFoodAudio(position, this.selfHead());
     this.food?.remove(foodId);
   }
 
@@ -225,7 +225,7 @@ export class GameRenderer {
       for (const foodId of this.foodSpeculation.takeNewlyHiddenFoodIds()) {
         const consumed = latestSnapshot.foods.find((food) => food.id === foodId);
         if (consumed) {
-          this.playFoodFeedback(
+          this.playFoodAudio(
             { x: consumed.position.x, y: consumed.position.y, kind: consumed.kind },
             selfHead,
           );
@@ -239,18 +239,13 @@ export class GameRenderer {
     this.fx.update(deltaMS);
   }
 
-  private playFoodFeedback(
+  private playFoodAudio(
     position: { readonly x: number; readonly y: number; readonly kind: FoodState["kind"] },
     selfHead: { readonly x: number; readonly y: number } | undefined,
   ): void {
-    const distance = selfHead
-      ? Math.hypot(position.x - selfHead.x, position.y - selfHead.y)
-      : Infinity;
-    if (distance >= 720) return;
-    const color = FOOD_FX_COLORS[position.kind];
-    this.fx?.burst(position.x, position.y, color, position.kind === "ambient" ? 8 : 14, 200, 3.5);
-    // 普通食物不发声：吃豆是持续行为，逐颗发声会连成一片噪音。
-    if (position.kind === "remains" && distance < 400) this.controller.sfx.eatRemains();
+    if (position.kind !== "remains" || !selfHead) return;
+    const distance = Math.hypot(position.x - selfHead.x, position.y - selfHead.y);
+    if (distance < 400) this.controller.sfx.eatRemains();
   }
 
   private selfHead(): { x: number; y: number } | undefined {
