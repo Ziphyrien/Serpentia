@@ -25,50 +25,48 @@ interface ViewBounds {
   bottom: number;
 }
 
-interface BeadNodes {
-  body: Sprite;
-  /** 加速高光：与身体同贴图、同位置，用加色混合把该节点亮起来。 */
-  pulse: Sprite;
-}
-
 interface SnakeNodes {
   root: Container;
   bodyLayer: Container;
   head: Sprite;
-  headPulse: Sprite;
   label: Text;
   skin: SkinDefinition;
   textures: SnakeSkinTextures;
-  beadNodes: Array<BeadNodes>;
+  beadNodes: Array<Sprite>;
   lastBody: ReadonlyArray<Point>;
+  animationStartedAtMs: number;
 }
 
 interface Bead {
   x: number;
   y: number;
   r: number;
-  /** 沿身体的累计弧长，用于取加速波相位；与视口裁剪无关。 */
-  distance: number;
+  index: number;
 }
 
-/** 加速波长，以身体节点数计。 */
-const BOOST_WAVE_BEADS = 6;
-/** 加速波沿身体推进的速度（世界单位／秒）。 */
-const BOOST_WAVE_SPEED = 520;
-const BOOST_PULSE_ALPHA = 0.5;
-const BOOST_PULSE_SCALE = 0.12;
+interface BeadLayout {
+  visible: ReadonlyArray<Bead>;
+  count: number;
+}
 
-/**
- * 加速脉冲强度（0..1）：沿身体推进的正弦波，波峰朝头部移动。
- *
- * 相位取自累计弧长而不是节点序号，所以视口裁掉尾部时波形不会跳变。
- * 平方一次让波谷更平，读起来是一束束能量而不是整条蛇整体明暗呼吸。
- */
-function boostWave(distance: number, radius: number, nowMs: number): number {
-  const wavelength = Math.max(1, radius * 1.4 * BOOST_WAVE_BEADS);
-  const travelled = (nowMs / 1000) * BOOST_WAVE_SPEED;
-  const raw = Math.sin(((distance + travelled) / wavelength) * Math.PI * 2);
-  return raw <= 0 ? 0 : raw * raw;
+const SNAKER_FIXED_FRAME_MS = 33;
+const SNAKER_GLARE_PERIOD_FRAMES = 20;
+const SNAKER_GLARE_HALF_PERIOD_FRAMES = SNAKER_GLARE_PERIOD_FRAMES / 2;
+const SNAKER_SCALE_PERIOD_MS = 1000;
+const SNAKER_MIN_SCALE = 0.5;
+
+function snakerGlareAlpha(frameIndex: number, beadIndex: number, beadCount: number): number {
+  const phase = (frameIndex + beadCount - beadIndex) % SNAKER_GLARE_PERIOD_FRAMES;
+  return Math.abs(SNAKER_GLARE_HALF_PERIOD_FRAMES - phase) / SNAKER_GLARE_HALF_PERIOD_FRAMES;
+}
+
+function snakerNodeScale(elapsedMs: number): number {
+  const phase = (Math.max(0, elapsedMs) % SNAKER_SCALE_PERIOD_MS) / SNAKER_SCALE_PERIOD_MS;
+  const descending = phase < 0.5;
+  const progress = descending ? phase * 2 : (phase - 0.5) * 2;
+  const eased = progress * progress * (3 - 2 * progress);
+  const range = 1 - SNAKER_MIN_SCALE;
+  return descending ? 1 - range * eased : SNAKER_MIN_SCALE + range * eased;
 }
 
 /**
@@ -110,7 +108,7 @@ export class SnakeLayer {
     const seen = new Set<string>();
     for (const snake of views) {
       seen.add(snake.id);
-      const nodes = this.ensureNodes(snake.id);
+      const nodes = this.ensureNodes(snake.id, nowMs);
       this.drawSnake(nodes, snake, view, showNicknames, nowMs);
     }
     for (const [id, nodes] of this.snakes) {
@@ -126,7 +124,7 @@ export class SnakeLayer {
     this.snakes.clear();
   }
 
-  private ensureNodes(id: string): SnakeNodes {
+  private ensureNodes(id: string, nowMs: number): SnakeNodes {
     const existing = this.snakes.get(id);
     if (existing) return existing;
 
@@ -137,14 +135,7 @@ export class SnakeLayer {
     const root = new Container();
     const bodyLayer = new Container();
     const head = new Sprite({ texture: textures.head, anchor: 0.5 });
-    // 加速高光复用同一张贴图并叠加，亮度只在原有轮廓内增强，不外溢成光斑。
-    const headPulse = new Sprite({
-      texture: textures.head,
-      anchor: 0.5,
-      blendMode: "add",
-      visible: false,
-    });
-    root.addChild(bodyLayer, head, headPulse);
+    root.addChild(bodyLayer, head);
 
     const label = new Text({
       text: "",
@@ -164,18 +155,18 @@ export class SnakeLayer {
       root,
       bodyLayer,
       head,
-      headPulse,
       label,
       skin,
       textures,
       beadNodes: [],
       lastBody: [],
+      animationStartedAtMs: nowMs,
     };
     this.snakes.set(id, nodes);
     return nodes;
   }
 
-  private collectBeads(body: ReadonlyArray<Point>, radius: number, view: ViewBounds): Array<Bead> {
+  private collectBeads(body: ReadonlyArray<Point>, radius: number, view: ViewBounds): BeadLayout {
     const beads = this.beads;
     beads.length = 0;
 
@@ -184,6 +175,7 @@ export class SnakeLayer {
     const margin = radius * 3;
     let target = spacing;
     let travelled = 0;
+    let beadIndex = 0;
     let startX = body[0].x;
     let startY = body[0].y;
 
@@ -194,6 +186,7 @@ export class SnakeLayer {
       const deltaY = endY - startY;
       const segmentLength = Math.hypot(deltaX, deltaY);
       while (segmentLength > 0 && target <= travelled + segmentLength) {
+        beadIndex += 1;
         const t = (target - travelled) / segmentLength;
         const x = startX + deltaX * t;
         const y = startY + deltaY * t;
@@ -203,7 +196,7 @@ export class SnakeLayer {
           y > view.top - margin &&
           y < view.bottom + margin
         ) {
-          beads.push({ x, y, r: radius, distance: target });
+          beads.push({ x, y, r: radius, index: beadIndex });
         }
         target += spacing;
       }
@@ -211,54 +204,36 @@ export class SnakeLayer {
       startX = endX;
       startY = endY;
     }
-    return beads;
+    return { visible: beads, count: beadIndex };
   }
 
-  private ensureBeadNode(nodes: SnakeNodes, index: number): BeadNodes {
+  private ensureBeadNode(nodes: SnakeNodes, index: number): Sprite {
     const existing = nodes.beadNodes[index];
     if (existing) return existing;
 
     const body = new Sprite({ texture: nodes.textures.body, anchor: 0.5 });
-    const pulse = new Sprite({
-      texture: nodes.textures.body,
-      anchor: 0.5,
-      blendMode: "add",
-      visible: false,
-    });
-    nodes.bodyLayer.addChild(body, pulse);
-    const beadNodes = { body, pulse };
-    nodes.beadNodes.push(beadNodes);
-    return beadNodes;
+    nodes.bodyLayer.addChild(body);
+    nodes.beadNodes.push(body);
+    return body;
   }
 
-  private syncBeads(
-    nodes: SnakeNodes,
-    beads: ReadonlyArray<Bead>,
-    boosting: boolean,
-    nowMs: number,
-  ): void {
+  private syncBeads(nodes: SnakeNodes, layout: BeadLayout, boosting: boolean, nowMs: number): void {
     const textureDiameter = Math.max(nodes.textures.body.width, nodes.textures.body.height);
-    for (let renderIndex = 0; renderIndex < beads.length; renderIndex += 1) {
+    const frameIndex = Math.floor(nowMs / SNAKER_FIXED_FRAME_MS);
+    const animationScale = snakerNodeScale(nowMs - nodes.animationStartedAtMs);
+    for (let renderIndex = 0; renderIndex < layout.visible.length; renderIndex += 1) {
       // 尾部先画，靠近头部的身体覆盖在上方，与原 SpriteRenderer 层级一致。
-      const bead = beads[beads.length - 1 - renderIndex];
-      const node = this.ensureBeadNode(nodes, renderIndex);
+      const bead = layout.visible[layout.visible.length - 1 - renderIndex];
+      const body = this.ensureBeadNode(nodes, renderIndex);
       const scale = (bead.r * 2) / textureDiameter;
-      node.body.visible = true;
-      node.body.position.set(bead.x, bead.y);
-      node.body.scale.set(scale);
-
-      const wave = boosting ? boostWave(bead.distance, bead.r, nowMs) : 0;
-      node.pulse.visible = wave > 0.01;
-      if (node.pulse.visible) {
-        node.pulse.position.set(bead.x, bead.y);
-        node.pulse.scale.set(scale * (1 + BOOST_PULSE_SCALE * wave));
-        node.pulse.alpha = BOOST_PULSE_ALPHA * wave;
-      }
+      body.visible = true;
+      body.position.set(bead.x, bead.y);
+      body.scale.set(scale * (boosting ? animationScale : 1));
+      body.alpha = boosting ? snakerGlareAlpha(frameIndex, bead.index, layout.count) : 1;
     }
 
-    for (let index = beads.length; index < nodes.beadNodes.length; index += 1) {
-      nodes.beadNodes[index].body.visible = false;
-      nodes.beadNodes[index].pulse.visible = false;
+    for (let index = layout.visible.length; index < nodes.beadNodes.length; index += 1) {
+      nodes.beadNodes[index].visible = false;
     }
   }
 
@@ -298,9 +273,9 @@ export class SnakeLayer {
     }
     nodes.root.visible = true;
 
-    const beads = this.collectBeads(body, snake.radius, view);
-    this.syncBeads(nodes, beads, snake.boosting, nowMs);
-    this.syncHead(nodes, snake, nowMs);
+    const beadLayout = this.collectBeads(body, snake.radius, view);
+    this.syncBeads(nodes, beadLayout, snake.boosting, nowMs);
+    this.syncHead(nodes, snake);
 
     nodes.label.visible = showNicknames;
     if (showNicknames) {
@@ -312,7 +287,7 @@ export class SnakeLayer {
     nodes.root.alpha = snake.invulnerable ? 0.55 + Math.sin(nowMs * 0.02) * 0.2 : 1;
   }
 
-  private syncHead(nodes: SnakeNodes, snake: SnakeRenderView, nowMs: number): void {
+  private syncHead(nodes: SnakeNodes, snake: SnakeRenderView): void {
     const head = snake.body[0];
     const bodyTextureDiameter = Math.max(nodes.textures.body.width, nodes.textures.body.height);
     const scale = (snake.radius * 2) / bodyTextureDiameter;
@@ -321,15 +296,5 @@ export class SnakeLayer {
     nodes.head.position.set(head.x, head.y);
     nodes.head.rotation = rotation;
     nodes.head.scale.set(scale);
-
-    // 头部取波的起点（弧长 0），所以每束能量推到头部时正好在这里亮一下。
-    const wave = snake.boosting ? boostWave(0, snake.radius, nowMs) : 0;
-    nodes.headPulse.visible = wave > 0.01;
-    if (nodes.headPulse.visible) {
-      nodes.headPulse.position.set(head.x, head.y);
-      nodes.headPulse.rotation = rotation;
-      nodes.headPulse.scale.set(scale * (1 + BOOST_PULSE_SCALE * wave));
-      nodes.headPulse.alpha = BOOST_PULSE_ALPHA * wave;
-    }
   }
 }
