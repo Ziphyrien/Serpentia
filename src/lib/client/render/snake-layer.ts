@@ -34,7 +34,6 @@ interface SnakeNodes {
   textures: SnakeSkinTextures;
   beadNodes: Array<Sprite>;
   lastBody: ReadonlyArray<Point>;
-  animationStartedAtMs: number;
 }
 
 interface Bead {
@@ -52,21 +51,10 @@ interface BeadLayout {
 const SNAKER_FIXED_FRAME_MS = 33;
 const SNAKER_GLARE_PERIOD_FRAMES = 20;
 const SNAKER_GLARE_HALF_PERIOD_FRAMES = SNAKER_GLARE_PERIOD_FRAMES / 2;
-const SNAKER_SCALE_PERIOD_MS = 1000;
-const SNAKER_MIN_SCALE = 0.5;
 
 function snakerGlareAlpha(frameIndex: number, beadIndex: number, beadCount: number): number {
   const phase = (frameIndex + beadCount - beadIndex) % SNAKER_GLARE_PERIOD_FRAMES;
   return Math.abs(SNAKER_GLARE_HALF_PERIOD_FRAMES - phase) / SNAKER_GLARE_HALF_PERIOD_FRAMES;
-}
-
-function snakerNodeScale(elapsedMs: number): number {
-  const phase = (Math.max(0, elapsedMs) % SNAKER_SCALE_PERIOD_MS) / SNAKER_SCALE_PERIOD_MS;
-  const descending = phase < 0.5;
-  const progress = descending ? phase * 2 : (phase - 0.5) * 2;
-  const eased = progress * progress * (3 - 2 * progress);
-  const range = 1 - SNAKER_MIN_SCALE;
-  return descending ? 1 - range * eased : SNAKER_MIN_SCALE + range * eased;
 }
 
 /**
@@ -108,7 +96,7 @@ export class SnakeLayer {
     const seen = new Set<string>();
     for (const snake of views) {
       seen.add(snake.id);
-      const nodes = this.ensureNodes(snake.id, nowMs);
+      const nodes = this.ensureNodes(snake.id);
       this.drawSnake(nodes, snake, view, showNicknames, nowMs);
     }
     for (const [id, nodes] of this.snakes) {
@@ -124,7 +112,7 @@ export class SnakeLayer {
     this.snakes.clear();
   }
 
-  private ensureNodes(id: string, nowMs: number): SnakeNodes {
+  private ensureNodes(id: string): SnakeNodes {
     const existing = this.snakes.get(id);
     if (existing) return existing;
 
@@ -160,7 +148,6 @@ export class SnakeLayer {
       textures,
       beadNodes: [],
       lastBody: [],
-      animationStartedAtMs: nowMs,
     };
     this.snakes.set(id, nodes);
     return nodes;
@@ -220,7 +207,6 @@ export class SnakeLayer {
   private syncBeads(nodes: SnakeNodes, layout: BeadLayout, boosting: boolean, nowMs: number): void {
     const textureDiameter = Math.max(nodes.textures.body.width, nodes.textures.body.height);
     const frameIndex = Math.floor(nowMs / SNAKER_FIXED_FRAME_MS);
-    const animationScale = snakerNodeScale(nowMs - nodes.animationStartedAtMs);
     for (let renderIndex = 0; renderIndex < layout.visible.length; renderIndex += 1) {
       // 尾部先画，靠近头部的身体覆盖在上方，与原 SpriteRenderer 层级一致。
       const bead = layout.visible[layout.visible.length - 1 - renderIndex];
@@ -228,7 +214,7 @@ export class SnakeLayer {
       const scale = (bead.r * 2) / textureDiameter;
       body.visible = true;
       body.position.set(bead.x, bead.y);
-      body.scale.set(scale * (boosting ? animationScale : 1));
+      body.scale.set(scale);
       body.alpha = boosting ? snakerGlareAlpha(frameIndex, bead.index, layout.count) : 1;
     }
 
