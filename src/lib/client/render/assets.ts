@@ -8,14 +8,13 @@ export interface SnakeSkinTextures {
 
 export interface GameTextures {
   readonly snakeSkins: ReadonlyArray<SnakeSkinTextures>;
-  readonly snakeGlare: Texture;
   readonly foods: ReadonlyArray<Texture>;
   readonly remainsFood: Texture;
 }
 
 /** 加载从 Snake-Demo 原工程按 Unity GUID 对应出的游戏 Sprite。 */
 export async function loadGameTextures(): Promise<GameTextures> {
-  const [snakeSkins, snakeGlare, foods, remainsFood] = await Promise.all([
+  const [snakeSkins, foods, remainsFood] = await Promise.all([
     Promise.all(
       ASSET_PATHS.snakeDemo.snakeSkins.map(async (skin) => {
         const [head, body] = await Promise.all([
@@ -25,10 +24,9 @@ export async function loadGameTextures(): Promise<GameTextures> {
         return { head, body };
       }),
     ),
-    Assets.load<Texture>(ASSET_PATHS.snaker.nodeGlare),
     Promise.all(ASSET_PATHS.snakeDemo.foods.map((path) => Assets.load<Texture>(path))),
     Assets.load<Texture>(ASSET_PATHS.snakeDemo.remainsFood),
   ]);
 
-  return { snakeSkins, snakeGlare, foods, remainsFood };
+  return { snakeSkins, foods, remainsFood };
 }

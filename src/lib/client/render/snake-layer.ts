@@ -1,4 +1,4 @@
-import { Container, Sprite, Text, type Texture } from "pixi.js";
+import { Container, Sprite, Text } from "pixi.js";
 import { RENDER, skinForPlayer, type SkinDefinition } from "../config";
 import type { SnakeSkinTextures } from "./assets";
 
@@ -13,7 +13,6 @@ export interface SnakeRenderView {
   body: ReadonlyArray<Point>;
   angle: number;
   radius: number;
-  boosting: boolean;
   invulnerable: boolean;
   isSelf: boolean;
 }
@@ -25,11 +24,6 @@ interface ViewBounds {
   bottom: number;
 }
 
-interface BeadNodes {
-  body: Sprite;
-  glare: Sprite;
-}
-
 interface SnakeNodes {
   root: Container;
   bodyLayer: Container;
@@ -37,7 +31,7 @@ interface SnakeNodes {
   label: Text;
   skin: SkinDefinition;
   textures: SnakeSkinTextures;
-  beadNodes: Array<BeadNodes>;
+  beadNodes: Array<Sprite>;
   lastBody: ReadonlyArray<Point>;
 }
 
@@ -45,22 +39,6 @@ interface Bead {
   x: number;
   y: number;
   r: number;
-  index: number;
-  rotation: number;
-}
-
-interface BeadLayout {
-  visible: ReadonlyArray<Bead>;
-  count: number;
-}
-
-const SNAKER_FIXED_FRAME_MS = 33;
-const SNAKER_GLARE_PERIOD_FRAMES = 20;
-const SNAKER_GLARE_HALF_PERIOD_FRAMES = SNAKER_GLARE_PERIOD_FRAMES / 2;
-
-export function snakerGlareAlpha(frameIndex: number, beadIndex: number, beadCount: number): number {
-  const phase = (frameIndex + beadCount - beadIndex) % SNAKER_GLARE_PERIOD_FRAMES;
-  return Math.abs(SNAKER_GLARE_HALF_PERIOD_FRAMES - phase) / SNAKER_GLARE_HALF_PERIOD_FRAMES;
 }
 
 /**
@@ -84,10 +62,7 @@ export class SnakeLayer {
   private readonly snakes = new Map<string, SnakeNodes>();
   private readonly beads: Array<Bead> = [];
 
-  constructor(
-    private readonly skinTextures: ReadonlyArray<SnakeSkinTextures>,
-    private readonly glareTexture: Texture,
-  ) {
+  constructor(private readonly skinTextures: ReadonlyArray<SnakeSkinTextures>) {
     if (skinTextures.length === 0) throw new Error("Snake-Demo snake textures are missing");
   }
 
@@ -162,7 +137,7 @@ export class SnakeLayer {
     return nodes;
   }
 
-  private collectBeads(body: ReadonlyArray<Point>, radius: number, view: ViewBounds): BeadLayout {
+  private collectBeads(body: ReadonlyArray<Point>, radius: number, view: ViewBounds): Array<Bead> {
     const beads = this.beads;
     beads.length = 0;
 
@@ -171,7 +146,6 @@ export class SnakeLayer {
     const margin = radius * 3;
     let target = spacing;
     let travelled = 0;
-    let beadIndex = 0;
     let startX = body[0].x;
     let startY = body[0].y;
 
@@ -182,7 +156,6 @@ export class SnakeLayer {
       const deltaY = endY - startY;
       const segmentLength = Math.hypot(deltaX, deltaY);
       while (segmentLength > 0 && target <= travelled + segmentLength) {
-        beadIndex += 1;
         const t = (target - travelled) / segmentLength;
         const x = startX + deltaX * t;
         const y = startY + deltaY * t;
@@ -192,13 +165,7 @@ export class SnakeLayer {
           y > view.top - margin &&
           y < view.bottom + margin
         ) {
-          beads.push({
-            x,
-            y,
-            r: radius,
-            index: beadIndex,
-            rotation: Math.atan2(deltaY, deltaX) - Math.PI / 2,
-          });
+          beads.push({ x, y, r: radius });
         }
         target += spacing;
       }
@@ -206,50 +173,32 @@ export class SnakeLayer {
       startX = endX;
       startY = endY;
     }
-    return { visible: beads, count: beadIndex };
+    return beads;
   }
 
-  private ensureBeadNode(nodes: SnakeNodes, index: number): BeadNodes {
+  private ensureBeadNode(nodes: SnakeNodes, index: number): Sprite {
     const existing = nodes.beadNodes[index];
     if (existing) return existing;
 
-    const body = new Sprite({ texture: nodes.textures.body, anchor: 0.5 });
-    const glare = new Sprite({
-      texture: this.glareTexture,
-      anchor: 0.5,
-      visible: false,
-    });
-    nodes.bodyLayer.addChild(body, glare);
-    const beadNodes = { body, glare };
-    nodes.beadNodes.push(beadNodes);
-    return beadNodes;
+    const bead = new Sprite({ texture: nodes.textures.body, anchor: 0.5 });
+    nodes.bodyLayer.addChild(bead);
+    nodes.beadNodes.push(bead);
+    return bead;
   }
 
-  private syncBeads(nodes: SnakeNodes, layout: BeadLayout, boosting: boolean, nowMs: number): void {
-    const bodyTextureDiameter = Math.max(nodes.textures.body.width, nodes.textures.body.height);
-    const glareTextureDiameter = Math.max(this.glareTexture.width, this.glareTexture.height);
-    const frameIndex = Math.floor(nowMs / SNAKER_FIXED_FRAME_MS);
-    for (let renderIndex = 0; renderIndex < layout.visible.length; renderIndex += 1) {
+  private syncBeads(nodes: SnakeNodes, beads: ReadonlyArray<Bead>): void {
+    const textureDiameter = Math.max(nodes.textures.body.width, nodes.textures.body.height);
+    for (let renderIndex = 0; renderIndex < beads.length; renderIndex += 1) {
       // 尾部先画，靠近头部的身体覆盖在上方，与原 SpriteRenderer 层级一致。
-      const bead = layout.visible[layout.visible.length - 1 - renderIndex];
+      const bead = beads[beads.length - 1 - renderIndex];
       const node = this.ensureBeadNode(nodes, renderIndex);
-      const bodyScale = (bead.r * 2) / bodyTextureDiameter;
-      const glareScale = (bead.r * 2) / glareTextureDiameter;
-      node.body.visible = true;
-      node.body.position.set(bead.x, bead.y);
-      node.body.scale.set(bodyScale);
-
-      const glareAlpha = boosting ? snakerGlareAlpha(frameIndex, bead.index, layout.count) : 0;
-      node.glare.visible = glareAlpha > 0;
-      node.glare.position.set(bead.x, bead.y);
-      node.glare.rotation = bead.rotation;
-      node.glare.scale.set(glareScale);
-      node.glare.alpha = glareAlpha;
+      node.visible = true;
+      node.position.set(bead.x, bead.y);
+      node.scale.set((bead.r * 2) / textureDiameter);
     }
 
-    for (let index = layout.visible.length; index < nodes.beadNodes.length; index += 1) {
-      nodes.beadNodes[index].body.visible = false;
-      nodes.beadNodes[index].glare.visible = false;
+    for (let index = beads.length; index < nodes.beadNodes.length; index += 1) {
+      nodes.beadNodes[index].visible = false;
     }
   }
 
@@ -289,8 +238,7 @@ export class SnakeLayer {
     }
     nodes.root.visible = true;
 
-    const beadLayout = this.collectBeads(body, snake.radius, view);
-    this.syncBeads(nodes, beadLayout, snake.boosting, nowMs);
+    this.syncBeads(nodes, this.collectBeads(body, snake.radius, view));
     this.syncHead(nodes, snake);
 
     nodes.label.visible = showNicknames;

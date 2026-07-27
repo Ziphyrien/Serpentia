@@ -64,7 +64,7 @@ export class GameRenderer {
     const rules = this.controller.descriptor.rules;
     this.arena = new ArenaLayer(rules.arenaHalfSize);
     this.food = new FoodLayer(rules.foodRadius, textures.foods, textures.remainsFood);
-    this.snakes = new SnakeLayer(textures.snakeSkins, textures.snakeGlare);
+    this.snakes = new SnakeLayer(textures.snakeSkins);
     this.fx = new FxLayer();
 
     app.stage.addChild(this.arena.screenContainer);
@@ -146,8 +146,6 @@ export class GameRenderer {
     controller.selfPredictor.advance(localNow);
 
     // 2. 组装本帧蛇视图
-    // 加速意图不等于加速生效：长度低于阈值时速度不变，不该显示加速光晕
-    const minBoostLength = controller.descriptor.rules.boostMinimumLength;
     const views: Array<SnakeRenderView> = [];
     const renderTime = serverNow - controller.snapshotBuffer.interpolationDelay();
     for (const remote of controller.snapshotBuffer.sampleRemoteSnakes(renderTime)) {
@@ -157,7 +155,6 @@ export class GameRenderer {
         body: remote.body,
         angle: remote.angle,
         radius: remote.radius,
-        boosting: remote.boosting && remote.length > minBoostLength,
         invulnerable: remote.invulnerable,
         isSelf: false,
       });
@@ -175,18 +172,15 @@ export class GameRenderer {
     this.lastSelfAlive = selfAlive;
 
     let selfHead: { x: number; y: number } | undefined;
-    let selfBoosting = false;
     if (selfState && selfSnapshot?.alive) {
       const radius = selfSnapshot.radius;
       this.selfRadiusSmooth += (radius - this.selfRadiusSmooth) * 0.08;
-      selfBoosting = selfState.boosting && controller.selfPredictor.currentLength > minBoostLength;
       views.push({
         id: selfSnapshot.id,
         nickname: selfSnapshot.nickname,
         body: selfState.body,
         angle: selfState.angle,
         radius: this.selfRadiusSmooth,
-        boosting: selfBoosting,
         invulnerable: selfSnapshot.invulnerable,
         isSelf: true,
       });
