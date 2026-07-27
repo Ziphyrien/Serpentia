@@ -26,6 +26,9 @@ export const ASSET_PATHS = {
   bgTile: "/assets/art/bg-tile.webp",
   logo: "/assets/art/logo.png",
   loginHero: "/assets/art/login-hero.webp",
+  snaker: {
+    nodeGlare: "/assets/art/snaker/node-glare.png",
+  },
   snakeDemo: {
     snakeSkins: [
       {
