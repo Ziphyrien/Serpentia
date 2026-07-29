@@ -28,8 +28,11 @@ export function pointToSegmentDistanceSquared(point: Point, start: Point, end: P
   const projection =
     ((point.x - start.x) * segmentX + (point.y - start.y) * segmentY) / segmentLengthSquared;
   const t = Math.max(0, Math.min(1, projection));
-  const closest = { x: start.x + segmentX * t, y: start.y + segmentY * t };
-  return distanceSquared(point, closest);
+  const closestX = start.x + segmentX * t;
+  const closestY = start.y + segmentY * t;
+  const dx = point.x - closestX;
+  const dy = point.y - closestY;
+  return dx * dx + dy * dy;
 }
 
 export function interpolate(from: Point, to: Point, ratio: number): Point {

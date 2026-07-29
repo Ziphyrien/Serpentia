@@ -114,7 +114,6 @@
 
 <style>
   .safe-panel-padding {
-    padding: 0.75rem;
     padding-top: max(0.75rem, var(--hud-safe-top));
     padding-right: max(0.75rem, var(--hud-safe-right));
     padding-bottom: max(0.75rem, var(--hud-safe-bottom));

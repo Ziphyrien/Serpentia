@@ -16,8 +16,6 @@ jobs:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'pull_request'
-    outputs:
-      merged: ${{ steps.merge.outputs.merged }}
     runs-on: ubuntu-latest
     steps:
       - name: Find Dependabot pull request
@@ -55,12 +53,9 @@ jobs:
           echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Merge Dependabot pull request
-        id: merge
         if: steps.pull-request.outputs.merge == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           NUMBER: ${{ steps.pull-request.outputs.number }}
-        run: |
-          gh pr merge "$NUMBER" --repo "$REPOSITORY" --squash --delete-branch
-          echo "merged=true" >> "$GITHUB_OUTPUT"
+        run: gh pr merge "$NUMBER" --repo "$REPOSITORY" --squash --delete-branch

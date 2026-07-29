@@ -17,11 +17,17 @@ function jsonResponse(value: unknown, status = 200): Response {
   });
 }
 
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
 describe("initial session bootstrap", () => {
   it("loads and schema-decodes the backend descriptor and session in parallel", async () => {
     const requests: Array<string> = [];
     const fetcher: SessionFetch = async (input) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const url = requestUrl(input);
       requests.push(url);
       return requests.length === 1
         ? jsonResponse(descriptor)
@@ -39,7 +45,7 @@ describe("initial session bootstrap", () => {
     let requests = 0;
     const fetcher: SessionFetch = async (input) => {
       requests += 1;
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const url = requestUrl(input);
       return url === "/api/game" ? jsonResponse({}, 503) : jsonResponse({ authenticated: false });
     };
 
@@ -52,7 +58,7 @@ describe("initial session bootstrap", () => {
 
   it("treats a malformed backend descriptor as an unexpected protocol error", async () => {
     const fetcher: SessionFetch = async (input) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const url = requestUrl(input);
       return url === "/api/game" ? jsonResponse({}) : jsonResponse({ authenticated: false });
     };
 
@@ -64,7 +70,7 @@ describe("initial session bootstrap", () => {
 
   it("treats a malformed session payload as an unexpected protocol error", async () => {
     const fetcher: SessionFetch = async (input) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const url = requestUrl(input);
       return url === "/api/game" ? jsonResponse(descriptor) : jsonResponse({ authenticated: "no" });
     };
 
@@ -79,7 +85,7 @@ describe("session store login", () => {
   it("loads the descriptor in parallel when logging in from the prerendered entry", async () => {
     const requests: Array<string> = [];
     const fetcher: SessionFetch = async (input, init) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const url = requestUrl(input);
       requests.push(`${init?.method ?? "GET"} ${url}`);
       return init?.method === "POST"
         ? jsonResponse({
@@ -113,8 +119,7 @@ describe("session store login", () => {
     let requestedMethod: string | undefined;
     let requestedKeepalive: boolean | undefined;
     const fetcher: SessionFetch = async (input, init) => {
-      requestedUrl =
-        typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      requestedUrl = requestUrl(input);
       requestedMethod = init?.method;
       requestedKeepalive = init?.keepalive;
       return new Response(null, { status: 204 });

@@ -73,12 +73,8 @@ class FakePeerConnection {
     readonly type: string;
     readonly sdp?: string;
   }): Promise<void> {
-    this.signalingState =
-      description.type === "offer"
-        ? "have-local-offer"
-        : description.type === "rollback"
-          ? "stable"
-          : "stable";
+    if (description.type === "offer") this.signalingState = "have-local-offer";
+    else this.signalingState = "stable";
     this.onsignalingstatechange?.();
   }
 

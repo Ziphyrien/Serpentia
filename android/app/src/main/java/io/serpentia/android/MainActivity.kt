@@ -398,7 +398,6 @@ class MainActivity : Activity() {
 
   override fun onDestroy() {
     denyPendingAudioRequest()
-    dismissAudioPermissionDialog()
     webView.stopLoading()
     webView.webChromeClient = null
     webView.destroy()

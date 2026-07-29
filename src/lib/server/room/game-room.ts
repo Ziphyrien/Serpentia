@@ -402,10 +402,7 @@ export class GameRoom {
   }
 
   private broadcast(message: ServerMessage, withoutConnectionId?: string): void {
-    this.broadcastEncoded(encodeServerMessage(message), withoutConnectionId);
-  }
-
-  private broadcastEncoded(encoded: ServerWireMessage, withoutConnectionId?: string): void {
+    const encoded = encodeServerMessage(message);
     for (const connection of this.connections.values()) {
       if (connection.id === withoutConnectionId) continue;
       this.sendEncoded(connection, encoded);

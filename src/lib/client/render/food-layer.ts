@@ -430,12 +430,10 @@ export class FoodLayer {
   }
 
   private textureFor(food: FoodState, star: boolean): Texture {
-    const frames =
-      food.kind === "ambient"
-        ? star
-          ? [this.textures.star]
-          : this.textures.dots
-        : this.textures.candy;
+    let frames: ReadonlyArray<Texture>;
+    if (food.kind !== "ambient") frames = this.textures.candy;
+    else if (star) frames = [this.textures.star];
+    else frames = this.textures.dots;
     const texture = frames[food.variant % frames.length];
     if (!texture) throw new Error("Food texture lookup failed");
     return texture;

@@ -189,25 +189,25 @@ export class GameEngine {
   ): number {
     const id = this.nextFoodId;
     this.nextFoodId += 1;
-    const variant =
-      kind === "ambient"
-        ? value >= this.config.starFoodValue
-          ? 0
-          : this.random.integer(0, FOOD_VARIANT_COUNT.dot)
-        : this.random.integer(0, FOOD_VARIANT_COUNT.candy);
-    const motion: StarFoodMotion | undefined =
-      kind === "ambient" && value >= this.config.starFoodValue
-        ? {
-            directionDegrees: this.random.integer(0, 360),
-            directionFrameCount: 0,
-            directionFrameTarget: this.random.integer(
-              STAR_FOOD_DIRECTION_FRAME_MIN,
-              STAR_FOOD_DIRECTION_FRAME_MAX_EXCLUSIVE,
-            ),
-            boundaryX: position.x,
-            boundaryY: position.y,
-          }
-        : undefined;
+    const isAmbientStar = kind === "ambient" && value >= this.config.starFoodValue;
+    let variant: number;
+    if (isAmbientStar) variant = 0;
+    else if (kind === "ambient") variant = this.random.integer(0, FOOD_VARIANT_COUNT.dot);
+    else variant = this.random.integer(0, FOOD_VARIANT_COUNT.candy);
+
+    let motion: StarFoodMotion | undefined;
+    if (isAmbientStar) {
+      motion = {
+        directionDegrees: this.random.integer(0, 360),
+        directionFrameCount: 0,
+        directionFrameTarget: this.random.integer(
+          STAR_FOOD_DIRECTION_FRAME_MIN,
+          STAR_FOOD_DIRECTION_FRAME_MAX_EXCLUSIVE,
+        ),
+        boundaryX: position.x,
+        boundaryY: position.y,
+      };
+    }
     const food: FoodState = {
       id,
       position,
@@ -421,7 +421,7 @@ export class GameEngine {
         if (food === undefined) continue;
         const contact = eatContactDistance(
           bodyRadius,
-          this.foodRadiusOf(food),
+          foodRadiusOf(food, this.config),
           this.config.eatDistanceFactor,
         );
         if (distanceSquared(head, food.position) >= contact * contact) continue;
@@ -548,7 +548,7 @@ export class GameEngine {
         this.resetStarFoodDirection(motion, this.random.integer(0, 360));
       }
 
-      const radius = this.foodRadiusOf(food);
+      const radius = foodRadiusOf(food, this.config);
       if (motion.boundaryX - radius < -extent) {
         this.resetStarFoodDirection(motion, 0);
       } else if (motion.boundaryY + radius > extent) {
@@ -647,10 +647,6 @@ export class GameEngine {
     if (food.kind !== "ambient") return;
     if (isStarFood(food, this.config)) this.starFoodCount += delta;
     else this.dotFoodCount += delta;
-  }
-
-  private foodRadiusOf(food: FoodState): number {
-    return foodRadiusOf(food, this.config);
   }
 
   private clampToArena(value: number): number {

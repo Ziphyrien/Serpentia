@@ -208,13 +208,13 @@ export class VoiceManager {
 
   /** Drops stale peer state while retaining the local microphone during WS recovery. */
   handleSignalingDisconnect(): void {
-    for (const playerId of this.peers.keys()) this.dropPeer(playerId);
+    this.dropAllPeers();
     this.emitPeers();
   }
 
   /** Reannounces receive and microphone state after a new welcome. */
   handleSignalingReconnect(participants: ReadonlyArray<VoiceParticipant>): void {
-    for (const playerId of this.peers.keys()) this.dropPeer(playerId);
+    this.dropAllPeers();
     this.roster = new Map(participants.map((participant) => [participant.playerId, participant]));
     if (this.listening) {
       const microphoneEnabled = this.lifecycle === "joined";
@@ -448,6 +448,10 @@ export class VoiceManager {
     }, PEER_RESTART_DELAY_MS);
   }
 
+  private dropAllPeers(): void {
+    for (const playerId of this.peers.keys()) this.dropPeer(playerId);
+  }
+
   private dropPeer(playerId: PlayerId): void {
     const peer = this.peers.get(playerId);
     if (!peer) return;
@@ -599,7 +603,7 @@ export class VoiceManager {
     this.refreshTimer = undefined;
     if (this.levelTimer) clearInterval(this.levelTimer);
     this.levelTimer = undefined;
-    for (const playerId of this.peers.keys()) this.dropPeer(playerId);
+    this.dropAllPeers();
     this.credentials = undefined;
     this.levels.clear();
     this.speaking.clear();

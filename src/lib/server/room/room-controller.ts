@@ -92,8 +92,7 @@ export class RoomController {
     this.connectionByPlayer.set(identity.playerId, connectionId);
     this.nicknameByPlayer.set(identity.playerId, identity.nickname);
     this.disconnectDeadlineByPlayer.delete(identity.playerId);
-    this.pendingInputs.delete(identity.playerId);
-    this.lastQueuedSequence.delete(identity.playerId);
+    this.clearQueuedInputState(identity.playerId);
 
     const added = this.engine.addSnake(identity.playerId, identity.nickname, {
       skinId: identity.skinId,
@@ -122,8 +121,7 @@ export class RoomController {
 
     if (this.connectionByPlayer.get(playerId) !== connectionId) return false;
     this.connectionByPlayer.delete(playerId);
-    this.pendingInputs.delete(playerId);
-    this.lastQueuedSequence.delete(playerId);
+    this.clearQueuedInputState(playerId);
     this.engine.suspendSnake(playerId);
     this.disconnectDeadlineByPlayer.set(playerId, this.engine.tick + this.reconnectGraceTicks);
     return true;
@@ -137,8 +135,7 @@ export class RoomController {
 
     const hadNickname = this.nicknameByPlayer.delete(playerId);
     const hadDeadline = this.disconnectDeadlineByPlayer.delete(playerId);
-    this.pendingInputs.delete(playerId);
-    this.lastQueuedSequence.delete(playerId);
+    this.clearQueuedInputState(playerId);
     this.engine.removeSnake(playerId);
     return hadNickname || hadDeadline;
   }
@@ -221,6 +218,11 @@ export class RoomController {
     return this.engine.snapshot();
   }
 
+  private clearQueuedInputState(playerId: string): void {
+    this.pendingInputs.delete(playerId);
+    this.lastQueuedSequence.delete(playerId);
+  }
+
   private expireDisconnectedPlayers(): ReadonlyArray<string> {
     const expiredPlayerIds: Array<string> = [];
     for (const [playerId, deadline] of this.disconnectDeadlineByPlayer) {
@@ -231,8 +233,7 @@ export class RoomController {
     for (const playerId of expiredPlayerIds) {
       this.disconnectDeadlineByPlayer.delete(playerId);
       this.nicknameByPlayer.delete(playerId);
-      this.pendingInputs.delete(playerId);
-      this.lastQueuedSequence.delete(playerId);
+      this.clearQueuedInputState(playerId);
       this.engine.removeSnake(playerId);
     }
     return expiredPlayerIds;

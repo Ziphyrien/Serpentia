@@ -32,15 +32,13 @@
     event.preventDefault();
     if (submitting) return;
     error = undefined;
-    if (!session.savedNickname.trim()) {
+    const nickname = session.savedNickname.trim();
+    if (!nickname) {
       error = "先给自己起个名字吧";
       return;
     }
     submitting = true;
-    const message = await session.login(
-      session.savedNickname.trim(),
-      session.savedSkinId,
-    );
+    const message = await session.login(nickname, session.savedSkinId);
     submitting = false;
     if (message) {
       error = message;

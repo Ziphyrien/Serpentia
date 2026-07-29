@@ -273,11 +273,7 @@ export function encodeServerMessage(message: ServerMessage): ServerWireMessage {
 
 const parseProtocolJson = Effect.fn("parseProtocolJson")(function* (text: string) {
   return yield* Effect.try({
-    try: () => parseJson(text),
+    try: (): unknown => JSON.parse(text),
     catch: () => ProtocolError.make({ message: "Message is not valid JSON" }),
   });
 });
-
-function parseJson(text: string): unknown {
-  return JSON.parse(text);
-}
