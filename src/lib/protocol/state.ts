@@ -54,6 +54,17 @@ export const FoodState = Schema.Struct({
 });
 export type FoodState = typeof FoodState.Type;
 
+/** 正常新无尽地图中唯一允许的道具：`ToolConstant.Magnet` / `10001`。 */
+export const MagnetToolState = Schema.Struct({
+  id: NonNegativeInteger,
+  position: Point,
+  /** 半开存在区间的绝对 60 Hz 源帧终点。 */
+  expiresAtSourceFrame: NonNegativeInteger,
+  directionDegrees: NonNegativeInteger.check(Schema.isLessThan(360)),
+  linearFramesRemaining: NonNegativeInteger,
+});
+export type MagnetToolState = typeof MagnetToolState.Type;
+
 const BoundaryDeathCause = Schema.Struct({ _tag: Schema.Literal("Boundary") });
 const SnakeDeathCause = Schema.Struct({
   _tag: Schema.Literal("Snake"),
@@ -77,9 +88,20 @@ export const FoodConsumedEvent = Schema.Struct({
 });
 export type FoodConsumedEvent = typeof FoodConsumedEvent.Type;
 
+/** 磁铁碰撞时锁定的地图状态与蛇头坐标，用于原版 0.2 秒飞头表现。 */
+export const MagnetConsumedEvent = Schema.Struct({
+  playerId: PlayerId,
+  sourceFrame: NonNegativeInteger,
+  magnet: MagnetToolState,
+  target: Point,
+});
+export type MagnetConsumedEvent = typeof MagnetConsumedEvent.Type;
+
 export const TickEvents = Schema.Struct({
   deaths: Schema.Array(DeathEvent),
   consumedFoods: Schema.Array(FoodConsumedEvent),
+  /** 可选只用于兼容 v11 JSON 形状；v12 权威服务端始终发送数组。 */
+  consumedMagnets: Schema.optionalKey(Schema.Array(MagnetConsumedEvent)),
   respawnedPlayerIds: Schema.Array(PlayerId),
 });
 export type TickEvents = typeof TickEvents.Type;
@@ -107,6 +129,8 @@ export const SnakeSnapshot = Schema.Struct({
   boosting: Schema.Boolean,
   alive: Schema.Boolean,
   invulnerable: Schema.Boolean,
+  /** 缺省兼容 v11；`null` 表示未生效，否则为半开状态区间终点。 */
+  magnetUntilSourceFrame: Schema.optionalKey(Schema.NullOr(NonNegativeInteger)),
   respawnAtTick: Schema.NullOr(NonNegativeInteger),
   lastInputSequence: Schema.Int.check(
     Schema.isGreaterThanOrEqualTo(-1),
@@ -128,6 +152,8 @@ export const GameSnapshot = Schema.Struct({
   tick: NonNegativeInteger,
   snakes: Schema.Array(SnakeSnapshot),
   foods: Schema.Array(FoodState),
+  /** 缺省兼容 v11；v12 快照始终携带权威地图磁铁。 */
+  magnets: Schema.optionalKey(Schema.Array(MagnetToolState)),
   leaderboard: Schema.Array(LeaderboardEntry),
 });
 export type GameSnapshot = typeof GameSnapshot.Type;

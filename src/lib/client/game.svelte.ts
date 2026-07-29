@@ -42,6 +42,8 @@ export interface HudSelf {
   alive: boolean;
   /** 剩余重生秒数；活着时为 0 */
   respawnIn: number;
+  /** 权威磁铁剩余秒数。 */
+  magnetRemaining: number;
   deathBy?: string;
 }
 
@@ -60,7 +62,14 @@ export class GameController {
   selfId = $state<PlayerId | undefined>(undefined);
   leaderboard = $state<Array<HudRankEntry>>([]);
   gameMapMarkers = $state<Array<GameMapMarker>>([]);
-  self = $state<HudSelf>({ length: 0, kills: 0, score: 0, alive: true, respawnIn: 0 });
+  self = $state<HudSelf>({
+    length: 0,
+    kills: 0,
+    score: 0,
+    alive: true,
+    respawnIn: 0,
+    magnetRemaining: 0,
+  });
   killFeed = $state<Array<KillFeedEntry>>([]);
   pingMs = $state(0);
   voicePeers = $state<Array<VoicePeerView>>([]);
@@ -116,6 +125,8 @@ export class GameController {
   private voiceErrorTimer: ReturnType<typeof setTimeout> | undefined;
   private respawnTimer: ReturnType<typeof setInterval> | undefined;
   private respawnAtMs = 0;
+  private magnetTimer: ReturnType<typeof setInterval> | undefined;
+  private magnetExpiresAtMs = 0;
 
   constructor(
     readonly descriptor: BackendDescriptor,
@@ -191,6 +202,7 @@ export class GameController {
       this.client?.close();
       this.voice.leave();
       this.clearRespawnCountdown();
+      this.clearMagnetCountdown();
       this.status = "closed";
       this.notice = "游戏画面加载失败，请刷新后重试";
     }
@@ -216,6 +228,7 @@ export class GameController {
     this.unsubscribeInput();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.respawnTimer) clearInterval(this.respawnTimer);
+    if (this.magnetTimer) clearInterval(this.magnetTimer);
     if (this.voiceErrorTimer) clearTimeout(this.voiceErrorTimer);
     for (const timer of this.killFeedTimers) clearTimeout(timer);
     this.killFeedTimers.clear();
@@ -324,6 +337,7 @@ export class GameController {
         // 重连等场景漏掉死亡事件时，从快照补齐倒计时
         this.startRespawnCountdown(selfSnake.respawnAtTick, snapshot.tick);
       }
+      this.syncMagnetCountdown(selfSnake.magnetUntilSourceFrame ?? null, snapshot.tick, serverTime);
     }
     const ranked = rankAliveSnakes(snapshot.snakes);
     this.leaderboard = visibleHudRanks(ranked, this.selfId);
@@ -339,6 +353,9 @@ export class GameController {
     for (const batch of batches) {
       for (const consumed of batch.consumedFoods) {
         this.renderer?.foodConsumed(consumed);
+      }
+      for (const consumed of batch.consumedMagnets ?? []) {
+        this.renderer?.magnetConsumed(consumed);
       }
       for (const death of batch.deaths) {
         const victim = nickOf(death.playerId);
@@ -402,6 +419,38 @@ export class GameController {
     if (this.self.respawnIn !== 0) this.self = { ...this.self, respawnIn: 0 };
   }
 
+  private syncMagnetCountdown(
+    untilSourceFrame: number | null,
+    snapshotTick: number,
+    serverTime: number,
+  ): void {
+    if (untilSourceFrame === null) {
+      this.clearMagnetCountdown();
+      return;
+    }
+    const sourceFramesPerTick = Math.max(1, Math.round(60 / this.descriptor.tickRate));
+    this.magnetExpiresAtMs =
+      serverTime +
+      Math.max(0, untilSourceFrame - snapshotTick * sourceFramesPerTick) * (1_000 / 60);
+    if (this.magnetTimer !== undefined) return;
+    const update = (): void => {
+      const now = this.clock.serverNow() ?? Date.now();
+      const remaining = Math.max(0, (this.magnetExpiresAtMs - now) / 1_000);
+      this.self = { ...this.self, magnetRemaining: remaining };
+      if (remaining <= 0) this.clearMagnetCountdown();
+    };
+    update();
+    this.magnetTimer = setInterval(update, 1_000 / 60);
+  }
+
+  private clearMagnetCountdown(): void {
+    if (this.magnetTimer) clearInterval(this.magnetTimer);
+    this.magnetTimer = undefined;
+    if (this.self.magnetRemaining !== 0) {
+      this.self = { ...this.self, magnetRemaining: 0 };
+    }
+  }
+
   private handleServerError(code: string, retryable: boolean): void {
     if (code === "SESSION_EXPIRED") {
       this.notice = "游戏会话已过期，请返回首页重新进入";
@@ -437,6 +486,7 @@ export class GameController {
   private enterTerminalState(notice: string): void {
     this.voice.leave();
     this.clearRespawnCountdown();
+    this.clearMagnetCountdown();
     this.status = "closed";
     this.notice = notice;
   }

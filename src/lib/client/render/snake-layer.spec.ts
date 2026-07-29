@@ -55,6 +55,7 @@ describe("SnakeLayer trajectory orientation", () => {
           bodyScale: snake.bodyScale,
           boosting: false,
           invulnerable: false,
+          magnetActive: true,
           isSelf: true,
         },
       ],
@@ -64,9 +65,14 @@ describe("SnakeLayer trajectory orientation", () => {
     );
 
     const snakeContainer = layer.container.children[0] as Container;
+    const magnetContainer = layer.container.children[1] as Container;
     const root = snakeContainer.children[0] as Container;
     const bodyLayer = root.children[0] as Container;
     const head = root.children[1] as Sprite;
+    const magnetEffect = magnetContainer.children[0];
+    expect(magnetEffect.visible).toBe(true);
+    expect(magnetEffect.position.x).toBeCloseTo(snake.body[0].x, 12);
+    expect(magnetEffect.position.y).toBeCloseTo(snake.body[0].y, 12);
     expect(angleDifference(head.rotation, snake.angle + Math.PI / 2)).toBeLessThan(1e-12);
     expect(head.position.x).toBeCloseTo(snake.body[0].x, 12);
     expect(head.position.y).toBeCloseTo(snake.body[0].y, 12);

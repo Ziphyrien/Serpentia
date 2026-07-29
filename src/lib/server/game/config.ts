@@ -1,3 +1,4 @@
+import { MAGNET } from "../../game/magnet";
 import { SNAKE_MOTION, snakeMotionRules, type SnakeMotionRules } from "../../game/snake-motion";
 
 export interface GameConfig {
@@ -27,6 +28,10 @@ export interface GameConfig {
   readonly respawnInvulnerabilityTicks: number;
   readonly spawnAttempts: number;
   readonly spawnClearance: number;
+  readonly magnetWaveCount: number;
+  readonly magnetExistSourceFrames: number;
+  readonly magnetDurationSourceFrames: number;
+  readonly magnetExtraEatScope: number;
 }
 
 export const defaultGameConfig: GameConfig = Object.freeze({
@@ -49,6 +54,10 @@ export const defaultGameConfig: GameConfig = Object.freeze({
   respawnInvulnerabilityTicks: 60,
   spawnAttempts: 32,
   spawnClearance: 240,
+  magnetWaveCount: MAGNET.countPerWave,
+  magnetExistSourceFrames: MAGNET.existSeconds * SNAKE_MOTION.sourceFrameRate,
+  magnetDurationSourceFrames: MAGNET.durationSeconds * SNAKE_MOTION.sourceFrameRate,
+  magnetExtraEatScope: MAGNET.extraEatScope,
 });
 
 /** 由配置派生共享运动规则；逻辑帧率固定，tick 频率只决定每 tick 的子帧数。 */

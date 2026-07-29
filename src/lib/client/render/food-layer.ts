@@ -237,6 +237,7 @@ export class FoodLayer {
     collisionHead: { readonly x: number; readonly y: number },
     snakeRadius: number,
     eatDistanceFactor: number,
+    extraEatScope: number,
     presentationSourceFrame: number,
     collisionSourceFrame: number,
   ): Array<FoodState> {
@@ -251,7 +252,7 @@ export class FoodLayer {
         continue;
       }
       const radius = foodRadiusOf(authoritativeFood, this.rules);
-      const contact = eatContactDistance(snakeRadius, radius, eatDistanceFactor);
+      const contact = eatContactDistance(snakeRadius, radius, eatDistanceFactor) + extraEatScope;
       const visibleDx = visibleHead.x - record.x;
       const visibleDy = visibleHead.y - record.y;
       const visibleTouching = visibleDx * visibleDx + visibleDy * visibleDy < contact * contact;

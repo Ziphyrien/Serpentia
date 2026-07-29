@@ -42,7 +42,7 @@ describe("official sound-effect gain", () => {
 
   it("plays every original clip at unity gain", () => {
     const sfx = new Sfx();
-    expect(audioMock.volumes).toEqual([1, 1, 1, 1]);
+    expect(audioMock.volumes).toEqual([1, 1, 1, 1, 1]);
     sfx.dispose();
   });
 
@@ -56,6 +56,20 @@ describe("official sound-effect gain", () => {
     now.mockReturnValue(1_100);
     sfx.eatRemains();
 
+    expect(audioMock.playCount).toBe(2);
+    now.mockRestore();
+    sfx.dispose();
+  });
+
+  it("throttles original tool pickup audio independently", () => {
+    const now = vi.spyOn(Date, "now");
+    const sfx = new Sfx();
+    now.mockReturnValue(2_000);
+    sfx.eatTool();
+    now.mockReturnValue(2_099);
+    sfx.eatTool();
+    now.mockReturnValue(2_100);
+    sfx.eatTool();
     expect(audioMock.playCount).toBe(2);
     now.mockRestore();
     sfx.dispose();

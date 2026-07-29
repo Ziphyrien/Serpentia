@@ -1,4 +1,4 @@
-import type { FoodState, GameSnapshot, SnakeSnapshot } from "$lib/protocol";
+import type { FoodState, GameSnapshot, MagnetToolState, SnakeSnapshot } from "$lib/protocol";
 import { STAR_FOOD_MOVE_DISTANCE_PER_SOURCE_FRAME } from "$lib/game/food-metrics";
 import { SNAKE_MOTION } from "$lib/game/snake-motion";
 import { RENDER } from "../config";
@@ -17,6 +17,7 @@ export interface InterpolatedSnake {
   readonly boosting: boolean;
   readonly alive: boolean;
   readonly invulnerable: boolean;
+  readonly magnetUntilSourceFrame: number | null;
 }
 
 interface BufferedSnapshot {
@@ -118,6 +119,22 @@ export class SnapshotBuffer {
     return interpolateFoods(before.snapshot.foods, after.snapshot.foods, ratio, span);
   }
 
+  /** 在远端权威时间轴上平滑地图磁铁；生成、拾取和消失只在上界切换。 */
+  sampleMagnets(renderServerTime: number): Array<MagnetToolState> {
+    if (this.frames.length === 0) return [];
+    const upperIndex = this.frames.findIndex((frame) => frame.serverTime >= renderServerTime);
+    if (upperIndex === 0) return cloneMagnets(this.frames[0].snapshot.magnets ?? []);
+    if (upperIndex === -1) {
+      return cloneMagnets(this.frames[this.frames.length - 1].snapshot.magnets ?? []);
+    }
+    const before = this.frames[upperIndex - 1];
+    const after = this.frames[upperIndex];
+    const span = after.serverTime - before.serverTime;
+    if (span <= 0) return cloneMagnets(after.snapshot.magnets ?? []);
+    const ratio = Math.min(1, Math.max(0, (renderServerTime - before.serverTime) / span));
+    return interpolateMagnets(before.snapshot.magnets ?? [], after.snapshot.magnets ?? [], ratio);
+  }
+
   /** Samples remote snakes at a server timestamp, excluding the locally predicted snake. */
   sampleRemoteSnakes(renderServerTime: number): Array<InterpolatedSnake> {
     if (this.frames.length === 0) return [];
@@ -149,6 +166,36 @@ export class SnapshotBuffer {
       .filter((snake) => snake.id !== selfId && snake.alive)
       .map((snake) => toView(snake));
   }
+}
+
+function cloneMagnets(magnets: ReadonlyArray<MagnetToolState>): Array<MagnetToolState> {
+  return magnets.map((magnet) => ({ ...magnet, position: { ...magnet.position } }));
+}
+
+function interpolateMagnets(
+  before: ReadonlyArray<MagnetToolState>,
+  after: ReadonlyArray<MagnetToolState>,
+  ratio: number,
+): Array<MagnetToolState> {
+  if (ratio <= 0) return cloneMagnets(before);
+  if (ratio >= 1) return cloneMagnets(after);
+  const afterById = new Map(after.map((magnet) => [magnet.id, magnet]));
+  const result: Array<MagnetToolState> = [];
+  for (const magnet of before) {
+    const next = afterById.get(magnet.id);
+    if (next === undefined) {
+      result.push({ ...magnet, position: { ...magnet.position } });
+      continue;
+    }
+    result.push({
+      ...magnet,
+      position: {
+        x: magnet.position.x + (next.position.x - magnet.position.x) * ratio,
+        y: magnet.position.y + (next.position.y - magnet.position.y) * ratio,
+      },
+    });
+  }
+  return result;
 }
 
 function cloneFoods(foods: ReadonlyArray<FoodState>): Array<FoodState> {
@@ -216,6 +263,7 @@ function toView(snake: SnakeSnapshot): InterpolatedSnake {
     boosting: snake.boosting,
     alive: snake.alive,
     invulnerable: snake.invulnerable,
+    magnetUntilSourceFrame: snake.magnetUntilSourceFrame ?? null,
   };
 }
 
@@ -242,5 +290,7 @@ function lerpSnake(from: SnakeSnapshot, to: SnakeSnapshot, ratio: number): Inter
     boosting: to.boosting,
     alive: to.alive,
     invulnerable: to.invulnerable,
+    magnetUntilSourceFrame:
+      ratio < 1 ? (from.magnetUntilSourceFrame ?? null) : (to.magnetUntilSourceFrame ?? null),
   };
 }

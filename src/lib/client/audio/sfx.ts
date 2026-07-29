@@ -1,6 +1,6 @@
 import { Howl, Howler } from "howler";
 
-type SfxName = "eat-wreck" | "end" | "kill" | "button-click";
+type SfxName = "eat-wreck" | "eat-tool" | "end" | "kill" | "button-click";
 
 /**
  * 音效管理（howler 封装）：负责加载、音量与静音。
@@ -10,6 +10,7 @@ export class Sfx {
   private readonly sounds: Record<SfxName, Howl>;
   private unlocked = false;
   private lastEatWreckAt = Number.NEGATIVE_INFINITY;
+  private lastEatToolAt = Number.NEGATIVE_INFINITY;
   private readonly unlock = (): void => {
     if (this.unlocked) return;
     this.unlocked = true;
@@ -27,6 +28,7 @@ export class Sfx {
       });
     this.sounds = {
       "eat-wreck": createSound("eat-wreck"),
+      "eat-tool": createSound("eat-tool"),
       end: createSound("end"),
       kill: createSound("kill"),
       "button-click": createSound("button-click"),
@@ -50,6 +52,14 @@ export class Sfx {
     if (now < this.lastEatWreckAt + 100) return;
     this.lastEatWreckAt = now;
     this.sounds["eat-wreck"].play();
+  }
+
+  /** 原版 `playEatToolAudio`：所有道具拾取共用 100 ms 节流。 */
+  eatTool(): void {
+    const now = Date.now();
+    if (now < this.lastEatToolAt + 100) return;
+    this.lastEatToolAt = now;
+    this.sounds["eat-tool"].play();
   }
 
   death(): void {

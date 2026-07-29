@@ -7,6 +7,18 @@ export const ASSET_PATHS = {
   effects: {
     speedUp: "/assets/art/effects/speed-up.png",
     protect: "/assets/art/effects/protect.png",
+    magnet: [
+      "/assets/art/effects/magnet/ring.png",
+      "/assets/art/effects/magnet/light-1.png",
+      "/assets/art/effects/magnet/light-2.png",
+      "/assets/art/effects/magnet/light-3.png",
+      "/assets/art/effects/magnet/particle.png",
+    ],
+  },
+  tools: {
+    magnet: "/assets/art/tools/magnet.png",
+    statusBackground: "/assets/art/tools/tool-bg.png",
+    statusMask: "/assets/art/tools/tool-mask.png",
   },
   food: {
     dots: numberedPaths("/assets/art/food", "dot", 7),

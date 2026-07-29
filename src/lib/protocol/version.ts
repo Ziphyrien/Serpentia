@@ -1,1 +1,1 @@
-export const GAME_PROTOCOL_VERSION = 11;
+export const GAME_PROTOCOL_VERSION = 12;

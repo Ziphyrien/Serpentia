@@ -354,6 +354,7 @@ export class GameRoom {
     const urgent =
       result.events.deaths.length > 0 ||
       result.events.consumedFoods.length > 0 ||
+      (result.events.consumedMagnets?.length ?? 0) > 0 ||
       result.events.respawnedPlayerIds.length > 0 ||
       result.expiredPlayerIds.length > 0;
     if (urgent || this.controller.currentTick % snapshotInterval === 0) {

@@ -10,6 +10,8 @@ export interface GameTextures {
   readonly skinFrames: ReadonlyMap<number, SkinFrameTextures>;
   readonly speedUp: Texture;
   readonly protect: Texture;
+  readonly magnetEffect: ReadonlyArray<Texture>;
+  readonly magnetTool: Texture;
   readonly foods: ReadonlyArray<Texture>;
   readonly starFood: Texture;
   readonly candy: ReadonlyArray<Texture>;
@@ -17,16 +19,28 @@ export interface GameTextures {
 
 /** 加载全部内置皮肤图集、食物、残骸、加速流光与保护光罩贴图。 */
 export async function loadGameTextures(): Promise<GameTextures> {
-  const [skinFrames, speedUp, protect, foods, starFood, candy] = await Promise.all([
-    loadSkinFrames(),
-    Assets.load<Texture>(ASSET_PATHS.effects.speedUp),
-    Assets.load<Texture>(ASSET_PATHS.effects.protect),
-    Promise.all(ASSET_PATHS.food.dots.map((path) => Assets.load<Texture>(path))),
-    Assets.load<Texture>(ASSET_PATHS.food.star),
-    Promise.all(ASSET_PATHS.wrecks.map((path) => Assets.load<Texture>(path))),
-  ]);
+  const [skinFrames, speedUp, protect, magnetEffect, magnetTool, foods, starFood, candy] =
+    await Promise.all([
+      loadSkinFrames(),
+      Assets.load<Texture>(ASSET_PATHS.effects.speedUp),
+      Assets.load<Texture>(ASSET_PATHS.effects.protect),
+      Promise.all(ASSET_PATHS.effects.magnet.map((path) => Assets.load<Texture>(path))),
+      Assets.load<Texture>(ASSET_PATHS.tools.magnet),
+      Promise.all(ASSET_PATHS.food.dots.map((path) => Assets.load<Texture>(path))),
+      Assets.load<Texture>(ASSET_PATHS.food.star),
+      Promise.all(ASSET_PATHS.wrecks.map((path) => Assets.load<Texture>(path))),
+    ]);
 
-  return { skinFrames, speedUp, protect, foods, starFood, candy };
+  return {
+    skinFrames,
+    speedUp,
+    protect,
+    magnetEffect,
+    magnetTool,
+    foods,
+    starFood,
+    candy,
+  };
 }
 
 async function loadSkinFrames(): Promise<ReadonlyMap<number, SkinFrameTextures>> {

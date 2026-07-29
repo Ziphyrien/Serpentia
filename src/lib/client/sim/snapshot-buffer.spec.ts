@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { DEFAULT_SKIN_ID } from "$lib/game/internal-skins";
-import type { FoodState, GameSnapshot, SnakeSnapshot } from "$lib/protocol";
+import type { FoodState, GameSnapshot, MagnetToolState, SnakeSnapshot } from "$lib/protocol";
 import { SnapshotBuffer } from "./snapshot-buffer";
 
 function snake(id: string, x: number, alive = true, skinId = DEFAULT_SKIN_ID): SnakeSnapshot {
@@ -36,17 +36,29 @@ function food(id: number, x: number, y = 0): FoodState {
   };
 }
 
+function magnet(id: number, x: number): MagnetToolState {
+  return {
+    id,
+    position: { x, y: 0 },
+    expiresAtSourceFrame: 1_000,
+    directionDegrees: 0,
+    linearFramesRemaining: 80,
+  };
+}
+
 function snapshot(
   tick: number,
   x: number,
   bodyScale = 1,
   remoteSkinId = DEFAULT_SKIN_ID,
   foods: ReadonlyArray<FoodState> = [],
+  magnets: ReadonlyArray<MagnetToolState> = [],
 ): GameSnapshot {
   return {
     tick,
     snakes: [snake("self", x), { ...snake("remote", x, true, remoteSkinId), bodyScale }],
     foods,
+    ...(magnets.length === 0 ? {} : { magnets }),
     leaderboard: [],
   };
 }
@@ -136,6 +148,17 @@ describe("snapshot buffer", () => {
     appearing.push(snapshot(4, 200, 1, DEFAULT_SKIN_ID, [food(1, 10)]), 200);
     expect(appearing.sampleFoods(199)).toEqual([]);
     expect(appearing.sampleFoods(200)).toHaveLength(1);
+  });
+
+  it("interpolates authoritative magnet movement and delays pickup removal", () => {
+    const buffer = new SnapshotBuffer(() => "self");
+    buffer.push(snapshot(2, 100, 1, DEFAULT_SKIN_ID, [], [magnet(1, 0)]), 100);
+    buffer.push(snapshot(4, 200, 1, DEFAULT_SKIN_ID, [], [magnet(1, 18)]), 200);
+
+    expect(buffer.sampleMagnets(150)[0]?.position.x).toBeCloseTo(9);
+    buffer.push(snapshot(6, 300), 300);
+    expect(buffer.sampleMagnets(299)).toHaveLength(1);
+    expect(buffer.sampleMagnets(300)).toEqual([]);
   });
 
   it("keeps discrete authoritative fields throughout an interpolation interval", () => {

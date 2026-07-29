@@ -8,6 +8,9 @@ import {
   type FoodKind,
   type FoodState,
   type LeaderboardEntry,
+  MagnetToolState,
+  type MagnetConsumedEvent,
+  type MagnetToolState as MagnetToolStateType,
   type SnakeSnapshot,
   type TickEventBatch,
 } from "./state";
@@ -24,6 +27,7 @@ const TAU = Math.PI * 2;
 const ANGLE_LEVELS = 65_536;
 const MAX_BODY_COORDINATES = 16_384;
 const MAX_FOOD_COUNT = 100_000;
+const MAX_MAGNET_COUNT = 10_000;
 const MAX_EVENT_COUNT = 10_000;
 
 const Nickname = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64));
@@ -38,6 +42,7 @@ const CompactSnapshotSchema = Schema.Tuple([
   Schema.Uint8Array,
   Schema.Uint8Array,
   Schema.Uint8Array,
+  Schema.Array(MagnetToolState),
 ]);
 type CompactSnapshot = typeof CompactSnapshotSchema.Type;
 
@@ -56,6 +61,7 @@ export function encodeSnapshotMessage(message: SnapshotMessage): Uint8Array {
     encodeFoods(message.snapshot.foods),
     encodeLeaderboards(message.snapshot.leaderboard, message.snapshot.snakes, playerIndex),
     encodeEvents(message.events, playerIndex),
+    message.snapshot.magnets ?? [],
   ];
   return pack(wire);
 }
@@ -68,8 +74,15 @@ export function decodeSnapshotMessage(bytes: Uint8Array): SnapshotMessage {
     throw new Error("Snapshot delta frame requires stream state");
   }
   const unpacked: unknown = unpack(bytes);
-  const [, metadata, compactSnakes, compactFoods, compactLeaderboard, compactEvents] =
-    decodeCompactSnapshot(unpacked);
+  const [
+    ,
+    metadata,
+    compactSnakes,
+    compactFoods,
+    compactLeaderboard,
+    compactEvents,
+    compactMagnets,
+  ] = decodeCompactSnapshot(unpacked);
   const { serverTime, tick } = decodeSnapshotMeta(metadata);
   const snakes = compactSnakes.map(decodeSnake);
   return {
@@ -80,6 +93,7 @@ export function decodeSnapshotMessage(bytes: Uint8Array): SnapshotMessage {
       tick,
       snakes,
       foods: decodeFoods(compactFoods),
+      ...(compactMagnets.length === 0 ? {} : { magnets: compactMagnets }),
       leaderboard: decodeLeaderboards(compactLeaderboard, snakes),
     },
     events: decodeEvents(compactEvents, snakes),
@@ -246,6 +260,12 @@ function encodeSnapshotDelta(
       encodeBodyDelta(snake.body, previous.snakes[index].body),
     );
   }
+  const magnetDelta = encodeMagnetsDelta(
+    message.snapshot.magnets ?? [],
+    previous.magnets ?? [],
+  );
+  writeUnsignedVarint(bytes, magnetDelta.length);
+  for (const byte of magnetDelta) bytes.push(byte);
   const tailMask = writeTailSections(
     bytes,
     encodeFoodsDelta(message.snapshot.foods, previous.foods),
@@ -304,6 +324,9 @@ function decodeSnapshotDelta(
     );
   }
 
+  const magnetSection = readSection(bytes, offset);
+  offset = magnetSection.offset;
+  const magnets = decodeMagnetsDelta(magnetSection.bytes, previous.magnets ?? []);
   const tail = readTailSections(bytes, offset, streamTailMask(frame));
   offset = tail.offset;
   if (offset !== bytes.length) throw new Error("Trailing snapshot delta data");
@@ -316,6 +339,7 @@ function decodeSnapshotDelta(
       tick,
       snakes,
       foods: decodeFoodsDelta(tail.foods, previous.foods),
+      ...(magnets.length === 0 ? {} : { magnets }),
       leaderboard: decodeLeaderboardsDelta(tail.leaderboard, previous.leaderboard, snakes),
     },
     events: decodeEventsDelta(tail.events, snakes),
@@ -636,6 +660,8 @@ function snakeFromScalars(
     boosting: (scalars.flags & 1) !== 0,
     alive: (scalars.flags & 2) !== 0,
     invulnerable: (scalars.flags & 4) !== 0,
+    magnetUntilSourceFrame:
+      scalars.magnetUntilSourceFrame < 0 ? null : scalars.magnetUntilSourceFrame,
     respawnAtTick: scalars.respawnAtTick < 0 ? null : scalars.respawnAtTick,
     lastInputSequence: scalars.lastInputSequence,
     lastInputAppliedTick: scalars.lastInputAppliedTick,
@@ -657,6 +683,7 @@ interface DecodedSnakeScalars {
   respawnAtTick: number;
   lastInputSequence: number;
   lastInputAppliedTick: number;
+  magnetUntilSourceFrame: number;
 }
 
 function snakeStateFlags(snake: SnakeSnapshot): number {
@@ -694,6 +721,7 @@ function encodeSnakeScalars(snake: SnakeSnapshot): Uint8Array {
   if (snake.respawnAtTick !== null) writeUnsignedVarint(bytes, snake.respawnAtTick);
   writeSignedVarint(bytes, snake.lastInputSequence);
   writeUnsignedVarint(bytes, snake.lastInputAppliedTick);
+  writeSignedVarint(bytes, snake.magnetUntilSourceFrame ?? -1);
   return Uint8Array.from(bytes);
 }
 
@@ -719,7 +747,9 @@ function decodeSnakeScalars(bytes: Uint8Array): DecodedSnakeScalars {
   const lastInputSequence = readSignedVarint(bytes, offset);
   offset = lastInputSequence.offset;
   const lastInputAppliedTick = readUnsignedVarint(bytes, offset);
-  if (lastInputAppliedTick.offset !== bytes.length)
+  offset = lastInputAppliedTick.offset;
+  const magnetUntilSourceFrame = readSignedVarint(bytes, offset);
+  if (magnetUntilSourceFrame.offset !== bytes.length)
     throw new Error("Trailing compact snake scalar data");
   return {
     angle: angle.value,
@@ -736,6 +766,7 @@ function decodeSnakeScalars(bytes: Uint8Array): DecodedSnakeScalars {
     respawnAtTick: respawnAtTick === undefined ? -1 : respawnAtTick.value,
     lastInputSequence: lastInputSequence.value,
     lastInputAppliedTick: lastInputAppliedTick.value,
+    magnetUntilSourceFrame: magnetUntilSourceFrame.value,
   };
 }
 
@@ -752,6 +783,7 @@ function scalarValues(snake: SnakeSnapshot): DecodedSnakeScalars {
     respawnAtTick: snake.respawnAtTick === null ? -1 : snake.respawnAtTick,
     lastInputSequence: snake.lastInputSequence,
     lastInputAppliedTick: snake.lastInputAppliedTick,
+    magnetUntilSourceFrame: snake.magnetUntilSourceFrame ?? -1,
   };
 }
 
@@ -779,6 +811,7 @@ function encodeSnakeScalarsDelta(current: SnakeSnapshot, previous: SnakeSnapshot
   if (next.lastInputSequence !== prior.lastInputSequence) mask |= 32;
   if (next.lastInputAppliedTick !== prior.lastInputAppliedTick) mask |= 256;
   if (next.skinId !== prior.skinId) mask |= 512;
+  if (next.magnetUntilSourceFrame !== prior.magnetUntilSourceFrame) mask |= 1024;
 
   const delta: Array<number> = [];
   writeUnsignedVarint(delta, mask + 1);
@@ -798,6 +831,9 @@ function encodeSnakeScalarsDelta(current: SnakeSnapshot, previous: SnakeSnapshot
     writeSignedVarint(delta, next.lastInputAppliedTick - prior.lastInputAppliedTick);
   }
   if ((mask & 512) !== 0) writeUnsignedVarint(delta, next.skinId);
+  if ((mask & 1024) !== 0) {
+    writeSignedVarint(delta, next.magnetUntilSourceFrame - prior.magnetUntilSourceFrame);
+  }
   const deltaEncoded = Uint8Array.from(delta);
   return deltaEncoded.length < fullEncoded.length ? deltaEncoded : fullEncoded;
 }
@@ -806,7 +842,7 @@ function decodeSnakeScalarsDelta(bytes: Uint8Array, previous: SnakeSnapshot): De
   const tag = readUnsignedVarint(bytes, 0);
   if (tag.value === 0) return decodeSnakeScalars(bytes.subarray(tag.offset));
   const mask = tag.value - 1;
-  if (mask > 0x3ff) throw new Error("Invalid snapshot scalar delta mask");
+  if (mask > 0x7ff) throw new Error("Invalid snapshot scalar delta mask");
 
   let offset = tag.offset;
   const prior = scalarValues(previous);
@@ -867,6 +903,11 @@ function decodeSnakeScalarsDelta(bytes: Uint8Array, previous: SnakeSnapshot): De
     offset = skinId.offset;
     next.skinId = skinId.value;
   }
+  if ((mask & 1024) !== 0) {
+    const magnetUntilSourceFrame = readSignedVarint(bytes, offset);
+    offset = magnetUntilSourceFrame.offset;
+    next.magnetUntilSourceFrame = prior.magnetUntilSourceFrame + magnetUntilSourceFrame.value;
+  }
   if (offset !== bytes.length) throw new Error("Trailing snapshot scalar delta data");
   if (
     next.bodyScale < 0 ||
@@ -874,7 +915,8 @@ function decodeSnakeScalarsDelta(bytes: Uint8Array, previous: SnakeSnapshot): De
     next.length < 0 ||
     next.score < 0 ||
     next.kills < 0 ||
-    next.lastInputAppliedTick < 0
+    next.lastInputAppliedTick < 0 ||
+    next.magnetUntilSourceFrame < -1
   ) {
     throw new Error("Invalid snapshot scalar delta value");
   }
@@ -1281,6 +1323,15 @@ function encodeEvents(
       writeSignedVarint(bytes, quantizeSigned(consumed.target.x));
       writeSignedVarint(bytes, quantizeSigned(consumed.target.y));
     }
+    const consumedMagnets = event.consumedMagnets ?? [];
+    writeUnsignedVarint(bytes, consumedMagnets.length);
+    for (const consumed of consumedMagnets) {
+      writeUnsignedVarint(bytes, requirePlayerIndex(consumed.playerId, playerIndex));
+      writeUnsignedVarint(bytes, consumed.sourceFrame);
+      writeMagnetRecord(bytes, consumed.magnet);
+      writeSignedVarint(bytes, quantizeSigned(consumed.target.x));
+      writeSignedVarint(bytes, quantizeSigned(consumed.target.y));
+    }
     writeUnsignedVarint(bytes, event.respawnedPlayerIds.length);
     for (const playerId of event.respawnedPlayerIds) {
       writeUnsignedVarint(bytes, requirePlayerIndex(playerId, playerIndex));
@@ -1347,6 +1398,23 @@ function decodeEvents(
         target: { x: dequantize(targetX.value), y: dequantize(targetY.value) },
       });
     }
+    const magnetCount = readUnsignedVarint(bytes, offset);
+    offset = magnetCount.offset;
+    const consumedMagnets: Array<MagnetConsumedEvent> = [];
+    for (let magnetIndex = 0; magnetIndex < magnetCount.value; magnetIndex += 1) {
+      const consumer = readUnsignedVarint(bytes, offset);
+      const sourceFrame = readUnsignedVarint(bytes, consumer.offset);
+      const decodedMagnet = readMagnetRecord(bytes, sourceFrame.offset);
+      const targetX = readSignedVarint(bytes, decodedMagnet.offset);
+      const targetY = readSignedVarint(bytes, targetX.offset);
+      offset = targetY.offset;
+      consumedMagnets.push({
+        playerId: requireSnake(consumer.value, snakes).id,
+        sourceFrame: sourceFrame.value,
+        magnet: decodedMagnet.magnet,
+        target: { x: dequantize(targetX.value), y: dequantize(targetY.value) },
+      });
+    }
     const respawnCount = readUnsignedVarint(bytes, offset);
     offset = respawnCount.offset;
     const respawnedPlayerIds: Array<string> = [];
@@ -1355,10 +1423,97 @@ function decodeEvents(
       offset = respawned.offset;
       respawnedPlayerIds.push(requireSnake(respawned.value, snakes).id);
     }
-    events.push({ tick: tick.value, deaths, consumedFoods, respawnedPlayerIds });
+    events.push({
+      tick: tick.value,
+      deaths,
+      consumedFoods,
+      ...(consumedMagnets.length === 0 ? {} : { consumedMagnets }),
+      respawnedPlayerIds,
+    });
   }
   if (offset !== bytes.length) throw new Error("Trailing compact event data");
   return events;
+}
+
+function encodeMagnetsDelta(
+  magnets: ReadonlyArray<MagnetToolStateType>,
+  previous: ReadonlyArray<MagnetToolStateType>,
+): Uint8Array {
+  if (
+    magnets.length === previous.length &&
+    magnets.every((magnet, index) => sameMagnet(magnet, previous[index]))
+  ) {
+    return new Uint8Array(0);
+  }
+  const bytes: Array<number> = [];
+  writeUnsignedVarint(bytes, magnets.length);
+  for (const magnet of magnets) writeMagnetRecord(bytes, magnet);
+  return Uint8Array.from(bytes);
+}
+
+function decodeMagnetsDelta(
+  bytes: Uint8Array,
+  previous: ReadonlyArray<MagnetToolStateType>,
+): Array<MagnetToolStateType> {
+  if (bytes.length === 0) {
+    return previous.map((magnet) => ({ ...magnet, position: { ...magnet.position } }));
+  }
+  let offset = 0;
+  const count = readUnsignedVarint(bytes, offset);
+  offset = count.offset;
+  if (count.value > MAX_MAGNET_COUNT) throw new Error("Invalid compact magnet count");
+  const magnets: Array<MagnetToolStateType> = [];
+  for (let index = 0; index < count.value; index += 1) {
+    const decoded = readMagnetRecord(bytes, offset);
+    offset = decoded.offset;
+    magnets.push(decoded.magnet);
+  }
+  if (offset !== bytes.length) throw new Error("Trailing compact magnet data");
+  return magnets;
+}
+
+function sameMagnet(left: MagnetToolStateType, right: MagnetToolStateType | undefined): boolean {
+  return (
+    right !== undefined &&
+    left.id === right.id &&
+    quantizeSigned(left.position.x) === quantizeSigned(right.position.x) &&
+    quantizeSigned(left.position.y) === quantizeSigned(right.position.y) &&
+    left.expiresAtSourceFrame === right.expiresAtSourceFrame &&
+    left.directionDegrees === right.directionDegrees &&
+    left.linearFramesRemaining === right.linearFramesRemaining
+  );
+}
+
+function writeMagnetRecord(target: Array<number>, magnet: MagnetToolStateType): void {
+  writeUnsignedVarint(target, magnet.id);
+  writeSignedVarint(target, quantizeSigned(magnet.position.x));
+  writeSignedVarint(target, quantizeSigned(magnet.position.y));
+  writeUnsignedVarint(target, magnet.expiresAtSourceFrame);
+  writeUnsignedVarint(target, magnet.directionDegrees);
+  writeUnsignedVarint(target, magnet.linearFramesRemaining);
+}
+
+function readMagnetRecord(
+  bytes: Uint8Array,
+  offset: number,
+): { magnet: MagnetToolStateType; offset: number } {
+  const id = readUnsignedVarint(bytes, offset);
+  const x = readSignedVarint(bytes, id.offset);
+  const y = readSignedVarint(bytes, x.offset);
+  const expiresAtSourceFrame = readUnsignedVarint(bytes, y.offset);
+  const directionDegrees = readUnsignedVarint(bytes, expiresAtSourceFrame.offset);
+  const linearFramesRemaining = readUnsignedVarint(bytes, directionDegrees.offset);
+  if (directionDegrees.value >= 360) throw new Error("Invalid compact magnet direction");
+  return {
+    magnet: {
+      id: id.value,
+      position: { x: dequantize(x.value), y: dequantize(y.value) },
+      expiresAtSourceFrame: expiresAtSourceFrame.value,
+      directionDegrees: directionDegrees.value,
+      linearFramesRemaining: linearFramesRemaining.value,
+    },
+    offset: linearFramesRemaining.offset,
+  };
 }
 
 function requirePlayerIndex(playerId: string, indexes: ReadonlyMap<string, number>): number {

@@ -1,9 +1,10 @@
 import { Application, Container, UPDATE_PRIORITY } from "pixi.js";
-import type { FoodConsumedEvent, FoodState } from "$lib/protocol";
+import type { FoodConsumedEvent, FoodState, MagnetConsumedEvent } from "$lib/protocol";
 import type { GameController } from "../game.svelte";
 import type { SettingsStore } from "../stores/settings.svelte";
 import { RENDER, ARENA_COLORS } from "../config";
 import { MAP_BORDER } from "$lib/game/arena";
+import { MAGNET, magnetPositionAfterSourceFrames } from "$lib/game/magnet";
 import { foodRadiusOf, usesEatWreckAudio } from "$lib/game/food-metrics";
 import { predictFoodPresentationPosition } from "$lib/game/star-food-motion";
 import { SNAKE_MOTION, snakeBodyRadius } from "$lib/game/snake-motion";
@@ -12,6 +13,7 @@ import { Camera } from "./camera";
 import { ArenaLayer } from "./arena-layer";
 import { FoodLayer } from "./food-layer";
 import { MovingFoodPresentation } from "./moving-food-presentation";
+import { MagnetToolLayer } from "./magnet-tool-layer";
 import { SnakeLayer, type SnakeRenderView } from "./snake-layer";
 import { FxLayer } from "./fx-layer";
 
@@ -26,10 +28,12 @@ export class GameRenderer {
   private camera = new Camera();
   private arena: ArenaLayer | undefined;
   private food: FoodLayer | undefined;
+  private magnetTools: MagnetToolLayer | undefined;
   private snakes: SnakeLayer | undefined;
   private fx: FxLayer | undefined;
   private readonly movingFoodPresentation = new MovingFoodPresentation();
   private readonly pendingConsumedFoods: Array<FoodConsumedEvent> = [];
+  private readonly pendingConsumedMagnets: Array<MagnetConsumedEvent> = [];
   private started = false;
   private destroyed = false;
   private lastSelfAlive = false;
@@ -78,13 +82,21 @@ export class GameRenderer {
       },
       rules.arenaHalfSize - MAP_BORDER,
     );
-    this.snakes = new SnakeLayer(textures.skinFrames, textures.speedUp, textures.protect);
+    this.magnetTools = new MagnetToolLayer(textures.magnetTool);
+    this.snakes = new SnakeLayer(
+      textures.skinFrames,
+      textures.speedUp,
+      textures.protect,
+      textures.magnetEffect,
+    );
     this.fx = new FxLayer();
     for (const event of this.pendingConsumedFoods.splice(0)) this.presentConsumedFood(event);
+    for (const event of this.pendingConsumedMagnets.splice(0)) this.presentConsumedMagnet(event);
 
     app.stage.addChild(this.arena.screenContainer);
     this.world.addChild(this.arena.worldContainer);
     this.world.addChild(this.food.container);
+    this.world.addChild(this.magnetTools.container);
     this.world.addChild(this.snakes.container);
     this.world.addChild(this.fx.container);
     app.stage.addChild(this.world);
@@ -110,6 +122,15 @@ export class GameRenderer {
     this.presentConsumedFood(event);
   }
 
+  magnetConsumed(event: MagnetConsumedEvent): void {
+    if (this.destroyed) return;
+    if (!this.magnetTools) {
+      this.pendingConsumedMagnets.push(event);
+      return;
+    }
+    this.presentConsumedMagnet(event);
+  }
+
   /** 蛇死亡：沿身体爆裂（由控制器在事件到达时调用）。 */
   snakeDied(playerId: string): void {
     const last = this.snakes?.lastBodyOf(playerId);
@@ -132,9 +153,11 @@ export class GameRenderer {
     this.app?.ticker.remove(this.afterRender);
     this.app?.renderer.off("resize", this.handleResize);
     this.pendingConsumedFoods.length = 0;
+    this.pendingConsumedMagnets.length = 0;
     this.movingFoodPresentation.reset();
     this.snakes?.destroy();
     this.food?.destroy();
+    this.magnetTools?.destroy();
     this.fx?.destroy();
     this.app?.destroy(true);
     this.app = undefined;
@@ -146,7 +169,9 @@ export class GameRenderer {
   }
 
   private frame(deltaMS: number): void {
-    if (!this.app || !this.arena || !this.food || !this.snakes || !this.fx) return;
+    if (!this.app || !this.arena || !this.food || !this.magnetTools || !this.snakes || !this.fx) {
+      return;
+    }
     const controller = this.controller;
     const rules = controller.descriptor.rules;
     const clock = controller.clockSync;
@@ -179,6 +204,10 @@ export class GameRenderer {
         bodyScale: remote.bodyScale,
         boosting: remote.boosting && remote.length > rules.minimumLength,
         invulnerable: remote.invulnerable,
+        magnetActive:
+          remotePresentationSourceFrame !== undefined &&
+          remote.magnetUntilSourceFrame !== null &&
+          remotePresentationSourceFrame < remote.magnetUntilSourceFrame,
         isSelf: false,
       });
     }
@@ -203,6 +232,9 @@ export class GameRenderer {
         boosting:
           selfState.boosting && controller.selfPredictor.currentLength > rules.minimumLength,
         invulnerable: selfSnapshot.invulnerable,
+        magnetActive:
+          selfSnapshot.magnetUntilSourceFrame != null &&
+          selfState.presentationSourceFrame < selfSnapshot.magnetUntilSourceFrame,
         isSelf: true,
       });
       selfHead = selfState.body[0];
@@ -246,6 +278,23 @@ export class GameRenderer {
           : presentedFoods;
       if (!selfState || !selfSnapshot?.alive) this.movingFoodPresentation.reset();
       this.food.sync(smoothedFoods, viewBounds, authoritativeSourceFrame, latestSnapshot.foods);
+      const presentedMagnets =
+        selfState && selfSnapshot?.alive
+          ? (latestSnapshot.magnets ?? []).map((magnet) => {
+              const elapsed = Math.max(
+                0,
+                Math.min(
+                  magnet.linearFramesRemaining,
+                  selfState.presentationSourceFrame - authoritativeSourceFrame,
+                ),
+              );
+              return {
+                ...magnet,
+                position: magnetPositionAfterSourceFrames(magnet, elapsed, rules.arenaHalfSize),
+              };
+            })
+          : controller.snapshotBuffer.sampleMagnets(renderTime);
+      this.magnetTools.sync(presentedMagnets, viewBounds);
     }
     if (selfHead && selfState && selfSnapshot?.alive) {
       const predictedFoods = this.food.predictSelfContacts(
@@ -254,6 +303,10 @@ export class GameRenderer {
         selfState.collisionHead,
         snakeBodyRadius(selfState.bodyScale),
         rules.eatDistanceFactor,
+        selfSnapshot.magnetUntilSourceFrame != null &&
+          selfState.collisionSourceFrame < selfSnapshot.magnetUntilSourceFrame
+          ? MAGNET.extraEatScope
+          : 0,
         selfState.presentationSourceFrame,
         selfState.collisionSourceFrame,
       );
@@ -275,6 +328,14 @@ export class GameRenderer {
     for (const event of presentedFoods) {
       if (event.playerId === controller.selfId) this.playFoodAudio(event.food);
     }
+    const presentedMagnets = this.magnetTools.update(viewBounds, (playerId) =>
+      playerId === controller.selfId
+        ? (selfState?.presentationSourceFrame ?? remotePresentationSourceFrame)
+        : remotePresentationSourceFrame,
+    );
+    for (const event of presentedMagnets) {
+      if (event.playerId === controller.selfId) controller.sfx.eatTool();
+    }
     this.snakes.update(views, viewBounds, this.settings.showNicknames, nowMs);
     this.fx.update(deltaMS);
     if (controller.status === "online" && latestSnapshot !== undefined) {
@@ -293,6 +354,10 @@ export class GameRenderer {
 
   private presentConsumedFood(event: FoodConsumedEvent): void {
     this.food?.startAbsorb(event);
+  }
+
+  private presentConsumedMagnet(event: MagnetConsumedEvent): void {
+    this.magnetTools?.consume(event);
   }
 
   private playFoodAudio(food: FoodState): void {

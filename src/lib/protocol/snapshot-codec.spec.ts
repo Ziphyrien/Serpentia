@@ -153,6 +153,94 @@ describe("snapshot consumed food events", () => {
   });
 });
 
+describe("snapshot magnet state", () => {
+  it("round-trips authoritative map, snake deadline, and pickup event", () => {
+    const encoder = new SnapshotStreamEncoder();
+    const decoder = new SnapshotStreamDecoder();
+    const magnet = {
+      id: 3,
+      position: { x: 42.25, y: -12.5 },
+      expiresAtSourceFrame: 1_400,
+      directionDegrees: 271,
+      linearFramesRemaining: 87,
+    };
+    const activeSnake: SnakeSnapshot = {
+      ...snake(2, 8),
+      magnetUntilSourceFrame: 900,
+    };
+    const message: SnapshotMessage = {
+      ...snapshotMessage(9, [], [activeSnake]),
+      snapshot: {
+        ...snapshotMessage(9, [], [activeSnake]).snapshot,
+        magnets: [magnet],
+      },
+      events: [
+        {
+          tick: 9,
+          deaths: [],
+          consumedFoods: [],
+          consumedMagnets: [
+            {
+              playerId: "self",
+              sourceFrame: 27,
+              magnet,
+              target: { x: 50.5, y: -4.25 },
+            },
+          ],
+          respawnedPlayerIds: [],
+        },
+      ],
+    };
+
+    const decoded = decoder.decode(encoder.encode(message));
+    expect(decoded.snapshot.snakes[0].magnetUntilSourceFrame).toBe(900);
+    expect(decoded.snapshot.magnets).toEqual([magnet]);
+    expect(decoded.events).toEqual(message.events);
+  });
+
+  it("keeps moving magnets on compact stream deltas", () => {
+    const encoder = new SnapshotStreamEncoder();
+    const decoder = new SnapshotStreamDecoder();
+    const firstMagnet = {
+      id: 4,
+      position: { x: 10, y: 20 },
+      expiresAtSourceFrame: 1_400,
+      directionDegrees: 30,
+      linearFramesRemaining: 99,
+    };
+    const secondMagnet = {
+      ...firstMagnet,
+      position: { x: 15.25, y: 23 },
+      linearFramesRemaining: 93,
+    };
+    const first = {
+      ...snapshotMessage(1, [], [snake(2, 2)]),
+      snapshot: {
+        ...snapshotMessage(1, [], [snake(2, 2)]).snapshot,
+        magnets: [firstMagnet],
+      },
+    };
+    const second = {
+      ...snapshotMessage(3, [], [snake(2, 2)]),
+      snapshot: {
+        ...snapshotMessage(3, [], [snake(2, 2)]).snapshot,
+        magnets: [secondMagnet],
+      },
+    };
+
+    decoder.decode(encoder.encode(first));
+    const wire = encoder.encode(second);
+    const decoded = decoder.decode(wire);
+    expect(wire[0] & 0xe0).toBe(0xc0);
+    expect(decoded.snapshot.magnets).toEqual([secondMagnet]);
+
+    const removedWire = encoder.encode(snapshotMessage(5, [], [snake(2, 2)]));
+    const removed = decoder.decode(removedWire);
+    expect(removedWire[0] & 0xe0).toBe(0xc0);
+    expect(removed.snapshot.magnets ?? []).toEqual([]);
+  });
+});
+
 describe("snapshot food delta", () => {
   const removalCases: ReadonlyArray<{
     readonly name: string;

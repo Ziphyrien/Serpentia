@@ -5,6 +5,7 @@
   import Leaderboard from "./leaderboard.svelte";
   import GameMap from "./game-map.svelte";
   import GameState from "./game-state.svelte";
+  import MagnetStatus from "./magnet-status.svelte";
   import NetStatus from "./net-status.svelte";
   import KillFeed from "./kill-feed.svelte";
   import DeathOverlay from "./death-overlay.svelte";
@@ -73,6 +74,8 @@
       />
     </div>
   </div>
+
+  <MagnetStatus remaining={controller.self.magnetRemaining} />
 
   {#if hintVisible && controller.self.alive && (controller.gamepadConnected || !isTouch)}
     <div class="absolute inset-x-0 bottom-16 flex justify-center transition-opacity duration-700">

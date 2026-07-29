@@ -1,4 +1,10 @@
 import {
+  MAGNET,
+  magnetBorderDirection,
+  magnetPositionAfterSourceFrames,
+  shouldGenerateMagnetWave,
+} from "../../game/magnet";
+import {
   SNAKE_BODY,
   advanceSnakeSourceFrame,
   applySnakeBoostInput,
@@ -34,7 +40,7 @@ import {
   maximumFoodRadius,
 } from "../../game/food-metrics";
 import { BodySpatialIndex } from "./body-spatial-index";
-import { defaultGameConfig, motionRulesFor, type GameConfig } from "./config";
+import { SOURCE_FRAME_RATE, defaultGameConfig, motionRulesFor, type GameConfig } from "./config";
 import { distanceSquared, pointToSegmentDistanceSquared, type Point } from "./geometry";
 import type {
   DeathCause,
@@ -43,6 +49,8 @@ import type {
   FoodKind,
   FoodState,
   GameSnapshot,
+  MagnetConsumedEvent,
+  MagnetToolState,
   PlayerInput,
   SnakeState,
   TickEvents,
@@ -73,6 +81,11 @@ interface StarFoodMotion {
   boundaryY: number;
 }
 
+interface MagnetMotion {
+  directionFrameCount: number;
+  directionFrameTarget: number;
+}
+
 export class GameEngine {
   readonly config: GameConfig;
   private readonly motion: SnakeMotionRules;
@@ -82,8 +95,11 @@ export class GameEngine {
   private readonly foods = new Map<number, FoodState>();
   private readonly starFoodMotion = new Map<number, StarFoodMotion>();
   private readonly pendingAmbientFoodRespawns: Array<PendingAmbientFoodRespawn> = [];
+  private readonly magnets = new Map<number, MagnetToolState>();
+  private readonly magnetMotion = new Map<number, MagnetMotion>();
   private readonly foodIndex: FoodSpatialIndex;
   private nextFoodId = 1;
+  private nextMagnetId = 1;
   private dotFoodCount = 0;
   private starFoodCount = 0;
   private currentTick = 0;
@@ -137,6 +153,7 @@ export class GameEngine {
       alive: true,
       respawnAtTick: undefined,
       invulnerableUntilSourceFrame: this.invulnerabilityDeadline(options.invulnerabilityTicks ?? 0),
+      magnetUntilSourceFrame: undefined,
       lastInputSequence: -1,
       lastInputAppliedTick: 0,
     };
@@ -225,6 +242,28 @@ export class GameEngine {
     return id;
   }
 
+  addMagnet(position: Point): number {
+    const id = this.nextMagnetId;
+    this.nextMagnetId += 1;
+    const directionDegrees = this.random.integer(0, 360);
+    const directionFrameTarget = this.random.integer(
+      MAGNET.directionFrameMin,
+      MAGNET.directionFrameMaxExclusive,
+    );
+    this.magnets.set(id, {
+      id,
+      position: { x: position.x, y: position.y },
+      expiresAtSourceFrame: this.currentSourceFrame + this.config.magnetExistSourceFrames,
+      directionDegrees,
+      linearFramesRemaining: directionFrameTarget,
+    });
+    this.magnetMotion.set(id, {
+      directionFrameCount: 0,
+      directionFrameTarget,
+    });
+    return id;
+  }
+
   applyInput(input: PlayerInput): boolean {
     const snake = this.snakes.get(input.playerId);
     if (!snake || !snake.alive || input.sequence <= snake.lastInputSequence) return false;
@@ -255,17 +294,22 @@ export class GameEngine {
 
     const deaths: Array<DeathEvent> = [];
     const consumedFoods: Array<FoodConsumedEvent> = [];
+    const consumedMagnets: Array<MagnetConsumedEvent> = [];
     for (let frame = 0; frame < this.motion.sourceFramesPerTick; frame += 1) {
       this.currentSourceFrame += 1;
       this.moveAliveSnakesOneSourceFrame();
       this.moveStarFoodsOneSourceFrame();
+      this.moveMagnetsOneSourceFrame();
       this.respawnAmbientFoods();
       deaths.push(...this.resolveDeaths());
       consumedFoods.push(...this.consumeFood());
+      consumedMagnets.push(...this.consumeMagnets());
+      // 每秒回调位于当帧所有 onUpdate / 碰撞之后；新波次从下一源帧开始移动。
+      this.generateScheduledMagnets();
     }
     this.replenishAmbientFood();
 
-    return { deaths, consumedFoods, respawnedPlayerIds };
+    return { deaths, consumedFoods, consumedMagnets, respawnedPlayerIds };
   }
 
   snapshot(): GameSnapshot {
@@ -283,6 +327,9 @@ export class GameEngine {
       boosting: snake.boosting,
       alive: snake.alive,
       invulnerable: this.isInvulnerable(snake),
+      magnetUntilSourceFrame: this.isMagnetActive(snake)
+        ? (snake.magnetUntilSourceFrame ?? null)
+        : null,
       respawnAtTick: snake.respawnAtTick ?? null,
       lastInputSequence: snake.lastInputSequence,
       lastInputAppliedTick: snake.lastInputAppliedTick,
@@ -302,6 +349,7 @@ export class GameEngine {
       tick: this.currentTick,
       snakes,
       foods: [...this.foods.values()].sort((left, right) => left.id - right.id),
+      magnets: [...this.magnets.values()].sort((left, right) => left.id - right.id),
       leaderboard,
     };
   }
@@ -314,6 +362,13 @@ export class GameEngine {
 
   private isInvulnerable(snake: SnakeState): boolean {
     return snake.alive && this.currentSourceFrame < snake.invulnerableUntilSourceFrame;
+  }
+
+  private isMagnetActive(snake: SnakeState): boolean {
+    return (
+      snake.magnetUntilSourceFrame !== undefined &&
+      this.currentSourceFrame < snake.magnetUntilSourceFrame
+    );
   }
 
   private moveAliveSnakesOneSourceFrame(): void {
@@ -410,20 +465,20 @@ export class GameEngine {
       if (!snake.alive) continue;
       const head = snake.body[0];
       const bodyRadius = snakeBodyRadius(snake.bodyScale);
-      const reach = eatContactDistance(
-        bodyRadius,
-        maximumFoodRadius(),
-        this.config.eatDistanceFactor,
-      );
+      const magnetScope = this.isMagnetActive(snake) ? this.config.magnetExtraEatScope : 0;
+      const reach =
+        eatContactDistance(bodyRadius, maximumFoodRadius(), this.config.eatDistanceFactor) +
+        magnetScope;
       for (const foodId of this.foodIndex.query(head, reach)) {
         if (consumed.has(foodId)) continue;
         const food = this.foods.get(foodId);
         if (food === undefined) continue;
-        const contact = eatContactDistance(
-          bodyRadius,
-          foodRadiusOf(food, this.config),
-          this.config.eatDistanceFactor,
-        );
+        const contact =
+          eatContactDistance(
+            bodyRadius,
+            foodRadiusOf(food, this.config),
+            this.config.eatDistanceFactor,
+          ) + magnetScope;
         if (distanceSquared(head, food.position) >= contact * contact) continue;
         consumed.set(food.id, {
           playerId: snake.id,
@@ -454,6 +509,38 @@ export class GameEngine {
       }
     }
     return [...consumed.values()];
+  }
+
+  private consumeMagnets(): Array<MagnetConsumedEvent> {
+    const consumed = new Set<number>();
+    const events: Array<MagnetConsumedEvent> = [];
+    for (const snake of this.orderedSnakes) {
+      if (!snake.alive) continue;
+      const head = snake.body[0];
+      const contact =
+        (snakeBodyRadius(snake.bodyScale) + MAGNET.toolSize / 2) * this.config.eatDistanceFactor;
+      for (const magnet of this.magnets.values()) {
+        if (consumed.has(magnet.id)) continue;
+        if (distanceSquared(head, magnet.position) >= contact * contact) continue;
+        consumed.add(magnet.id);
+        events.push({
+          playerId: snake.id,
+          sourceFrame: this.currentSourceFrame,
+          magnet: { ...magnet, position: { ...magnet.position } },
+          target: { x: head.x, y: head.y },
+        });
+        const nextDeadline = this.currentSourceFrame + this.config.magnetDurationSourceFrames;
+        const remaining = (snake.magnetUntilSourceFrame ?? 0) - this.currentSourceFrame;
+        if (this.config.magnetDurationSourceFrames >= remaining) {
+          snake.magnetUntilSourceFrame = nextDeadline;
+        }
+      }
+    }
+    for (const id of consumed) {
+      this.magnets.delete(id);
+      this.magnetMotion.delete(id);
+    }
+    return events;
   }
 
   private renderedBodyPointIndexes(snake: SnakeState): Array<number> {
@@ -535,6 +622,65 @@ export class GameEngine {
       if (safe) return candidate;
     }
     return candidate;
+  }
+
+  private generateScheduledMagnets(): void {
+    if (this.currentSourceFrame % SOURCE_FRAME_RATE !== 0) return;
+    const mainSnake = this.snakes.values().next().value;
+    if (mainSnake === undefined) return;
+    const second = this.currentSourceFrame / SOURCE_FRAME_RATE;
+    if (!shouldGenerateMagnetWave(second, mainSnake.length)) return;
+    const extent = this.config.arenaHalfSize - MAP_BORDER;
+    for (let count = 0; count < this.config.magnetWaveCount; count += 1) {
+      const x = this.random.integer(-extent, extent);
+      const y = this.random.integer(-extent, extent);
+      if (x === 0 || y === 0) continue;
+      this.addMagnet({ x, y });
+    }
+  }
+
+  private moveMagnetsOneSourceFrame(): void {
+    for (const magnet of this.magnets.values()) {
+      if (this.currentSourceFrame >= magnet.expiresAtSourceFrame) {
+        this.magnets.delete(magnet.id);
+        this.magnetMotion.delete(magnet.id);
+        continue;
+      }
+      const motion = this.magnetMotion.get(magnet.id);
+      if (motion === undefined) continue;
+      motion.directionFrameCount += 1;
+      let directionDegrees = magnet.directionDegrees;
+      if (motion.directionFrameCount >= motion.directionFrameTarget) {
+        directionDegrees = this.random.integer(0, 360);
+        this.resetMagnetDirection(motion);
+      }
+      const borderDirection = magnetBorderDirection(
+        { position: magnet.position, directionDegrees },
+        this.config.arenaHalfSize,
+      );
+      if (borderDirection !== undefined) {
+        directionDegrees = borderDirection;
+        this.resetMagnetDirection(motion);
+      }
+      this.magnets.set(magnet.id, {
+        ...magnet,
+        directionDegrees,
+        linearFramesRemaining: motion.directionFrameTarget - motion.directionFrameCount,
+        position: magnetPositionAfterSourceFrames(
+          { position: magnet.position, directionDegrees },
+          1,
+          this.config.arenaHalfSize,
+        ),
+      });
+    }
+  }
+
+  private resetMagnetDirection(motion: MagnetMotion): void {
+    motion.directionFrameCount = 0;
+    motion.directionFrameTarget = this.random.integer(
+      MAGNET.directionFrameMin,
+      MAGNET.directionFrameMaxExclusive,
+    );
   }
 
   private moveStarFoodsOneSourceFrame(): void {

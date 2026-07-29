@@ -20,6 +20,13 @@ import {
   speedPeriodPointCount,
   updateSpeedAnimationState,
 } from "./snake-speed-effect";
+import {
+  SNAKE_MAGNET_LIGHTS,
+  SNAKE_MAGNET_RINGS,
+  sampleSnakeMagnetLight,
+  sampleSnakeMagnetParticle,
+  sampleSnakeMagnetRing,
+} from "./snake-magnet-effect";
 
 interface Point {
   x: number;
@@ -37,6 +44,7 @@ export interface SnakeRenderView {
   bodyScale: number;
   boosting: boolean;
   invulnerable: boolean;
+  magnetActive: boolean;
   isSelf: boolean;
 }
 
@@ -47,11 +55,23 @@ interface ViewBounds {
   bottom: number;
 }
 
+interface SnakeMagnetNodes {
+  readonly root: Container;
+  readonly groups: ReadonlyArray<ReadonlyArray<Sprite>>;
+  readonly rings: ReadonlyArray<Sprite>;
+  readonly particle: Sprite | undefined;
+  elapsedSourceFrames: number;
+  particleElapsedSourceFrames: number;
+  wasVisible: boolean;
+  lastUpdateMs: number | undefined;
+}
+
 interface SnakeNodes {
   root: Container;
   bodyLayer: Container;
   speedLayer: Container;
   protect: Sprite;
+  magnet: SnakeMagnetNodes;
   head: Sprite;
   label: Text;
   skin: InternalSkin;
@@ -91,6 +111,7 @@ const LABEL_RESOLUTION = Math.ceil(RENDER.maxDevicePixelRatio * RENDER.cameraIni
 export class SnakeLayer {
   readonly container = new Container();
   private readonly snakeContainer = new Container();
+  private readonly magnetContainer = new Container();
   private readonly protectContainer = new Container();
   private readonly snakes = new Map<string, SnakeNodes>();
 
@@ -98,9 +119,14 @@ export class SnakeLayer {
     private readonly skinFrames: ReadonlyMap<number, SkinFrameTextures>,
     private readonly speedTexture: Texture,
     private readonly protectTexture: Texture,
+    private readonly magnetTextures: ReadonlyArray<Texture> = [],
   ) {
     if (skinFrames.size === 0) throw new Error("Internal skin textures are missing");
-    this.container.addChild(this.snakeContainer, this.protectContainer);
+    this.container.addChild(
+      this.snakeContainer,
+      this.magnetContainer,
+      this.protectContainer,
+    );
   }
 
   lastBodyOf(id: string): { body: ReadonlyArray<Point>; bodyColor: number } | undefined {
@@ -123,6 +149,7 @@ export class SnakeLayer {
     for (const [id, nodes] of this.snakes) {
       if (!seen.has(id)) {
         nodes.root.destroy({ children: true });
+        nodes.magnet.root.destroy({ children: true });
         nodes.protect.destroy();
         this.snakes.delete(id);
       }
@@ -132,6 +159,7 @@ export class SnakeLayer {
   destroy(): void {
     for (const nodes of this.snakes.values()) {
       nodes.root.destroy({ children: true });
+      nodes.magnet.root.destroy({ children: true });
       nodes.protect.destroy();
     }
     this.snakes.clear();
@@ -143,6 +171,7 @@ export class SnakeLayer {
     if (existing) {
       if (existing.skin.id === internalSkinOrDefault(skinId).id) return existing;
       existing.root.destroy({ children: true });
+      existing.magnet.root.destroy({ children: true });
       existing.protect.destroy();
       this.snakes.delete(id);
     }
@@ -156,6 +185,7 @@ export class SnakeLayer {
     const speedLayer = new Container();
     const protect = new Sprite({ texture: this.protectTexture, anchor: 0.5 });
     protect.visible = false;
+    const magnet = this.createMagnetEffect();
     const head = new Sprite({ texture: this.frameTexture(frames, skin.head.textures[0]) });
     head.anchor.set(0.5);
     // 流光后于蛇本体绘制，因此覆盖在身体与头部之上。
@@ -175,12 +205,14 @@ export class SnakeLayer {
     root.addChild(label);
 
     this.snakeContainer.addChild(root);
+    this.magnetContainer.addChild(magnet.root);
     this.protectContainer.addChild(protect);
     const nodes: SnakeNodes = {
       root,
       bodyLayer,
       speedLayer,
       protect,
+      magnet,
       head,
       label,
       skin,
@@ -199,6 +231,131 @@ export class SnakeLayer {
     };
     this.snakes.set(id, nodes);
     return nodes;
+  }
+
+  private createMagnetEffect(): SnakeMagnetNodes {
+    const root = new Container();
+    root.visible = false;
+    const groups: Array<Array<Sprite>> = [];
+    for (let groupIndex = 0; groupIndex < 2; groupIndex += 1) {
+      const group = new Container();
+      group.rotation = groupIndex * Math.PI;
+      const lights: Array<Sprite> = [];
+      for (const definition of SNAKE_MAGNET_LIGHTS) {
+        const texture = this.magnetTextures[definition.textureIndex];
+        if (texture === undefined) continue;
+        const light = new Sprite({ texture, anchor: 0.5 });
+        light.rotation = (definition.rotationDegrees / 180) * Math.PI;
+        group.addChild(light);
+        lights.push(light);
+      }
+      root.addChild(group);
+      groups.push(lights);
+    }
+
+    const particleTexture = this.magnetTextures[4];
+    const particle =
+      particleTexture === undefined
+        ? undefined
+        : new Sprite({ texture: particleTexture, anchor: 0.5 });
+    if (particle !== undefined) {
+      particle.blendMode = "add";
+      root.addChild(particle);
+    }
+
+    const rings: Array<Sprite> = [];
+    const ringTexture = this.magnetTextures[0];
+    if (ringTexture !== undefined) {
+      for (const definition of SNAKE_MAGNET_RINGS) {
+        const ring = new Sprite({ texture: ringTexture, anchor: 0.5 });
+        ring.rotation = (definition.rotationDegrees / 180) * Math.PI;
+        root.addChild(ring);
+        rings.push(ring);
+      }
+    }
+    return {
+      root,
+      groups,
+      rings,
+      particle,
+      elapsedSourceFrames: 0,
+      particleElapsedSourceFrames: 0,
+      wasVisible: false,
+      lastUpdateMs: undefined,
+    };
+  }
+
+  private syncMagnetEffect(
+    nodes: SnakeNodes,
+    snake: SnakeRenderView,
+    view: ViewBounds,
+    bodyWidth: number,
+    nowMs: number,
+  ): void {
+    const head = snake.body[0];
+    nodes.magnet.root.visible =
+      snake.magnetActive &&
+      head !== undefined &&
+      head.x > view.left - bodyWidth &&
+      head.x < view.right + bodyWidth &&
+      head.y > view.top - bodyWidth &&
+      head.y < view.bottom + bodyWidth;
+    if (!nodes.magnet.root.visible || head === undefined) {
+      nodes.magnet.wasVisible = false;
+      nodes.magnet.lastUpdateMs = undefined;
+      return;
+    }
+    const elapsedSourceFrames =
+      nodes.magnet.lastUpdateMs === undefined
+        ? 0
+        : (Math.max(0, nowMs - nodes.magnet.lastUpdateMs) / 1_000) * 60;
+    nodes.magnet.elapsedSourceFrames += elapsedSourceFrames;
+    nodes.magnet.particleElapsedSourceFrames = nodes.magnet.wasVisible
+      ? nodes.magnet.particleElapsedSourceFrames + elapsedSourceFrames
+      : 0;
+    nodes.magnet.wasVisible = true;
+    nodes.magnet.lastUpdateMs = nowMs;
+    nodes.magnet.root.position.set(head.x, head.y);
+
+    for (const group of nodes.magnet.groups) {
+      for (let index = 0; index < group.length; index += 1) {
+        const light = group[index];
+        const definition = SNAKE_MAGNET_LIGHTS[index];
+        if (definition === undefined) continue;
+        const sample = sampleSnakeMagnetLight(index, nodes.magnet.elapsedSourceFrames);
+        light.position.set(sample.x, sample.y);
+        light.alpha = sample.alpha;
+        light.scale.set(
+          (sample.scale * definition.nodeWidth) / Math.max(1, light.texture.width),
+          (sample.scale * definition.nodeHeight) / Math.max(1, light.texture.height),
+        );
+      }
+    }
+
+    for (let index = 0; index < nodes.magnet.rings.length; index += 1) {
+      const ring = nodes.magnet.rings[index];
+      const definition = SNAKE_MAGNET_RINGS[index];
+      if (definition === undefined) continue;
+      const sample = sampleSnakeMagnetRing(index, nodes.magnet.elapsedSourceFrames);
+      ring.position.set(sample.x, sample.y);
+      ring.alpha = sample.alpha;
+      ring.scale.set(
+        (sample.scale * definition.nodeWidth) / Math.max(1, ring.texture.width),
+        (sample.scale * definition.nodeHeight) / Math.max(1, ring.texture.height),
+      );
+    }
+
+    if (nodes.magnet.particle !== undefined) {
+      const sample = sampleSnakeMagnetParticle(nodes.magnet.particleElapsedSourceFrames);
+      nodes.magnet.particle.visible = sample.visible;
+      nodes.magnet.particle.position.set(sample.x, sample.y);
+      nodes.magnet.particle.alpha = sample.alpha;
+      nodes.magnet.particle.tint = sample.tint;
+      nodes.magnet.particle.rotation = sample.rotation;
+      nodes.magnet.particle.scale.set(
+        sample.size / Math.max(1, nodes.magnet.particle.texture.width),
+      );
+    }
   }
 
   private frameTexture(frames: SkinFrameTextures, name: string): Texture {
@@ -485,13 +642,17 @@ export class SnakeLayer {
     if (body.length === 0) {
       nodes.root.visible = false;
       nodes.protect.visible = false;
+      nodes.magnet.root.visible = false;
+      nodes.magnet.wasVisible = false;
+      nodes.magnet.lastUpdateMs = undefined;
       return;
     }
     nodes.lastBody = body;
     nodes.root.visible = true;
-    this.syncProtectEffect(nodes, snake, view);
-
     const size = skinSizeInfo(nodes.skin, bodyScale);
+    this.syncProtectEffect(nodes, snake, view);
+    this.syncMagnetEffect(nodes, snake, view, size.bodyWidth, nowMs);
+
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;

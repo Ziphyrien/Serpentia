@@ -7,6 +7,8 @@ export type {
   FoodKind,
   FoodState,
   GameSnapshot,
+  MagnetConsumedEvent,
+  MagnetToolState,
   Point,
   SnakeSnapshot,
   TickEvents,
@@ -33,6 +35,8 @@ export interface SnakeState {
   /** 已连续累计的加速源帧数。 */
   boostFrames: number;
   alive: boolean;
+  /** 磁铁状态截止源帧（半开区间）；死亡期间继续按绝对时间流逝。 */
+  magnetUntilSourceFrame: number | undefined;
   respawnAtTick: number | undefined;
   /** 保护截止源帧（半开区间，不包含该源帧）。 */
   invulnerableUntilSourceFrame: number;
