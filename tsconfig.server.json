@@ -7,6 +7,7 @@
     "server/**/*.ts",
     "scripts/**/*.ts",
     "src/lib/protocol/**/*.ts",
-    "src/lib/server/**/*.ts"
+    "src/lib/server/**/*.ts",
+    "tests/**/*.ts"
   ]
 }

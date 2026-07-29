@@ -1,7 +1,13 @@
+import { DEFAULT_SKIN_ID, isInternalSkinId } from "../../game/internal-skins";
 import type { PlayerIdentity } from "./room-controller";
 
 export interface ConnectionIdentity extends PlayerIdentity {
   readonly sessionExpiresAt: number;
+}
+
+/** 皮肤 ID 必须存在于官方清单，否则回落到默认皮肤。 */
+export function normalizeSkinId(input: unknown): number {
+  return isInternalSkinId(input) ? input : DEFAULT_SKIN_ID;
 }
 
 export function normalizeNickname(input: string): string | undefined {

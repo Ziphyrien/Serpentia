@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Dialog, mergeProps } from "bits-ui";
   import Settings from "lucide-svelte/icons/settings";
-  import LogOut from "lucide-svelte/icons/log-out";
+  import House from "lucide-svelte/icons/house";
   import X from "lucide-svelte/icons/x";
   import type { SettingsStore } from "$lib/client/stores/settings.svelte";
   import type { Sfx } from "$lib/client/audio/sfx";
@@ -12,11 +12,11 @@
   let {
     settings,
     sfx,
-    onLogout,
+    onReturnHome,
   }: {
     settings: SettingsStore;
     sfx: Sfx;
-    onLogout: () => void;
+    onReturnHome: () => void;
   } = $props();
 
   let open = $state(false);
@@ -45,7 +45,7 @@
     >
       <div class="mb-5 flex items-center justify-between">
         <Dialog.Title class="text-lg font-black tracking-wide">设置</Dialog.Title>
-        <Dialog.Close class="cursor-pointer rounded-full p-1 text-white/60 transition hover:bg-white/10 hover:text-white">
+        <Dialog.Close class="cursor-pointer rounded-full p-1 text-white/60 transition hover:text-white">
           <X size={18} />
         </Dialog.Close>
       </div>
@@ -74,19 +74,12 @@
             onCheckedChange={(value) => settings.setShowNicknames(value)}
           />
         </div>
-        <div class="flex items-center justify-between">
-          <span class="text-sm font-bold text-white/85">高清画质</span>
-          <Switch
-            checked={settings.highQuality}
-            onCheckedChange={(value) => settings.setHighQuality(value)}
-          />
-        </div>
       </div>
 
       <div class="mt-7 border-t border-white/10 pt-5">
-        <Button intent="danger" class="w-full" onclick={onLogout}>
-          <LogOut size={15} />
-          退出登录
+        <Button intent="danger" class="w-full" onclick={onReturnHome}>
+          <House size={15} />
+          返回首页
         </Button>
       </div>
     </Dialog.Content>

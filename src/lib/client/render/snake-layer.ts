@@ -1,6 +1,25 @@
-import { Container, Sprite, Text } from "pixi.js";
-import { RENDER, skinForPlayer, type SkinDefinition } from "../config";
-import type { SnakeSkinTextures } from "./assets";
+import { Container, Sprite, Text, type Texture } from "pixi.js";
+import {
+  bodyNodeAt,
+  bodyPointIndexes,
+  fixedSkinFrameScale,
+  internalSkinOrDefault,
+  nodeFrameName,
+  skinSizeInfo,
+  type InternalSkin,
+  type SkinNode,
+  type SkinSizeInfo,
+} from "$lib/game/internal-skins";
+import { RENDER } from "../config";
+import type { SkinFrameTextures } from "./assets";
+import { snakeProtectBounds } from "./snake-protect-effect";
+import {
+  SNAKE_SPEED_EFFECT,
+  accumulateSpeedSourceFrame,
+  forEachSpeedPathSample,
+  speedPeriodPointCount,
+  updateSpeedAnimationState,
+} from "./snake-speed-effect";
 
 interface Point {
   x: number;
@@ -10,9 +29,13 @@ interface Point {
 export interface SnakeRenderView {
   id: string;
   nickname: string;
+  /** 权威内置皮肤 ID。 */
+  skinId: number;
   body: ReadonlyArray<Point>;
   angle: number;
-  radius: number;
+  /** 原版带迟滞的当前身体缩放档位。 */
+  bodyScale: number;
+  boosting: boolean;
   invulnerable: boolean;
   isSelf: boolean;
 }
@@ -27,48 +50,62 @@ interface ViewBounds {
 interface SnakeNodes {
   root: Container;
   bodyLayer: Container;
+  speedLayer: Container;
+  protect: Sprite;
   head: Sprite;
   label: Text;
-  skin: SkinDefinition;
-  textures: SnakeSkinTextures;
-  beadNodes: Array<Sprite>;
+  skin: InternalSkin;
+  frames: SkinFrameTextures;
+  bodyNodes: Array<Sprite>;
+  speedNodes: Array<Sprite>;
+  speedPointIndex: number;
+  speedFrameRemainder: number;
+  speedWasBoosting: boolean;
+  lastSpeedUpdateMs: number | undefined;
+  /** 皮肤动画的 60 Hz 源帧计数，加速与非加速各自累计。 */
+  boostFrameCount: number;
+  normalFrameCount: number;
+  skinFrameRemainder: number;
+  lastSkinUpdateMs: number | undefined;
   lastBody: ReadonlyArray<Point>;
-}
-
-interface Bead {
-  x: number;
-  y: number;
-  r: number;
 }
 
 /**
  * 昵称贴图的栅格化倍率。
  *
  * Pixi 的 Text 默认按 renderer.resolution 栅格化，并不知道 world 容器上还叠了
- * camera.zoom 的放大，所以 zoom > 1 时贴图会被放大采样而发虚。
+ * 相机缩放的放大，所以缩放 > 1 时贴图会被放大采样而发虚。
  * 这里取「最大设备像素比 × 最大相机缩放」，让贴图在任何缩放下都处于缩小采样区间。
  *
  * 必须是静态常量：Text 的 styleKey 含 resolution，常量才能保证贴图只生成一次。
  * 若改成每帧计算，贴图会被反复重建并抖动。
  */
-const LABEL_RESOLUTION = Math.ceil(RENDER.maxDevicePixelRatio * RENDER.zoomAtBaseRadius);
+const LABEL_RESOLUTION = Math.ceil(RENDER.maxDevicePixelRatio * RENDER.cameraInitScale);
 
 /**
- * 蛇渲染层：使用 Snake-Demo 游戏场景实际引用的四套头部与身体 Sprite。
- * 尺寸关系、朝向和离散身体间距沿用原 Unity 实现。
+ * 蛇渲染层：按原版 `NormalRepeat` 规则沿身体路径铺贴片。
+ *
+ * 每个贴片以采样点为中心，贴图顶边朝向该点的前进方向；
+ * 头、身、尾的间距与帧序列全部来自官方皮肤清单。
  */
 export class SnakeLayer {
   readonly container = new Container();
+  private readonly snakeContainer = new Container();
+  private readonly protectContainer = new Container();
   private readonly snakes = new Map<string, SnakeNodes>();
-  private readonly beads: Array<Bead> = [];
 
-  constructor(private readonly skinTextures: ReadonlyArray<SnakeSkinTextures>) {
-    if (skinTextures.length === 0) throw new Error("Snake-Demo snake textures are missing");
+  constructor(
+    private readonly skinFrames: ReadonlyMap<number, SkinFrameTextures>,
+    private readonly speedTexture: Texture,
+    private readonly protectTexture: Texture,
+  ) {
+    if (skinFrames.size === 0) throw new Error("Internal skin textures are missing");
+    this.container.addChild(this.snakeContainer, this.protectContainer);
   }
 
-  lastBodyOf(id: string): { body: ReadonlyArray<Point>; skin: SkinDefinition } | undefined {
+  lastBodyOf(id: string): { body: ReadonlyArray<Point>; bodyColor: number } | undefined {
     const nodes = this.snakes.get(id);
-    return nodes ? { body: nodes.lastBody, skin: nodes.skin } : undefined;
+    return nodes ? { body: nodes.lastBody, bodyColor: nodes.skin.bodyColor } : undefined;
   }
 
   update(
@@ -80,34 +117,49 @@ export class SnakeLayer {
     const seen = new Set<string>();
     for (const snake of views) {
       seen.add(snake.id);
-      const nodes = this.ensureNodes(snake.id);
+      const nodes = this.ensureNodes(snake.id, snake.skinId);
       this.drawSnake(nodes, snake, view, showNicknames, nowMs);
     }
     for (const [id, nodes] of this.snakes) {
       if (!seen.has(id)) {
         nodes.root.destroy({ children: true });
+        nodes.protect.destroy();
         this.snakes.delete(id);
       }
     }
   }
 
   destroy(): void {
-    for (const nodes of this.snakes.values()) nodes.root.destroy({ children: true });
+    for (const nodes of this.snakes.values()) {
+      nodes.root.destroy({ children: true });
+      nodes.protect.destroy();
+    }
     this.snakes.clear();
   }
 
-  private ensureNodes(id: string): SnakeNodes {
+  private ensureNodes(id: string, skinId: number): SnakeNodes {
     const existing = this.snakes.get(id);
-    if (existing) return existing;
+    // 皮肤在同一条蛇上换过之后，贴图池必须整体重建。
+    if (existing) {
+      if (existing.skin.id === internalSkinOrDefault(skinId).id) return existing;
+      existing.root.destroy({ children: true });
+      existing.protect.destroy();
+      this.snakes.delete(id);
+    }
 
-    const skin = skinForPlayer(id);
-    const textures = this.skinTextures[skin.textureIndex] ?? this.skinTextures[0];
-    if (!textures) throw new Error("Snake-Demo snake texture lookup failed");
+    const skin = internalSkinOrDefault(skinId);
+    const frames = this.skinFrames.get(skin.id);
+    if (frames === undefined) throw new Error(`Skin ${skin.id} textures are not loaded`);
 
     const root = new Container();
     const bodyLayer = new Container();
-    const head = new Sprite({ texture: textures.head, anchor: 0.5 });
-    root.addChild(bodyLayer, head);
+    const speedLayer = new Container();
+    const protect = new Sprite({ texture: this.protectTexture, anchor: 0.5 });
+    protect.visible = false;
+    const head = new Sprite({ texture: this.frameTexture(frames, skin.head.textures[0]) });
+    head.anchor.set(0.5);
+    // 流光后于蛇本体绘制，因此覆盖在身体与头部之上。
+    root.addChild(bodyLayer, head, speedLayer);
 
     const label = new Text({
       text: "",
@@ -122,84 +174,302 @@ export class SnakeLayer {
     label.anchor.set(0.5, 1);
     root.addChild(label);
 
-    this.container.addChild(root);
-    const nodes = {
+    this.snakeContainer.addChild(root);
+    this.protectContainer.addChild(protect);
+    const nodes: SnakeNodes = {
       root,
       bodyLayer,
+      speedLayer,
+      protect,
       head,
       label,
       skin,
-      textures,
-      beadNodes: [],
+      frames,
+      bodyNodes: [],
+      speedNodes: [],
+      speedPointIndex: SNAKE_SPEED_EFFECT.startPointIndex,
+      speedFrameRemainder: 0,
+      speedWasBoosting: false,
+      lastSpeedUpdateMs: undefined,
+      boostFrameCount: 0,
+      normalFrameCount: 0,
+      skinFrameRemainder: 0,
+      lastSkinUpdateMs: undefined,
       lastBody: [],
     };
     this.snakes.set(id, nodes);
     return nodes;
   }
 
-  private collectBeads(body: ReadonlyArray<Point>, radius: number, view: ViewBounds): Array<Bead> {
-    const beads = this.beads;
-    beads.length = 0;
-
-    // 原版每 5 个 FixedUpdate 放置一节；移动步长约 0.08、身体直径约 0.5。
-    const spacing = Math.max(5, radius * 1.4);
-    const margin = radius * 3;
-    let target = spacing;
-    let travelled = 0;
-    let startX = body[0].x;
-    let startY = body[0].y;
-
-    for (let index = 1; index < body.length; index += 1) {
-      const endX = body[index].x;
-      const endY = body[index].y;
-      const deltaX = endX - startX;
-      const deltaY = endY - startY;
-      const segmentLength = Math.hypot(deltaX, deltaY);
-      while (segmentLength > 0 && target <= travelled + segmentLength) {
-        const t = (target - travelled) / segmentLength;
-        const x = startX + deltaX * t;
-        const y = startY + deltaY * t;
-        if (
-          x > view.left - margin &&
-          x < view.right + margin &&
-          y > view.top - margin &&
-          y < view.bottom + margin
-        ) {
-          beads.push({ x, y, r: radius });
-        }
-        target += spacing;
-      }
-      travelled += segmentLength;
-      startX = endX;
-      startY = endY;
-    }
-    return beads;
+  private frameTexture(frames: SkinFrameTextures, name: string): Texture {
+    const texture = frames.get(name);
+    if (texture === undefined) throw new Error(`Skin frame ${name} is not loaded`);
+    return texture;
   }
 
-  private ensureBeadNode(nodes: SnakeNodes, index: number): Sprite {
-    const existing = nodes.beadNodes[index];
+  /**
+   * 推进皮肤动画的源帧计数。
+   *
+   * 原版按渲染帧累计，并在加速与非加速之间互相清零；
+   * 这里把可变刷新率折算到 60 Hz，单次更新最多推进一帧。
+   */
+  private advanceSkinFrames(nodes: SnakeNodes, boosting: boolean, nowMs: number): void {
+    let frameCount: 0 | 1 = 1;
+    let frameRemainder = 0;
+    if (nodes.lastSkinUpdateMs !== undefined) {
+      const elapsedMs = Math.max(0, nowMs - nodes.lastSkinUpdateMs);
+      const sourceFrame = accumulateSpeedSourceFrame(nodes.skinFrameRemainder, elapsedMs);
+      frameCount = sourceFrame.frameCount;
+      frameRemainder = sourceFrame.remainder;
+    }
+    nodes.lastSkinUpdateMs = nowMs;
+    nodes.skinFrameRemainder = frameRemainder;
+    if (boosting) {
+      nodes.boostFrameCount += frameCount;
+      nodes.normalFrameCount = 0;
+    } else {
+      nodes.normalFrameCount += frameCount;
+      nodes.boostFrameCount = 0;
+    }
+  }
+
+  /** 加速状态下优先使用加速帧组，没有配置时回落到普通帧组。 */
+  private nodeTexture(
+    nodes: SnakeNodes,
+    normal: SkinNode,
+    speed: SkinNode | undefined,
+    boosting: boolean,
+  ): Texture {
+    const node = boosting && speed !== undefined ? speed : normal;
+    const frameCount =
+      boosting && speed !== undefined ? nodes.boostFrameCount : nodes.normalFrameCount;
+    return this.frameTexture(nodes.frames, nodeFrameName(node, frameCount));
+  }
+
+  private ensureBodyNode(nodes: SnakeNodes, index: number): Sprite {
+    const existing = nodes.bodyNodes[index];
     if (existing) return existing;
 
-    const bead = new Sprite({ texture: nodes.textures.body, anchor: 0.5 });
-    nodes.bodyLayer.addChild(bead);
-    nodes.beadNodes.push(bead);
-    return bead;
+    const sprite = new Sprite();
+    sprite.anchor.set(0.5);
+    nodes.bodyLayer.addChild(sprite);
+    nodes.bodyNodes.push(sprite);
+    return sprite;
   }
 
-  private syncBeads(nodes: SnakeNodes, beads: ReadonlyArray<Bead>): void {
-    const textureDiameter = Math.max(nodes.textures.body.width, nodes.textures.body.height);
-    for (let renderIndex = 0; renderIndex < beads.length; renderIndex += 1) {
-      // 尾部先画，靠近头部的身体覆盖在上方，与原 SpriteRenderer 层级一致。
-      const bead = beads[beads.length - 1 - renderIndex];
-      const node = this.ensureBeadNode(nodes, renderIndex);
-      node.visible = true;
-      node.position.set(bead.x, bead.y);
-      node.scale.set((bead.r * 2) / textureDiameter);
+  /** 采样点的前进方向：由后一个点指向该点。 */
+  private directionAt(body: ReadonlyArray<Point>, index: number, headAngle: number): number {
+    if (index <= 0) return headAngle;
+    const current = body[Math.min(index, body.length - 1)];
+    const behind = body[Math.min(index + 1, body.length - 1)];
+    if (behind === current) {
+      const ahead = body[Math.max(0, index - 1)];
+      return Math.atan2(current.y - ahead.y, current.x - ahead.x) + Math.PI;
+    }
+    return Math.atan2(current.y - behind.y, current.x - behind.x);
+  }
+
+  /**
+   * 按原版顺序铺身体与尾巴贴片。
+   *
+   * 从尾侧向头部遍历，先绘制的节点被后绘制的覆盖，头部始终在最上层。
+   */
+  private syncBody(
+    nodes: SnakeNodes,
+    snake: SnakeRenderView,
+    size: SkinSizeInfo,
+    indexes: ReadonlyArray<number>,
+    view: ViewBounds,
+  ): void {
+    const { body, angle, boosting } = snake;
+    const skin = nodes.skin;
+    const hasTail = skin.tail !== null;
+    const total = indexes.length + (hasTail ? 1 : 0);
+    const margin = Math.max(size.bodyWidth, size.headHeight, size.tailHeight);
+    let renderIndex = 0;
+
+    for (let order = total - 1; order >= 1; order -= 1) {
+      const isTail = hasTail && order === total - 1;
+      const pointIndex = isTail ? indexes[indexes.length - 1] : indexes[order];
+      const point = body[Math.min(pointIndex, body.length - 1)];
+      if (point === undefined) continue;
+      const direction = this.directionAt(body, pointIndex, angle);
+
+      let x = point.x;
+      let y = point.y;
+      let texture: Texture;
+      let renderWidth: number;
+      let renderHeight: number;
+      if (isTail && skin.tail !== null) {
+        // 尾巴沿前进方向反向偏移固定的采样点数。
+        const offset = size.pointDistance * size.tailPointDistance;
+        x -= offset * Math.cos(direction);
+        y -= offset * Math.sin(direction);
+        texture = this.nodeTexture(nodes, skin.tail, skin.tailSpeed ?? undefined, boosting);
+        renderWidth = size.tailWidth;
+        renderHeight = size.tailHeight;
+      } else {
+        const bodyIndex = isTail ? order - 1 : order;
+        const normal = bodyNodeAt(skin.body, bodyIndex);
+        const speed = skin.bodySpeed.length > 0 ? bodyNodeAt(skin.bodySpeed, bodyIndex) : undefined;
+        texture = this.nodeTexture(nodes, normal, speed, boosting);
+        renderWidth = size.bodyWidth;
+        renderHeight = size.bodyHeight;
+      }
+
+      if (
+        x + margin < view.left ||
+        x - margin > view.right ||
+        y + margin < view.top ||
+        y - margin > view.bottom
+      ) {
+        continue;
+      }
+
+      const sprite = this.ensureBodyNode(nodes, renderIndex);
+      sprite.visible = true;
+      sprite.texture = texture;
+      sprite.position.set(x, y);
+      // 贴图顶边朝向前进方向；引擎里 angle=0 指向 +X。
+      sprite.rotation = direction + Math.PI / 2;
+      const scale = fixedSkinFrameScale(renderWidth, renderHeight, texture.width, texture.height);
+      sprite.scale.set(scale.x, scale.y);
+      renderIndex += 1;
     }
 
-    for (let index = beads.length; index < nodes.beadNodes.length; index += 1) {
-      nodes.beadNodes[index].visible = false;
+    for (let index = renderIndex; index < nodes.bodyNodes.length; index += 1) {
+      nodes.bodyNodes[index].visible = false;
     }
+  }
+
+  private syncHead(nodes: SnakeNodes, snake: SnakeRenderView, size: SkinSizeInfo): void {
+    const head = snake.body[0];
+    const skin = nodes.skin;
+    nodes.head.texture = this.nodeTexture(
+      nodes,
+      skin.head,
+      skin.headSpeed ?? undefined,
+      snake.boosting,
+    );
+    nodes.head.position.set(head.x, head.y);
+    nodes.head.rotation = snake.angle + Math.PI / 2;
+    const scale = fixedSkinFrameScale(
+      size.headWidth,
+      size.headHeight,
+      nodes.head.texture.width,
+      nodes.head.texture.height,
+    );
+    nodes.head.scale.set(scale.x, scale.y);
+  }
+
+  private ensureSpeedNode(nodes: SnakeNodes, index: number): Sprite {
+    const existing = nodes.speedNodes[index];
+    if (existing) return existing;
+
+    const speed = new Sprite({ texture: this.speedTexture, anchor: 0.5 });
+    nodes.speedLayer.addChild(speed);
+    nodes.speedNodes.push(speed);
+    return speed;
+  }
+
+  private updateSpeedAnimation(
+    nodes: SnakeNodes,
+    boosting: boolean,
+    bodyScale: number,
+    nowMs: number,
+  ): void {
+    const elapsedMs =
+      nodes.lastSpeedUpdateMs === undefined ? 0 : Math.max(0, nowMs - nodes.lastSpeedUpdateMs);
+    nodes.lastSpeedUpdateMs = nowMs;
+    const next = updateSpeedAnimationState(
+      {
+        pointIndex: nodes.speedPointIndex,
+        frameRemainder: nodes.speedFrameRemainder,
+        wasBoosting: nodes.speedWasBoosting,
+      },
+      boosting,
+      bodyScale,
+      elapsedMs,
+    );
+    nodes.speedPointIndex = next.pointIndex;
+    nodes.speedFrameRemainder = next.frameRemainder;
+    nodes.speedWasBoosting = next.wasBoosting;
+  }
+
+  private syncSpeedEffect(
+    nodes: SnakeNodes,
+    snake: SnakeRenderView,
+    view: ViewBounds,
+    bodyScale: number,
+  ): void {
+    if (!snake.boosting || snake.body.length < 2) {
+      nodes.speedLayer.visible = false;
+      return;
+    }
+    nodes.speedLayer.visible = true;
+
+    const effectWidth = SNAKE_SPEED_EFFECT.frameWidth * bodyScale;
+    const effectLength = SNAKE_SPEED_EFFECT.frameLength * bodyScale;
+    const spacing = speedPeriodPointCount(bodyScale) * SNAKE_SPEED_EFFECT.pointDistance;
+    const textureWidth = Math.max(1, this.speedTexture.width);
+    const textureHeight = Math.max(1, this.speedTexture.height);
+    let renderIndex = 0;
+
+    forEachSpeedPathSample(
+      snake.body,
+      nodes.speedPointIndex * SNAKE_SPEED_EFFECT.pointDistance,
+      spacing,
+      (x, y, forwardAngle) => {
+        const rotation = forwardAngle + Math.PI / 2;
+        const halfWidth = effectWidth / 2;
+        const halfLength = effectLength / 2;
+        const extentX =
+          Math.abs(Math.cos(rotation)) * halfWidth + Math.abs(Math.sin(rotation)) * halfLength;
+        const extentY =
+          Math.abs(Math.sin(rotation)) * halfWidth + Math.abs(Math.cos(rotation)) * halfLength;
+        if (
+          x + extentX < view.left ||
+          x - extentX > view.right ||
+          y + extentY < view.top ||
+          y - extentY > view.bottom
+        ) {
+          return;
+        }
+
+        const speed = this.ensureSpeedNode(nodes, renderIndex);
+        speed.visible = true;
+        speed.position.set(x, y);
+        // speed_up 图块顶部是贴片前端。
+        speed.rotation = rotation;
+        speed.scale.set(effectWidth / textureWidth, effectLength / textureHeight);
+        renderIndex += 1;
+      },
+    );
+
+    for (let index = renderIndex; index < nodes.speedNodes.length; index += 1) {
+      nodes.speedNodes[index].visible = false;
+    }
+  }
+
+  private syncProtectEffect(nodes: SnakeNodes, snake: SnakeRenderView, view: ViewBounds): void {
+    const bounds = snake.invulnerable ? snakeProtectBounds(snake.body) : undefined;
+    if (
+      bounds === undefined ||
+      bounds.centerX + bounds.halfSize < view.left ||
+      bounds.centerX - bounds.halfSize > view.right ||
+      bounds.centerY + bounds.halfSize < view.top ||
+      bounds.centerY - bounds.halfSize > view.bottom
+    ) {
+      nodes.protect.visible = false;
+      return;
+    }
+
+    nodes.protect.visible = true;
+    nodes.protect.position.set(bounds.centerX, bounds.centerY);
+    nodes.protect.scale.set(
+      bounds.size / Math.max(1, this.protectTexture.width),
+      bounds.size / Math.max(1, this.protectTexture.height),
+    );
   }
 
   private drawSnake(
@@ -209,13 +479,19 @@ export class SnakeLayer {
     showNicknames: boolean,
     nowMs: number,
   ): void {
-    const { body } = snake;
+    const { body, bodyScale } = snake;
+    this.advanceSkinFrames(nodes, snake.boosting, nowMs);
+    this.updateSpeedAnimation(nodes, snake.boosting, bodyScale, nowMs);
     if (body.length === 0) {
       nodes.root.visible = false;
+      nodes.protect.visible = false;
       return;
     }
     nodes.lastBody = body;
+    nodes.root.visible = true;
+    this.syncProtectEffect(nodes, snake, view);
 
+    const size = skinSizeInfo(nodes.skin, bodyScale);
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -226,39 +502,26 @@ export class SnakeLayer {
       if (point.x > maxX) maxX = point.x;
       if (point.y > maxY) maxY = point.y;
     }
-    const margin = snake.radius * 2;
-    if (
+    const margin = Math.max(size.bodyWidth, size.headHeight);
+    const bodyVisible = !(
       maxX < view.left - margin ||
       minX > view.right + margin ||
       maxY < view.top - margin ||
       minY > view.bottom + margin
-    ) {
-      nodes.root.visible = false;
-      return;
+    );
+    nodes.bodyLayer.visible = bodyVisible;
+    nodes.head.visible = bodyVisible;
+    if (bodyVisible) {
+      this.syncBody(nodes, snake, size, bodyPointIndexes(size, body.length), view);
+      this.syncHead(nodes, snake, size);
     }
-    nodes.root.visible = true;
+    this.syncSpeedEffect(nodes, snake, view, bodyScale);
 
-    this.syncBeads(nodes, this.collectBeads(body, snake.radius, view));
-    this.syncHead(nodes, snake);
-
-    nodes.label.visible = showNicknames;
-    if (showNicknames) {
+    nodes.label.visible = bodyVisible && showNicknames;
+    if (nodes.label.visible) {
       const head = body[0];
       nodes.label.text = snake.nickname;
-      nodes.label.position.set(head.x, head.y - snake.radius * 2.3);
+      nodes.label.position.set(head.x, head.y - size.headHeight * 1.15);
     }
-
-    nodes.root.alpha = snake.invulnerable ? 0.55 + Math.sin(nowMs * 0.02) * 0.2 : 1;
-  }
-
-  private syncHead(nodes: SnakeNodes, snake: SnakeRenderView): void {
-    const head = snake.body[0];
-    const bodyTextureDiameter = Math.max(nodes.textures.body.width, nodes.textures.body.height);
-    const scale = (snake.radius * 2) / bodyTextureDiameter;
-    // 原 Sprite 朝上；当前引擎的 angle=0 朝右，因此顺时针补偿 90°。
-    const rotation = snake.angle + Math.PI / 2;
-    nodes.head.position.set(head.x, head.y);
-    nodes.head.rotation = rotation;
-    nodes.head.scale.set(scale);
   }
 }

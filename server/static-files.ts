@@ -1,5 +1,8 @@
 import { resolve, sep } from "node:path";
 
+const ROOT_DOCUMENT = "index.html";
+const SPA_FALLBACK = "200.html";
+
 /** 供应 adapter-static 输出，支持 Brotli/Gzip 与 SPA fallback。 */
 export class StaticFileServer {
   private readonly root: string;
@@ -9,8 +12,12 @@ export class StaticFileServer {
   }
 
   async assertReady(): Promise<void> {
-    if (!(await Bun.file(resolve(this.root, "index.html")).exists())) {
-      throw new Error(`Static build not found at ${this.root}; run bun run build first`);
+    for (const file of [ROOT_DOCUMENT, SPA_FALLBACK]) {
+      if (!(await Bun.file(resolve(this.root, file)).exists())) {
+        throw new Error(
+          `Static build file ${file} not found at ${this.root}; run bun run build first`,
+        );
+      }
     }
   }
 
@@ -26,7 +33,7 @@ export class StaticFileServer {
       return new Response("Bad request", { status: 400 });
     }
 
-    const relative = pathname.replace(/^\/+/, "") || "index.html";
+    const relative = pathname.replace(/^\/+/, "") || ROOT_DOCUMENT;
     const candidate = this.safePath(relative);
     if (candidate !== undefined && (await Bun.file(candidate).exists())) {
       return this.fileResponse(request, candidate, pathname);
@@ -35,7 +42,7 @@ export class StaticFileServer {
       return new Response("Not found", { status: 404 });
     }
 
-    return this.fileResponse(request, resolve(this.root, "index.html"), "/index.html");
+    return this.fileResponse(request, resolve(this.root, SPA_FALLBACK), `/${SPA_FALLBACK}`);
   }
 
   private safePath(relative: string): string | undefined {
@@ -80,7 +87,8 @@ export class StaticFileServer {
 function cacheControl(pathname: string): string {
   if (pathname.startsWith("/_app/immutable/")) return "public, max-age=31536000, immutable";
   if (
-    pathname === "/index.html" ||
+    pathname === `/${ROOT_DOCUMENT}` ||
+    pathname === `/${SPA_FALLBACK}` ||
     pathname === "/" ||
     pathname === "/service-worker.js" ||
     pathname === "/manifest.webmanifest"

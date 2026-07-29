@@ -14,25 +14,29 @@ export class JoystickInput {
   constructor(private readonly state: InputState) {}
 
   attach(zone: HTMLElement): void {
+    this.detach();
     this.manager = nipplejs.create({
       zone,
       mode: "dynamic",
       position: { left: "50%", top: "50%" },
-      size: 128,
-      color: "white",
+      size: 96,
+      color: {
+        back: "#cdcdd6",
+        front: "rgb(255 255 255 / 0.95)",
+      },
       fadeTime: 120,
     });
     // nipplejs 的 move 回调签名是 (event)，摇杆数据在 event.data 上
     this.manager.on("move", (event) => {
       const angle = directionAngleFromJoystickVector(event.data.vector);
       if (angle === undefined) return;
-      this.state.angle = angle;
-      this.state.hasDirection = true;
+      this.state.setDirection("joystick", angle);
     });
   }
 
   detach(): void {
     this.manager?.destroy();
     this.manager = undefined;
+    this.state.releaseDirection("joystick");
   }
 }

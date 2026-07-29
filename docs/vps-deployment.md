@@ -1,6 +1,6 @@
 # Bun VPS 部署
 
-蛇域在 VPS 上使用单个 Bun 进程供应静态 SPA、HTTP API 和 WebSocket。游戏房间保存在进程内，因此生产环境只启动一个应用实例；systemd 负责异常重启。
+蛇域在 VPS 上使用单个 Bun 进程供应预渲染入口、`/game` SPA fallback、HTTP API 和 WebSocket。游戏房间保存在进程内，因此生产环境只启动一个应用实例；systemd 负责异常重启。
 
 ## 1. 安装运行环境
 

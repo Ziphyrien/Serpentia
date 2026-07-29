@@ -7,6 +7,8 @@ export const INPUT_LEAD_TOLERANCE_SECONDS = 2;
 export interface PlayerIdentity {
   readonly playerId: string;
   readonly nickname: string;
+  /** 会话选择的内置皮肤 ID。 */
+  readonly skinId: number;
 }
 
 export interface RoomPlayerInput extends Omit<PlayerInput, "playerId"> {
@@ -93,8 +95,14 @@ export class RoomController {
     this.pendingInputs.delete(identity.playerId);
     this.lastQueuedSequence.delete(identity.playerId);
 
-    const added = this.engine.addSnake(identity.playerId, identity.nickname);
-    if (!added) this.engine.renameSnake(identity.playerId, identity.nickname);
+    const added = this.engine.addSnake(identity.playerId, identity.nickname, {
+      skinId: identity.skinId,
+      invulnerabilityTicks: this.engine.config.initialInvulnerabilityTicks,
+    });
+    if (!added) {
+      this.engine.renameSnake(identity.playerId, identity.nickname);
+      this.engine.reskinSnake(identity.playerId, identity.skinId);
+    }
 
     const snapshot = this.engine.snapshot();
     const snake = snapshot.snakes.find((candidate) => candidate.id === identity.playerId);

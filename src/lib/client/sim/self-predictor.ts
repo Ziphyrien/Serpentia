@@ -1,11 +1,22 @@
 import type { ClientGameRules, SnakeSnapshot } from "$lib/protocol";
 import {
   advanceSnakeMotion,
+  advanceSnakeSourceFrame,
+  applySnakeBoostInput,
+  bodyPointCount,
   normalizeAngle,
-  trimBody,
+  normalizeSnakeDirectionDelta,
+  quantizeSnakeTargetAngle,
+  resizeBody,
+  nextSnakeBodyScale,
+  snakeMotionRules,
   type MotionPoint,
+  type SnakeMotionRules,
   type SnakeMotionState,
 } from "../../game/snake-motion";
+
+/** 快照不携带加速计数余数，重基线时从 0 起算；长度仍由权威快照校正。 */
+const REBASED_BOOST_FRAMES = 0;
 
 export interface ScheduledInput {
   readonly sequence: number;
@@ -29,8 +40,14 @@ export interface SelfRenderState {
    * sharp turn. Remote snakes interpolate their authoritative angle the same way.
    */
   readonly angle: number;
+  /** 当前离散身体缩放档位；渲染层不得再按长度连续插值。 */
+  readonly bodyScale: number;
   readonly boosting: boolean;
-  readonly collisionTick: number;
+  /** 当前本机画面对应的绝对 60 Hz 源帧，可含 tick 内小数。 */
+  readonly presentationSourceFrame: number;
+  /** 平滑画面当前应检验的下一个离散 60 Hz 源帧。 */
+  readonly collisionSourceFrame: number;
+  /** 由共享源帧运动函数算出的离散蛇头，不受 Hermite 显示插值过冲影响。 */
   readonly collisionHead: MotionPoint;
 }
 
@@ -58,14 +75,20 @@ export class SelfPredictor {
   private activeLeadTicks = DEFAULT_PREDICTION_LEAD_TICKS;
   private lastServerTick = 0;
   private lastConfirmedSequence = -1;
+  /** 服务端最近确认的聚合加速按住状态；实际 boosting 可能因长度不足而为 false。 */
+  private confirmedBoostInputHeld = false;
   private readonly inputsBySequence = new Map<number, ScheduledInput>();
   private readonly statesByTick = new Map<number, PredictedStep>();
 
-  constructor(
-    private readonly rules: ClientGameRules,
-    tickRate: number,
-  ) {
+  private readonly motion: SnakeMotionRules;
+
+  constructor(rules: ClientGameRules, tickRate: number) {
     this.tickMs = 1000 / tickRate;
+    this.motion = snakeMotionRules({
+      tickRate,
+      minimumLength: rules.minimumLength,
+      maximumLength: rules.maximumLength,
+    });
   }
 
   get currentLength(): number {
@@ -79,7 +102,7 @@ export class SelfPredictor {
     if (current === undefined || tick !== current.tick + 1) return undefined;
     const next = cloneStep(current, tick);
     this.applyScheduledInput(tick, next);
-    advanceSnakeMotion(next, this.rules, this.tickMs / 1000);
+    advanceSnakeMotion(next, this.motion);
     const head = next.body[0];
     return head === undefined ? undefined : { ...head };
   }
@@ -148,10 +171,14 @@ export class SelfPredictor {
 
     const previousAccumulator = this.accumulatorMs;
     const previousLocalTime = this.lastLocalTime;
-    this.current = fromSnapshot(snapshot, snapshotTick);
+    this.confirmInputs(snapshot.lastInputSequence);
+    this.current = fromSnapshot(
+      snapshot,
+      snapshotTick,
+      this.confirmedBoostInputHeld || snapshot.boosting,
+    );
     this.statesByTick.clear();
     this.recordCurrent();
-    this.confirmInputs(snapshot.lastInputSequence);
     for (let tick = snapshotTick + 1; tick <= horizonTick; tick += 1) {
       this.simulateTick(tick);
     }
@@ -169,6 +196,7 @@ export class SelfPredictor {
     this.activeLeadTicks = this.configuredLeadTicks;
     this.lastServerTick = 0;
     this.lastConfirmedSequence = -1;
+    this.confirmedBoostInputHeld = false;
     this.inputsBySequence.clear();
     this.statesByTick.clear();
   }
@@ -209,22 +237,37 @@ export class SelfPredictor {
     const previous = this.statesByTick.get(current.tick - 1);
     const next = cloneStep(current, current.tick + 1);
     this.applyScheduledInput(next.tick, next);
-    advanceSnakeMotion(next, this.rules, this.tickMs / 1000);
+    advanceSnakeMotion(next, this.motion);
     const ratio = Math.min(1, Math.max(0, this.accumulatorMs / this.tickMs));
-    const collisionState = ratio > 0 ? next : current;
+    const collisionFrameOffset = Math.ceil(
+      ratio * this.motion.sourceFramesPerTick - Number.EPSILON,
+    );
+    const collisionState = cloneStep(current, current.tick + 1);
+    this.applyScheduledInput(collisionState.tick, collisionState);
+    for (let frame = 0; frame < collisionFrameOffset; frame += 1) {
+      advanceSnakeSourceFrame(collisionState, this.motion);
+    }
     const collisionHead = collisionState.body[0];
     if (collisionHead === undefined) return undefined;
     return {
       body: interpolateBodyContinuously(previous?.body, current.body, next.body, ratio),
-      angle: normalizeAngle(current.angle + normalizeAngle(next.angle - current.angle) * ratio),
+      angle: normalizeAngle(
+        current.angle + normalizeSnakeDirectionDelta(next.angle - current.angle) * ratio,
+      ),
+      bodyScale: current.bodyScale,
       boosting: next.boosting,
-      collisionTick: collisionState.tick,
+      presentationSourceFrame: (current.tick + ratio) * this.motion.sourceFramesPerTick,
+      collisionSourceFrame: current.tick * this.motion.sourceFramesPerTick + collisionFrameOffset,
       collisionHead: { ...collisionHead },
     };
   }
 
   private initialize(snapshot: SnakeSnapshot, snapshotTick: number, localNow: number): void {
-    this.current = fromSnapshot(snapshot, snapshotTick);
+    this.current = fromSnapshot(
+      snapshot,
+      snapshotTick,
+      this.confirmedBoostInputHeld || snapshot.boosting,
+    );
     this.accumulatorMs = 0;
     this.lastLocalTime = localNow;
     this.lastServerTick = snapshotTick;
@@ -242,7 +285,7 @@ export class SelfPredictor {
     const current = this.current;
     if (!current) return;
     this.applyScheduledInput(tick, current);
-    advanceSnakeMotion(current, this.rules, this.tickMs / 1000);
+    advanceSnakeMotion(current, this.motion);
     current.tick = tick;
     this.recordCurrent();
   }
@@ -254,8 +297,8 @@ export class SelfPredictor {
       if (selected === undefined || input.sequence > selected.sequence) selected = input;
     }
     if (selected === undefined) return;
-    state.targetAngle = selected.angle;
-    state.boosting = selected.boosting;
+    state.targetAngle = quantizeSnakeTargetAngle(selected.angle);
+    applySnakeBoostInput(state, selected.boosting, this.motion.minimumLength);
   }
 
   private remapFromAuthority(sequence: number, appliedTick: number): void {
@@ -285,20 +328,49 @@ export class SelfPredictor {
     predictedAtSnapshot: PredictedStep,
   ): void {
     const lengthDelta = snapshot.length - predictedAtSnapshot.length;
-    if (Math.abs(lengthDelta) > 0.001) {
-      for (const [tick, state] of this.statesByTick) {
-        if (tick < snapshotTick) continue;
-        state.length = Math.max(0, state.length + lengthDelta);
-        trimBody(state.body, state.length);
+    const states = [...this.statesByTick.entries()]
+      .filter(([tick]) => tick >= snapshotTick)
+      .sort(([left], [right]) => left - right);
+
+    for (const [tick, state] of states) {
+      if (Math.abs(lengthDelta) > 0.001) {
+        state.length =
+          tick === snapshotTick ? snapshot.length : Math.max(0, state.length + lengthDelta);
+        resizeBody(state.body, bodyPointCount(state.length, this.motion));
       }
-      if (this.current !== undefined) {
-        this.current.length = Math.max(0, this.current.length + lengthDelta);
-        trimBody(this.current.body, this.current.length);
+
+      if (tick === snapshotTick) {
+        state.bodyScale = snapshot.bodyScale;
+        continue;
+      }
+      const previous = this.statesByTick.get(tick - 1);
+      if (previous !== undefined) {
+        // 每个目标值在一个 tick 的三个源帧中相同；第一次检查后重复检查不会再改变档位。
+        state.bodyScale = nextSnakeBodyScale(
+          previous.bodyScale,
+          state.length,
+          this.motion.minimumLength,
+        );
       }
     }
+
+    const current = this.current;
+    if (current === undefined) return;
+    const authoritativeCurrent = this.statesByTick.get(current.tick);
+    if (authoritativeCurrent === undefined) return;
+    current.length = authoritativeCurrent.length;
+    current.bodyScale = authoritativeCurrent.bodyScale;
+    resizeBody(current.body, bodyPointCount(current.length, this.motion));
   }
 
   private confirmInputs(sequence: number): void {
+    let latest: ScheduledInput | undefined;
+    for (const input of this.inputsBySequence.values()) {
+      if (input.sequence <= this.lastConfirmedSequence || input.sequence > sequence) continue;
+      if (latest === undefined || input.sequence > latest.sequence) latest = input;
+    }
+    if (latest !== undefined) this.confirmedBoostInputHeld = latest.boosting;
+
     this.lastConfirmedSequence = Math.max(this.lastConfirmedSequence, sequence);
     for (const candidate of this.inputsBySequence.keys()) {
       if (candidate <= this.lastConfirmedSequence) this.inputsBySequence.delete(candidate);
@@ -331,13 +403,20 @@ function sameAuthoritativePose(state: PredictedStep, snapshot: SnakeSnapshot): b
   );
 }
 
-function fromSnapshot(snapshot: SnakeSnapshot, tick: number): PredictedStep {
+function fromSnapshot(
+  snapshot: SnakeSnapshot,
+  tick: number,
+  boostInputHeld: boolean,
+): PredictedStep {
   return {
     body: snapshot.body.map((point) => ({ x: point.x, y: point.y })),
-    angle: snapshot.angle,
-    targetAngle: snapshot.targetAngle ?? snapshot.angle,
+    angle: quantizeSnakeTargetAngle(snapshot.angle),
+    targetAngle: quantizeSnakeTargetAngle(snapshot.targetAngle ?? snapshot.angle),
     length: snapshot.length,
+    bodyScale: snapshot.bodyScale,
     boosting: snapshot.boosting,
+    boostInputHeld,
+    boostFrames: REBASED_BOOST_FRAMES,
     tick,
   };
 }
@@ -348,7 +427,10 @@ function cloneStep(state: PredictedStep, tick: number): PredictedStep {
     angle: state.angle,
     targetAngle: state.targetAngle,
     length: state.length,
+    bodyScale: state.bodyScale,
     boosting: state.boosting,
+    boostInputHeld: state.boostInputHeld,
+    boostFrames: state.boostFrames,
     tick,
   };
 }

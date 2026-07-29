@@ -1,23 +1,29 @@
+import { SNAKE_MOTION, snakeMotionRules, type SnakeMotionRules } from "../../game/snake-motion";
+
 export interface GameConfig {
   readonly tickRate: number;
   readonly arenaHalfSize: number;
-  readonly baseSpeed: number;
-  readonly boostSpeed: number;
-  readonly turnRate: number;
+  /** 出生逻辑长度，同时是长度下限。 */
   readonly initialLength: number;
   readonly minimumLength: number;
-  readonly boostMinimumLength: number;
-  readonly boostDrainPerSecond: number;
-  readonly bodyPointSpacing: number;
-  readonly baseRadius: number;
-  readonly maximumRadius: number;
-  readonly radiusGrowth: number;
-  readonly foodRadius: number;
-  readonly ambientFoodTarget: number;
-  readonly ambientFoodValue: number;
-  readonly deathDropRatio: number;
-  readonly deathFoodSpacing: number;
+  /** 只封顶身体采样点数、体型和相机；原版逻辑长度与分数仍可继续增长。 */
+  readonly maximumLength: number;
+  /** 进食判定将蛇头半径与食物半径之和整体放大的倍率。 */
+  readonly eatDistanceFactor: number;
+  readonly dotFoodValue: number;
+  /** 取值达到这个门槛的环境食物按星星处理。 */
+  readonly starFoodValue: number;
+  readonly dotFoodTarget: number;
+  readonly starFoodTarget: number;
+  /** 死亡残骸总分 = `pow(分数, 指数) * 系数`，再按份数均分。 */
+  readonly remainsScoreExponent: number;
+  readonly remainsScoreFactor: number;
+  /** 加速掉长时在尾部留下的残骸分值；正常新无尽同时用它恢复长度。 */
+  readonly boostRemainsValue: number;
   readonly respawnDelayTicks: number;
+  /** 正常 Game 中本机首次出生的 3 秒保护。 */
+  readonly initialInvulnerabilityTicks: number;
+  /** 正常 Game 中复活时的 3 秒保护。 */
   readonly respawnInvulnerabilityTicks: number;
   readonly spawnAttempts: number;
   readonly spawnClearance: number;
@@ -25,30 +31,33 @@ export interface GameConfig {
 
 export const defaultGameConfig: GameConfig = Object.freeze({
   tickRate: 20,
-  arenaHalfSize: 667,
-  baseSpeed: 132,
-  boostSpeed: 218,
-  turnRate: 8,
-  initialLength: 180,
-  minimumLength: 72,
-  boostMinimumLength: 96,
-  boostDrainPerSecond: 15,
-  bodyPointSpacing: 8,
-  baseRadius: 11,
-  maximumRadius: 30,
-  radiusGrowth: 2.8,
-  foodRadius: 5,
-  ambientFoodTarget: 40,
-  ambientFoodValue: 2,
-  deathDropRatio: 0.72,
-  deathFoodSpacing: 18,
+  // 地图 4896×4896。
+  arenaHalfSize: 2448,
+  initialLength: 80,
+  minimumLength: 80,
+  maximumLength: 100_000,
+  eatDistanceFactor: 1.6,
+  dotFoodValue: 1,
+  starFoodValue: 10,
+  dotFoodTarget: 1_000,
+  starFoodTarget: 30,
+  remainsScoreExponent: 0.8,
+  remainsScoreFactor: 2,
+  boostRemainsValue: 1,
   respawnDelayTicks: 30,
-  respawnInvulnerabilityTicks: 40,
+  initialInvulnerabilityTicks: 60,
+  respawnInvulnerabilityTicks: 60,
   spawnAttempts: 32,
-  spawnClearance: 180,
+  spawnClearance: 240,
 });
 
-export function snakeRadius(length: number, config: GameConfig): number {
-  const growth = Math.log2(Math.max(1, length / config.initialLength) + 1) * config.radiusGrowth;
-  return Math.min(config.maximumRadius, config.baseRadius + growth);
+/** 由配置派生共享运动规则；逻辑帧率固定，tick 频率只决定每 tick 的子帧数。 */
+export function motionRulesFor(config: GameConfig): SnakeMotionRules {
+  return snakeMotionRules({
+    tickRate: config.tickRate,
+    minimumLength: config.minimumLength,
+    maximumLength: config.maximumLength,
+  });
 }
+
+export const SOURCE_FRAME_RATE = SNAKE_MOTION.sourceFrameRate;

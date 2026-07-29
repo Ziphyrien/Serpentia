@@ -19,7 +19,7 @@ GET /api/game
 - 消息大小及频率限制
 - P2P 语音模式和公共 STUN 配置
 
-该端点不需要登录，可以作为前端启动探针。
+该端点不需要游戏会话，可以作为前端启动探针。
 
 ## 会话
 
@@ -31,44 +31,46 @@ GET /api/game
 GET /api/session
 ```
 
-已登录：
+会话有效：
 
 ```json
 {
   "authenticated": true,
   "playerId": "550e8400-e29b-41d4-a716-446655440000",
   "nickname": "Alpha",
+  "skinId": 1,
   "expiresAt": 1784740000000
 }
 ```
 
-未登录或会话过期：
+无会话或会话过期：
 
 ```json
 { "authenticated": false }
 ```
 
-### 登录
+### 创建游戏会话
 
 ```http
 POST /api/session
 Content-Type: application/json
 
 {
-  "nickname": "Alpha"
+  "nickname": "Alpha",
+  "skinId": 1
 }
 ```
 
-成功后为本次会话生成独立 `playerId`，并设置 `HttpOnly`、`SameSite=Strict` 的 `serpentia_session` cookie。
+`skinId` 可省略；服务端会校验它是否属于内置皮肤清单，无效或缺省时使用默认皮肤。成功后为本次会话生成独立 `playerId`，并设置 `HttpOnly`、`SameSite=Strict` 的 `serpentia_session` cookie。
 
 可能的错误码：
 
-- `INVALID_REQUEST`：Content-Type、JSON 或昵称格式无效
-- `RATE_LIMITED`：同一来源一分钟内尝试过多
+- `INVALID_REQUEST`：Content-Type、JSON、昵称或皮肤参数格式无效
+- `RATE_LIMITED`：同一来源的会话令牌桶暂时耗尽；按响应的 `Retry-After` 重试
 - `RUNTIME_UNAVAILABLE`：Bun 服务或房间暂不可用
 - `SERVER_MISCONFIGURED`：生产 secret 缺失或格式错误
 
-### 退出
+### 结束会话并返回首页
 
 ```http
 DELETE /api/session
@@ -286,12 +288,12 @@ WebSocket 错误码：
 
 ## P2P 语音前端职责
 
-1. 登录后调用 `/api/turn-credentials` 获取完整 `iceServers`
+1. 创建游戏会话后调用 `/api/turn-credentials` 获取完整 `iceServers`
 2. 使用 `iceTransportPolicy: "all"` 创建 `RTCPeerConnection`，保持直连优先、TURN 自动兜底
 3. roster 新增成员时，为每位远端成员建立一条连接
 4. 为避免双方同时 offer，可约定字典序较小的 `playerId` 主动创建 offer
 5. 通过 `voice-signal` 交换 offer、answer 和 ICE
-6. 使用 `addTrack()` 和 `ontrack` 直接传输/播放音频
+6. 首次建连即预协商 `sendrecv` 音频 transceiver；未开麦时 sender track 为 `null`，开关麦使用 `replaceTrack(track | null)`，接收端通过 `ontrack` 播放音频
 7. `refreshAfter` 到达后刷新凭据并调用 `setConfiguration()`
 8. 成员离开 roster 时关闭对应 `RTCPeerConnection`
 

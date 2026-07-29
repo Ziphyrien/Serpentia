@@ -1,8 +1,5 @@
 @import "tailwindcss";
 
-/* 手机横持（矮屏横屏）：压缩 HUD 体积 */
-@custom-variant landscape-short (@media (orientation: landscape) and (max-height: 30rem));
-
 @theme {
   --color-night-950: #0b1020;
   --color-night-900: #101736;
@@ -10,6 +7,11 @@
   --color-night-700: #1e2a52;
   --color-panel: rgb(8 12 28 / 0.55);
   --color-panel-border: rgb(255 255 255 / 0.08);
+  --color-map-floor: #ebecf4;
+  --color-map-grid: #cdcdd6;
+  --color-map-border: #eb4f71;
+  --color-map-border-dark: #c83255;
+  --color-map-ink: #55586a;
 
   --font-sans:
     "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
@@ -44,89 +46,37 @@ body {
 }
 
 body {
-  background: var(--color-night-950);
-  color: white;
+  background-color: var(--color-map-floor);
+  background-image:
+    linear-gradient(var(--color-map-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-map-grid) 1px, transparent 1px);
+  background-position: center;
+  background-size: 32px 32px;
+  color: var(--color-map-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   user-select: none;
   -webkit-user-select: none;
 }
 
+.game-map-background {
+  background-color: var(--color-map-floor);
+  background-image:
+    linear-gradient(var(--color-map-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-map-grid) 1px, transparent 1px);
+  background-position: center;
+  background-size: 32px 32px;
+}
+
 canvas {
   display: block;
+}
+
+[data-game-canvas] canvas {
   touch-action: none;
-}
-
-/* HUD 安全区内边距：避开刘海 / 灵动岛 / Home 指示条 */
-@utility p-hud {
-  padding: 0.75rem;
-  padding-top: max(0.75rem, var(--hud-safe-top));
-  padding-right: max(0.75rem, var(--hud-safe-right));
-  padding-bottom: max(0.75rem, var(--hud-safe-bottom));
-  padding-left: max(0.75rem, var(--hud-safe-left));
-}
-
-/* 虚拟摇杆皮肤：半透明底盘 + 白色旋钮（nipplejs 内联样式需 !important 覆盖） */
-.joystick > .back {
-  box-sizing: border-box;
-  background: rgb(255 255 255 / 0.08) !important;
-  border: 2px solid rgb(255 255 255 / 0.35);
-}
-
-.joystick > .front {
-  box-sizing: border-box;
-  background: rgb(255 255 255 / 0.85) !important;
-  border: 1px solid rgb(255 255 255 / 0.6);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 0.35);
-  opacity: 1 !important;
 }
 
 /* 数字与排行榜用等宽数字，跳动时不抖 */
 .tnum {
   font-variant-numeric: tabular-nums;
-}
-
-@keyframes feed-in {
-  from {
-    opacity: 0;
-    transform: translateY(-8px) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.feed-in {
-  animation: feed-in 0.18s ease-out;
-}
-
-@keyframes pulse-ring {
-  0% {
-    box-shadow: 0 0 0 0 rgb(61 220 132 / 0.55);
-  }
-  70% {
-    box-shadow: 0 0 0 12px rgb(61 220 132 / 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgb(61 220 132 / 0);
-  }
-}
-
-.speaking-ring {
-  animation: pulse-ring 1.2s ease-out infinite;
-}
-
-/* 麦克风按钮上的实时音量环：--level（0-1）驱动圆弧填充 */
-.mic-level-ring {
-  pointer-events: none;
-  position: absolute;
-  inset: -3px;
-  border-radius: 9999px;
-  background: conic-gradient(
-    rgb(163 230 53 / 0.95) calc(var(--level, 0) * 360deg),
-    rgb(163 230 53 / 0.15) 0deg
-  );
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
-  mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 calc(100% - 3px));
 }

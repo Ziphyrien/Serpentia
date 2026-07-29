@@ -19,14 +19,37 @@ export type Point = typeof Point.Type;
 
 export const FoodKind = Schema.Union([
   Schema.Literal("ambient"),
+  /** 死亡残骸：按身体点数分份，尺寸随每份分数放大。 */
   Schema.Literal("remains"),
+  /** 加速掉落残骸：固定尺寸与取值，落在蛇尾。 */
+  Schema.Literal("boost-remains"),
 ]);
 export type FoodKind = typeof FoodKind.Type;
+
+export const StarFoodMotion = Schema.Struct({
+  /** 原版星星当前移动方向，整数角度 [0, 359]。 */
+  directionDegrees: NonNegativeInteger.check(Schema.isLessThan(360)),
+  /** 从当前快照起，仍能确定保持当前直线方向的源帧数。 */
+  linearFramesRemaining: NonNegativeInteger,
+});
+export type StarFoodMotion = typeof StarFoodMotion.Type;
 
 export const FoodState = Schema.Struct({
   id: NonNegativeInteger,
   position: Point,
+  /** 最终分值；正常新无尽同时把它用于逻辑长度增长，并用于死亡残骸尺寸。 */
   value: NonNegativeFinite,
+  /**
+   * 原始配置长度增量；正常新无尽的 actAsEndless() 不用它增长蛇身，
+   * 而是用 value 同时增加逻辑长度和分数。死亡残骸在这里仍保存官方值 3。
+   */
+  lengthValue: NonNegativeFinite,
+  /** 官方 7 种彩点或 20 种 candy 的权威随机帧下标。 */
+  variant: NonNegativeInteger,
+  /** 同 ID 环境食物每次安全重生翻转，用于区分旧快照与新一代。 */
+  generation: Schema.Union([Schema.Literal(0), Schema.Literal(1)]),
+  /** 仅星星携带；普通彩点和残骸保持静止。 */
+  motion: Schema.optionalKey(StarFoodMotion),
   kind: FoodKind,
 });
 export type FoodState = typeof FoodState.Type;
@@ -45,9 +68,18 @@ export const DeathEvent = Schema.Struct({
 });
 export type DeathEvent = typeof DeathEvent.Type;
 
+/** 食物碰撞时的消费者、绝对源帧、完整食物状态与权威碰撞蛇头坐标。 */
+export const FoodConsumedEvent = Schema.Struct({
+  playerId: PlayerId,
+  sourceFrame: NonNegativeInteger,
+  food: FoodState,
+  target: Point,
+});
+export type FoodConsumedEvent = typeof FoodConsumedEvent.Type;
+
 export const TickEvents = Schema.Struct({
   deaths: Schema.Array(DeathEvent),
-  consumedFoodIds: Schema.Array(NonNegativeInteger),
+  consumedFoods: Schema.Array(FoodConsumedEvent),
   respawnedPlayerIds: Schema.Array(PlayerId),
 });
 export type TickEvents = typeof TickEvents.Type;
@@ -65,7 +97,10 @@ export const SnakeSnapshot = Schema.Struct({
   angle: Schema.Finite,
   /** The server-side steering target; optional for compatibility with older snapshots. */
   targetAngle: Schema.optionalKey(Schema.Finite),
-  radius: NonNegativeFinite,
+  /** 权威内置皮肤 ID，取值来自官方 `internalSkins` 清单。 */
+  skinId: Schema.Int.check(Schema.isGreaterThan(0)),
+  /** 原版带迟滞的当前身体缩放档位，不能由当前长度即时反推。 */
+  bodyScale: NonNegativeFinite,
   length: NonNegativeFinite,
   score: NonNegativeFinite,
   kills: NonNegativeInteger,

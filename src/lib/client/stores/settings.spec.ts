@@ -42,13 +42,11 @@ describe("settings store", () => {
     settings.setSfxVolume(0.35);
     settings.setSfxMuted(true);
     settings.setShowNicknames(false);
-    settings.setHighQuality(false);
 
     const restored = new SettingsStore();
     expect(restored.sfxVolume).toBe(0.35);
     expect(restored.sfxMuted).toBe(true);
     expect(restored.showNicknames).toBe(false);
-    expect(restored.highQuality).toBe(false);
   });
 
   it("rejects malformed persisted data instead of trusting a type assertion", () => {
@@ -58,29 +56,12 @@ describe("settings store", () => {
         sfxVolume: 4,
         sfxMuted: "yes",
         showNicknames: false,
-        highQuality: false,
       }),
     );
 
     const settings = new SettingsStore();
-    expect(settings.sfxVolume).toBe(0.8);
+    expect(settings.sfxVolume).toBe(1);
     expect(settings.sfxMuted).toBe(false);
     expect(settings.showNicknames).toBe(true);
-    expect(settings.highQuality).toBe(true);
-  });
-
-  it("notifies subscribers once per effective update", () => {
-    const settings = new SettingsStore();
-    let notifications = 0;
-    const unsubscribe = settings.subscribe(() => {
-      notifications += 1;
-    });
-
-    settings.setHighQuality(false);
-    settings.setHighQuality(false);
-    unsubscribe();
-    settings.setHighQuality(true);
-
-    expect(notifications).toBe(1);
   });
 });

@@ -1,44 +1,39 @@
 <script lang="ts">
+  import { goto } from "$app/navigation";
   import { onMount } from "svelte";
   import { installTouchFullscreen } from "$lib/client/fullscreen";
   import { SessionStore } from "$lib/client/stores/session.svelte";
-  import { SettingsStore } from "$lib/client/stores/settings.svelte";
   import LoginForm from "$lib/components/login-form.svelte";
-  import GameView from "$lib/components/game-view.svelte";
 
-  const session = new SessionStore();
-  const settings = new SettingsStore();
+  const session = new SessionStore({ status: "anonymous", descriptor: undefined });
+
+  async function bootstrapAndResume(): Promise<void> {
+    await session.bootstrap();
+    if (session.state.status === "authenticated") {
+      await goto("/game", { replaceState: true });
+    }
+  }
 
   onMount(() => {
     const disposeFullscreen = installTouchFullscreen();
-    const logoutOnPageExit = (): void => {
-      if (session.state.status === "authenticated") void session.logout(true);
-    };
-    window.addEventListener("pagehide", logoutOnPageExit);
-    void session.bootstrap();
-    return () => {
-      window.removeEventListener("pagehide", logoutOnPageExit);
-      disposeFullscreen();
-    };
+    void bootstrapAndResume();
+    return disposeFullscreen;
   });
 </script>
 
-{#if session.state.status === "loading"}
-  <div class="flex min-h-dvh items-center justify-center bg-night-950">
-    <p class="animate-pulse text-sm font-bold tracking-widest text-white/50">正在进入蛇域…</p>
-  </div>
-{:else if session.state.status === "unavailable"}
-  <div class="flex min-h-dvh flex-col items-center justify-center gap-4 bg-night-950 px-6">
-    <p class="text-center text-base font-bold text-white/85">{session.state.message}</p>
+{#if session.state.status === "unavailable"}
+  <div
+    data-login-page
+    class="game-map-background relative flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-map-ink"
+  >
+    <p class="text-center text-base font-bold">{session.state.message}</p>
     <button
-      class="rounded-full bg-lime-400 px-8 py-2.5 font-black text-night-950 transition active:scale-95"
-      onclick={() => void session.bootstrap()}
+      class="rounded-full bg-linear-to-b from-[#ff7895] to-map-border px-8 py-2.5 font-black text-white shadow-[0_4px_0_#c83255,0_8px_20px_rgba(235,79,113,0.22)] transition active:translate-y-1 active:shadow-[0_1px_0_#c83255]"
+      onclick={() => void bootstrapAndResume()}
     >
       重试
     </button>
   </div>
-{:else if session.state.status === "anonymous"}
-  <LoginForm {session} />
 {:else}
-  <GameView session={session.state} {settings} sessionStore={session} />
+  <LoginForm {session} onAuthenticated={() => goto("/game")} />
 {/if}

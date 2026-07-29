@@ -8,6 +8,8 @@ const MINIMUM_SESSION_SIGNING_SECRET_LENGTH = 32;
 export class SessionClaims extends Schema.Class<SessionClaims>("SessionClaims")({
   playerId: PlayerId,
   nickname: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(24)),
+  /** 会话选择的内置皮肤 ID。 */
+  skinId: Schema.Int.check(Schema.isGreaterThan(0)),
   expiresAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 }) {}
 

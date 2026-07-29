@@ -21,6 +21,7 @@
     "server/**/*.ts",
     "scripts/**/*.ts",
     "src/**/*.ts",
-    "src/**/*.svelte"
+    "src/**/*.svelte",
+    "tests/**/*.ts"
   ]
 }

@@ -15,12 +15,20 @@ import { SelfPredictor } from "./sim/self-predictor";
 import { InputState } from "./input/input-state";
 import { PointerInput } from "./input/pointer-input";
 import { JoystickInput } from "./input/joystick-input";
+import { GamepadInput } from "./input/gamepad-input";
 import { nextNetworkInput, type NetworkInputCommand } from "./input/network-input";
 import { Sfx } from "./audio/sfx";
+import type { GameConnectionStatus } from "./game-readiness";
+import { terminalGameCloseNotice } from "./game-close-notice";
+import {
+  rankAliveSnakes,
+  selectGameMapMarkers,
+  visibleHudRanks,
+  type GameMapMarker,
+  type HudRankEntry,
+} from "./hud/game-hud";
 import { VoiceManager, type VoicePeerView } from "./voice/voice-manager";
 import type { SettingsStore } from "./stores/settings.svelte";
-
-type ConnectionStatus = "connecting" | "online" | "reconnecting" | "closed";
 
 export interface KillFeedEntry {
   id: number;
@@ -46,11 +54,12 @@ export class GameController {
   readonly input = new InputState();
   readonly sfx = new Sfx();
 
-  status = $state<ConnectionStatus>("connecting");
+  status = $state<GameConnectionStatus>("connecting");
+  /** 网络、纹理和包含权威快照的首个 Pixi 帧均已完成。 */
+  gameReady = $state(false);
   selfId = $state<PlayerId | undefined>(undefined);
-  leaderboard = $state<
-    Array<{ playerId: string; nickname: string; length: number; kills: number }>
-  >([]);
+  leaderboard = $state<Array<HudRankEntry>>([]);
+  gameMapMarkers = $state<Array<GameMapMarker>>([]);
   self = $state<HudSelf>({ length: 0, kills: 0, score: 0, alive: true, respawnIn: 0 });
   killFeed = $state<Array<KillFeedEntry>>([]);
   pingMs = $state(0);
@@ -61,6 +70,8 @@ export class GameController {
   voiceLevel = $state(0);
   voiceError = $state<string | undefined>(undefined);
   notice = $state<string | undefined>(undefined);
+  gamepadConnected = $state(false);
+  gamepadName = $state<string | undefined>(undefined);
 
   /** 渲染层直读的最新快照（非响应式，避免 10Hz 大对象进入依赖图）。 */
   latestSnapshot: GameSnapshot | undefined;
@@ -71,6 +82,7 @@ export class GameController {
   private readonly predictor: SelfPredictor;
   private readonly pointer: PointerInput;
   readonly joystick: JoystickInput;
+  private readonly gamepad: GamepadInput;
   private readonly voice: VoiceManager;
   private renderer: import("./render/game-renderer").GameRenderer | undefined;
 
@@ -140,6 +152,10 @@ export class GameController {
     this.sfx.setVolume(settings.sfxVolume);
     this.sfx.setMuted(settings.sfxMuted);
     this.unsubscribeInput = this.input.subscribe(() => this.scheduleInputSend());
+    this.gamepad = new GamepadInput(this.input, (gamepad) => {
+      this.gamepadConnected = gamepad !== undefined;
+      this.gamepadName = gamepad?.id;
+    });
     this.connect();
   }
 
@@ -156,11 +172,28 @@ export class GameController {
   }
 
   async attachRenderer(host: HTMLElement): Promise<void> {
-    const { GameRenderer } = await import("./render/game-renderer");
-    if (this.destroyed) return;
-    this.renderer = new GameRenderer(this, this.settings);
-    await this.renderer.init(host);
-    this.renderer.start();
+    let renderer: import("./render/game-renderer").GameRenderer | undefined;
+    try {
+      const { GameRenderer } = await import("./render/game-renderer");
+      if (this.destroyed) return;
+      renderer = new GameRenderer(this, this.settings, () => {
+        if (!this.destroyed) this.gameReady = true;
+      });
+      this.renderer = renderer;
+      await renderer.init(host);
+      if (this.destroyed) return;
+      renderer.start();
+    } catch {
+      renderer?.destroy();
+      if (this.destroyed) return;
+      this.renderer = undefined;
+      this.stopConnectionLoops();
+      this.client?.close();
+      this.voice.leave();
+      this.clearRespawnCountdown();
+      this.status = "closed";
+      this.notice = "游戏画面加载失败，请刷新后重试";
+    }
   }
 
   toggleVoice(): void {
@@ -190,6 +223,7 @@ export class GameController {
     this.client?.close();
     this.pointer.dispose();
     this.joystick.detach();
+    this.gamepad.dispose();
     this.sfx.dispose();
     this.renderer?.destroy();
   }
@@ -199,7 +233,7 @@ export class GameController {
     const protocol = location.protocol === "https:" ? "wss" : "ws";
     this.client = new GameClient(`${protocol}://${location.host}${this.descriptor.websocketPath}`, {
       onMessage: (message) => this.handleMessage(message),
-      onClose: (code, reason) => this.handleClose(code, reason),
+      onClose: (code) => this.handleClose(code),
     });
     this.client.connect();
   }
@@ -284,7 +318,6 @@ export class GameController {
         score: Math.round(selfSnake.score),
         alive: selfSnake.alive,
       };
-      if (becameAlive) this.sfx.respawn();
       if (becameAlive || respawnReported) this.forceInputResend();
       if (selfSnake.alive && selfSnake.respawnAtTick === null) this.clearRespawnCountdown();
       if (!selfSnake.alive && selfSnake.respawnAtTick != null && !this.respawnTimer) {
@@ -292,12 +325,9 @@ export class GameController {
         this.startRespawnCountdown(selfSnake.respawnAtTick, snapshot.tick);
       }
     }
-    this.leaderboard = snapshot.leaderboard.slice(0, 10).map((entry) => ({
-      playerId: entry.playerId,
-      nickname: entry.nickname,
-      length: Math.round(entry.length),
-      kills: entry.kills,
-    }));
+    const ranked = rankAliveSnakes(snapshot.snakes);
+    this.leaderboard = visibleHudRanks(ranked, this.selfId);
+    this.gameMapMarkers = selectGameMapMarkers(ranked, snapshot.snakes, this.selfId);
 
     this.processEvents(snapshot, events);
   }
@@ -307,8 +337,8 @@ export class GameController {
       snapshot.snakes.find((snake) => snake.id === playerId)?.nickname ?? playerId;
 
     for (const batch of batches) {
-      for (const foodId of batch.consumedFoodIds) {
-        this.renderer?.foodConsumed(foodId);
+      for (const consumed of batch.consumedFoods) {
+        this.renderer?.foodConsumed(consumed);
       }
       for (const death of batch.deaths) {
         const victim = nickOf(death.playerId);
@@ -317,6 +347,7 @@ export class GameController {
         this.pushKillFeed(killer ? `${killer} 击杀了 ${victim}` : `${victim} 撞到了边界`);
         if (death.playerId === this.selfId) {
           this.sfx.death();
+          this.gamepad.rumbleOnDeath();
           this.self = { ...this.self, deathBy: killer };
           const selfSnake = snapshot.snakes.find((snake) => snake.id === this.selfId);
           if (selfSnake?.respawnAtTick != null) {
@@ -373,33 +404,30 @@ export class GameController {
 
   private handleServerError(code: string, retryable: boolean): void {
     if (code === "SESSION_EXPIRED") {
-      this.notice = "登录已过期，请重新登录";
+      this.notice = "游戏会话已过期，请返回首页重新进入";
       this.destroy();
       this.onSessionExpired();
       return;
     }
-    if (code === "NICKNAME_IN_USE") this.notice = "昵称被占用，请换一个";
+    if (code === "NICKNAME_IN_USE") this.notice = "昵称已被占用，请更换昵称";
     else if (code === "RATE_LIMITED") this.notice = "操作太频繁，已被限流";
     else if (code === "STALE_INPUT") {
       this.forceInputResend();
     } else if (!retryable) this.notice = `服务器错误：${code}`;
   }
 
-  private handleClose(code: number, reason: string): void {
+  private handleClose(code: number): void {
     if (this.destroyed) return;
     this.stopConnectionLoops();
     if (code === 4401) {
-      this.notice = "登录已过期，请重新登录";
+      this.notice = "游戏会话已过期，请返回首页重新进入";
       this.destroy();
       this.onSessionExpired();
       return;
     }
-    if (code === 4001) {
-      this.enterTerminalState("此账号已在其他窗口登录");
-      return;
-    }
-    if (code === 4409) {
-      this.enterTerminalState(reason || "昵称被占用");
+    const terminalNotice = terminalGameCloseNotice(code);
+    if (terminalNotice !== undefined) {
+      this.enterTerminalState(terminalNotice);
       return;
     }
     this.voice.handleSignalingDisconnect();

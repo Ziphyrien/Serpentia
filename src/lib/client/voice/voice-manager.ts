@@ -19,6 +19,9 @@ interface PeerEntry {
   audioTransceiver: RTCRtpTransceiver;
   nickname: string;
   makingOffer: boolean;
+  negotiationPending: boolean;
+  iceRestartPending: boolean;
+  negotiationTimer: ReturnType<typeof setTimeout> | undefined;
   signaling: Promise<void>;
   pendingIce: Array<RTCIceCandidateInit | null>;
   restartTimer: ReturnType<typeof setTimeout> | undefined;
@@ -49,6 +52,7 @@ const decodeTurnCredentials = Schema.decodeUnknownSync(TurnCredentialsResponse);
 const CREDENTIAL_RETRY_MS = 30_000;
 const SILENT_LISTEN_RETRY_DELAYS_MS: ReadonlyArray<number> = [150, 300, 600];
 const PEER_RESTART_DELAY_MS = 1_000;
+const NEGOTIATION_RETRY_DELAY_MS = 250;
 
 /** Cancellable P2P voice lifecycle with deterministic offer ownership. */
 export class VoiceManager {
@@ -139,10 +143,17 @@ export class VoiceManager {
     }
 
     this.localStream = stream;
-    await this.attachMicrophoneTrack(stream);
+    const microphoneReady = await this.attachMicrophoneTrack(stream);
     if (!this.isCurrentMicrophone(operation, "joining")) {
       stopStream(stream);
       if (this.localStream === stream) this.localStream = undefined;
+      return;
+    }
+    if (!microphoneReady) {
+      this.lifecycle = "idle";
+      this.stopMicrophoneResources();
+      this.events.onError("麦克风发布失败，请重试");
+      this.events.onJoinedChanged(false, false);
       return;
     }
 
@@ -161,8 +172,8 @@ export class VoiceManager {
     const wasJoined = this.lifecycle === "joined";
     this.microphoneOperation += 1;
     this.lifecycle = "idle";
-    if (wasJoined && this.listening) this.events.sendVoiceState(true, false, true);
     this.stopMicrophoneResources();
+    if (wasJoined && this.listening) this.events.sendVoiceState(true, false, true);
     this.muted = false;
     this.events.onJoinedChanged(false, false);
     this.emitPeers();
@@ -219,7 +230,10 @@ export class VoiceManager {
     const participant = this.roster.get(fromPlayerId);
     if (!participant) return;
     const peer = this.ensurePeer(participant);
-    const signaling = peer.signaling.then(() => this.applySignal(fromPlayerId, peer, signal));
+    const signaling = peer.signaling.then(async () => {
+      await this.applySignal(fromPlayerId, peer, signal);
+      await this.makePendingOffer(fromPlayerId, peer);
+    });
     peer.signaling = signaling.catch(() => undefined);
     await signaling.catch(() => undefined);
   }
@@ -271,6 +285,9 @@ export class VoiceManager {
     audio.autoplay = true;
     audio.volume = this.volumes.get(participant.playerId) ?? 1;
     const localTrack = this.localStream?.getAudioTracks()[0];
+    // Negotiate the bidirectional audio m-line up front. With no microphone,
+    // the sender simply has a null track; a later replaceTrack() can start
+    // publication without racing a second offer/answer exchange.
     const audioTransceiver =
       localTrack !== undefined && this.localStream !== undefined
         ? pc.addTransceiver(localTrack, {
@@ -284,6 +301,9 @@ export class VoiceManager {
       audioTransceiver,
       nickname: participant.nickname,
       makingOffer: false,
+      negotiationPending: false,
+      iceRestartPending: false,
+      negotiationTimer: undefined,
       signaling: Promise.resolve(),
       pendingIce: [],
       restartTimer: undefined,
@@ -307,13 +327,18 @@ export class VoiceManager {
       this.playPeerAudio(entry);
       this.attachLevelMeter(participant.playerId, stream);
     };
+    pc.onsignalingstatechange = () => {
+      if (pc.signalingState === "stable" && entry.negotiationPending) {
+        this.requestOffer(participant.playerId, entry, false);
+      }
+    };
     pc.onconnectionstatechange = () => {
       this.emitPeers();
       if (pc.connectionState === "failed") this.schedulePeerRestart(participant.playerId, entry);
     };
 
     if (this.selfId() < participant.playerId) {
-      void this.makeOffer(participant.playerId, entry, false);
+      this.requestOffer(participant.playerId, entry, false);
     }
     return entry;
   }
@@ -363,24 +388,52 @@ export class VoiceManager {
     for (const candidate of candidates) await entry.pc.addIceCandidate(candidate);
   }
 
-  private async makeOffer(
-    targetPlayerId: PlayerId,
-    entry: PeerEntry,
-    iceRestart: boolean,
-  ): Promise<void> {
-    if (!this.listening || entry.makingOffer || entry.pc.signalingState !== "stable") {
+  private requestOffer(targetPlayerId: PlayerId, entry: PeerEntry, iceRestart: boolean): void {
+    if (!this.listening || this.peers.get(targetPlayerId) !== entry) return;
+    entry.negotiationPending = true;
+    entry.iceRestartPending ||= iceRestart;
+    const signaling = entry.signaling.then(() => this.makePendingOffer(targetPlayerId, entry));
+    entry.signaling = signaling.catch(() => undefined);
+  }
+
+  private async makePendingOffer(targetPlayerId: PlayerId, entry: PeerEntry): Promise<void> {
+    if (
+      !this.listening ||
+      this.peers.get(targetPlayerId) !== entry ||
+      !entry.negotiationPending ||
+      entry.makingOffer ||
+      entry.pc.signalingState !== "stable"
+    ) {
       return;
     }
+
+    const iceRestart = entry.iceRestartPending;
+    entry.negotiationPending = false;
+    entry.iceRestartPending = false;
+    if (entry.negotiationTimer !== undefined) clearTimeout(entry.negotiationTimer);
+    entry.negotiationTimer = undefined;
+    entry.makingOffer = true;
     try {
-      entry.makingOffer = true;
       const offer = await entry.pc.createOffer({ iceRestart });
       await entry.pc.setLocalDescription(offer);
       this.events.sendVoiceSignal(targetPlayerId, { _tag: "offer", sdp: offer.sdp ?? "" });
     } catch {
-      // A roster update or the scheduled failed-connection restart owns recovery.
+      entry.negotiationPending = true;
+      entry.iceRestartPending ||= iceRestart;
+      this.scheduleNegotiationRetry(targetPlayerId, entry);
     } finally {
       entry.makingOffer = false;
     }
+  }
+
+  private scheduleNegotiationRetry(playerId: PlayerId, entry: PeerEntry): void {
+    if (entry.negotiationTimer !== undefined) return;
+    entry.negotiationTimer = setTimeout(() => {
+      entry.negotiationTimer = undefined;
+      if (this.peers.get(playerId) === entry && this.listening) {
+        this.requestOffer(playerId, entry, false);
+      }
+    }, NEGOTIATION_RETRY_DELAY_MS);
   }
 
   private schedulePeerRestart(playerId: PlayerId, entry: PeerEntry): void {
@@ -391,7 +444,7 @@ export class VoiceManager {
       entry.restartTimer = undefined;
       if (this.peers.get(playerId) !== entry || !this.listening) return;
       entry.pc.restartIce();
-      void this.makeOffer(playerId, entry, true);
+      this.requestOffer(playerId, entry, true);
     }, PEER_RESTART_DELAY_MS);
   }
 
@@ -400,8 +453,10 @@ export class VoiceManager {
     if (!peer) return;
     this.peers.delete(playerId);
     if (peer.restartTimer) clearTimeout(peer.restartTimer);
+    if (peer.negotiationTimer) clearTimeout(peer.negotiationTimer);
     peer.pc.onicecandidate = null;
     peer.pc.ontrack = null;
+    peer.pc.onsignalingstatechange = null;
     peer.pc.onconnectionstatechange = null;
     peer.pc.close();
     peer.audio.pause();
@@ -427,14 +482,27 @@ export class VoiceManager {
     return true;
   }
 
-  private async attachMicrophoneTrack(stream: MediaStream): Promise<void> {
+  private async attachMicrophoneTrack(stream: MediaStream): Promise<boolean> {
     const track = stream.getAudioTracks()[0];
-    if (track === undefined) return;
-    await Promise.all(
-      [...this.peers.values()].map((peer) =>
-        peer.audioTransceiver.sender.replaceTrack(track).catch(() => undefined),
-      ),
-    );
+    if (track === undefined) return false;
+
+    let ready = true;
+    for (const [playerId, peer] of Array.from(this.peers)) {
+      if (this.peers.get(playerId) !== peer) continue;
+      let attached = false;
+      try {
+        await peer.audioTransceiver.sender.replaceTrack(track);
+        attached = peer.audioTransceiver.sender.track === track;
+      } catch {
+        // Leave attached false so the caller rolls the entire microphone join back.
+      }
+
+      // A replacement peer would need a fresh offer/answer before its sender
+      // could publish. Treat replacement failure as a failed join instead of
+      // reporting a microphone attached to an unnegotiated connection.
+      ready &&= attached;
+    }
+    return ready;
   }
 
   private async fetchCredentialsWithRetry(operation: number): Promise<boolean> {
@@ -474,9 +542,9 @@ export class VoiceManager {
       for (const [playerId, peer] of this.peers) {
         try {
           peer.pc.setConfiguration({ iceServers });
-          if (this.listening && this.selfId() < playerId && peer.pc.signalingState === "stable") {
+          if (this.listening && this.selfId() < playerId) {
             peer.pc.restartIce();
-            void this.makeOffer(playerId, peer, true);
+            this.requestOffer(playerId, peer, true);
           }
         } catch {
           this.dropPeer(playerId);

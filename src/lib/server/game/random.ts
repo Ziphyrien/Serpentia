@@ -1,3 +1,5 @@
+import { normalGameDegreesToRadians } from "../../game/normal-game-math";
+
 export class DeterministicRandom {
   private state: number;
 
@@ -18,7 +20,13 @@ export class DeterministicRandom {
     return minimum + (maximum - minimum) * this.next();
   }
 
+  /** 对齐旧 `MathUtil.getRandom(min, max)`：半开区间整数。 */
+  integer(minimum: number, maximum: number): number {
+    return Math.floor(minimum + (maximum - minimum) * this.next());
+  }
+
+  /** 对齐正常 Game 的 `MathUtil.getRandomDegree()`：0..359 整数度。 */
   angle(): number {
-    return this.between(-Math.PI, Math.PI);
+    return normalGameDegreesToRadians(this.integer(0, 360));
   }
 }

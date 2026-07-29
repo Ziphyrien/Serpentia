@@ -59,7 +59,7 @@
     >
       <div class="mb-5 flex items-center justify-between">
         <Dialog.Title class="text-lg font-black tracking-wide">队伍语音</Dialog.Title>
-        <Dialog.Close class="cursor-pointer rounded-full p-1 text-white/60 transition hover:bg-white/10 hover:text-white">
+        <Dialog.Close class="cursor-pointer rounded-full p-1 text-white/60 transition hover:text-white">
           <X size={18} />
         </Dialog.Close>
       </div>
@@ -147,3 +147,42 @@
     </Dialog.Content>
   </Dialog.Portal>
 </Dialog.Root>
+
+<style>
+  .speaking-ring {
+    animation: pulse-ring 1.2s ease-out infinite;
+  }
+
+  .mic-level-ring {
+    pointer-events: none;
+    position: absolute;
+    inset: -3px;
+    border-radius: 9999px;
+    background: conic-gradient(
+      rgb(163 230 53 / 0.95) calc(var(--level, 0) * 360deg),
+      rgb(163 230 53 / 0.15) 0deg
+    );
+    -webkit-mask: radial-gradient(
+      farthest-side,
+      transparent calc(100% - 4px),
+      #000 calc(100% - 3px)
+    );
+    mask: radial-gradient(
+      farthest-side,
+      transparent calc(100% - 4px),
+      #000 calc(100% - 3px)
+    );
+  }
+
+  @keyframes pulse-ring {
+    0% {
+      box-shadow: 0 0 0 0 rgb(61 220 132 / 0.55);
+    }
+    70% {
+      box-shadow: 0 0 0 12px rgb(61 220 132 / 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgb(61 220 132 / 0);
+    }
+  }
+</style>

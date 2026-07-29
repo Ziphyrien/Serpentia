@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
+import { DEFAULT_SKIN_ID } from "$lib/game/internal-skins";
 import type { GameSnapshot } from "$lib/protocol";
-import { GameEngine } from "../../server/game/engine";
-import { gameConfig } from "../../server/game/__tests__/game-config";
-import { RoomController, type AppliedInputAck } from "../../server/room/room-controller";
+import { defaultGameConfig, type GameConfig } from "$lib/server/game/config";
+import { GameEngine } from "$lib/server/game/engine";
+import { RoomController, type AppliedInputAck } from "$lib/server/room/room-controller";
 import { SelfPredictor, type ScheduledInput } from "./self-predictor";
 
 interface ScheduledDelivery<T> {
@@ -14,6 +15,10 @@ type ServerDelivery =
   | { readonly _tag: "ack"; readonly ack: AppliedInputAck }
   | { readonly _tag: "snapshot"; readonly snapshot: GameSnapshot };
 
+function gameConfig(overrides: Partial<GameConfig> = {}): GameConfig {
+  return { ...defaultGameConfig, dotFoodTarget: 0, starFoodTarget: 0, ...overrides };
+}
+
 function renderedHead(predictor: SelfPredictor): { x: number; y: number } {
   const head = predictor.renderState()?.body[0];
   if (head === undefined) throw new Error("predicted snake has no head");
@@ -24,7 +29,11 @@ describe("target-tick prediction over delayed transport", () => {
   it("uses the measured lead to absorb a late steering packet", () => {
     const config = gameConfig({ arenaHalfSize: 10_000, spawnClearance: 1_000 });
     const controller = new RoomController(new GameEngine(config, 7, false));
-    const joined = controller.join("connection", { playerId: "self", nickname: "Self" });
+    const joined = controller.join("connection", {
+      playerId: "self",
+      nickname: "Self",
+      skinId: DEFAULT_SKIN_ID,
+    });
     if (joined._tag !== "Accepted") throw new Error("test connection was rejected");
     const predictor = new SelfPredictor(config, config.tickRate);
     predictor.reconcile(joined.snapshot.snakes[0], joined.snapshot.tick, 0);
@@ -49,7 +58,11 @@ describe("target-tick prediction over delayed transport", () => {
   it("matches authority through continuous turns and an ordered latency spike", () => {
     const config = gameConfig({ arenaHalfSize: 10_000, spawnClearance: 1_000 });
     const controller = new RoomController(new GameEngine(config, 7, false));
-    const joined = controller.join("connection", { playerId: "self", nickname: "Self" });
+    const joined = controller.join("connection", {
+      playerId: "self",
+      nickname: "Self",
+      skinId: DEFAULT_SKIN_ID,
+    });
     if (joined._tag !== "Accepted") throw new Error("test connection was rejected");
     const initialSnake = joined.snapshot.snakes[0];
     const predictor = new SelfPredictor(config, config.tickRate);

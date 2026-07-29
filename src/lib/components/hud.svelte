@@ -1,9 +1,11 @@
 <script lang="ts">
-  import Ruler from "lucide-svelte/icons/ruler";
-  import Sword from "lucide-svelte/icons/sword";
+  import Gamepad2 from "lucide-svelte/icons/gamepad-2";
   import type { GameController } from "$lib/client/game.svelte";
   import type { SettingsStore } from "$lib/client/stores/settings.svelte";
   import Leaderboard from "./leaderboard.svelte";
+  import GameMap from "./game-map.svelte";
+  import GameState from "./game-state.svelte";
+  import NetStatus from "./net-status.svelte";
   import KillFeed from "./kill-feed.svelte";
   import DeathOverlay from "./death-overlay.svelte";
   import VoicePanel from "./voice-panel.svelte";
@@ -13,57 +15,71 @@
   let {
     controller,
     settings,
-    onLogout,
+    onReturnHome,
   }: {
     controller: GameController;
     settings: SettingsStore;
-    onLogout: () => void;
+    onReturnHome: () => void;
   } = $props();
 
   const isTouch = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
-  const showTouch = $derived(isTouch && controller.self.alive);
+  const showTouch = $derived(isTouch && controller.self.alive && !controller.gamepadConnected);
 
   let hintVisible = $state(true);
+
   $effect(() => {
-    const timer = setTimeout(() => (hintVisible = false), 6000);
+    const gamepadConnected = controller.gamepadConnected;
+    hintVisible = true;
+    const timer = setTimeout(() => {
+      if (controller.gamepadConnected === gamepadConnected) hintVisible = false;
+    }, 6000);
     return () => clearTimeout(timer);
   });
 </script>
 
-<div class="pointer-events-none absolute inset-0 z-10 flex flex-col p-hud" data-ui>
-  <div class="flex items-start justify-between gap-3">
-    <Leaderboard entries={controller.leaderboard} selfId={controller.selfId} />
-    <div class="flex-1 pt-1">
+<div class="game-hud pointer-events-none absolute inset-0 z-10 flex flex-col" data-game-hud data-ui>
+  <div class="hud-row flex items-start">
+    <div class="hud-left flex shrink-0 items-start">
+      <Leaderboard entries={controller.leaderboard} selfId={controller.selfId} />
+      <div class="hud-meta flex flex-col items-start">
+        <GameState kills={controller.self.kills} />
+        {#if controller.pingMs > 0}
+          <NetStatus pingMs={controller.pingMs} />
+        {/if}
+        {#if controller.gamepadConnected}
+          <div
+            class="hud-gamepad flex items-center rounded-full border border-panel-border bg-panel backdrop-blur-sm"
+            title={controller.gamepadName}
+          >
+            <Gamepad2 size={15} class="text-amber-300" />
+            <span class="hidden text-xs font-bold text-white/70 lg:inline">手柄</span>
+          </div>
+        {/if}
+      </div>
+    </div>
+
+    <div class="hud-center min-w-0 flex-1">
       <KillFeed feed={controller.killFeed} />
     </div>
-    <div class="pointer-events-auto flex gap-2">
-      <VoicePanel {controller} />
-      <SettingsDialog {settings} sfx={controller.sfx} {onLogout} />
+
+    <div class="hud-right flex shrink-0 flex-col items-end">
+      <div class="hud-actions pointer-events-auto flex">
+        <VoicePanel {controller} />
+        <SettingsDialog {settings} sfx={controller.sfx} {onReturnHome} />
+      </div>
+      <GameMap
+        markers={controller.gameMapMarkers}
+        arenaHalfSize={controller.descriptor.rules.arenaHalfSize}
+      />
     </div>
   </div>
 
-  <div class="mt-auto flex items-end justify-between">
-    <div class="flex gap-2">
-      <div class="flex items-center gap-1.5 rounded-full border border-panel-border bg-panel px-4 py-1.5 backdrop-blur-sm">
-        <Ruler size={14} class="text-lime-300" />
-        <span class="tnum text-base font-black text-white">{controller.self.length}</span>
-      </div>
-      <div class="flex items-center gap-1.5 rounded-full border border-panel-border bg-panel px-4 py-1.5 backdrop-blur-sm">
-        <Sword size={14} class="text-red-400" />
-        <span class="tnum text-base font-black text-white">{controller.self.kills}</span>
-      </div>
-      {#if controller.pingMs > 0}
-        <div class="hidden items-center rounded-full border border-panel-border bg-panel px-3 py-1.5 backdrop-blur-sm sm:flex">
-          <span class="tnum text-xs font-bold text-white/50">{controller.pingMs}ms</span>
-        </div>
-      {/if}
-    </div>
-  </div>
-
-  {#if !isTouch && hintVisible}
+  {#if hintVisible && controller.self.alive && (controller.gamepadConnected || !isTouch)}
     <div class="absolute inset-x-0 bottom-16 flex justify-center transition-opacity duration-700">
       <p class="rounded-full bg-panel px-5 py-1.5 text-xs font-bold text-white/60 backdrop-blur-sm">
-        移动鼠标控制方向 · 按住左键或空格加速
+        {controller.gamepadConnected
+          ? "左摇杆或方向键控制方向 · 面键、肩键或扳机加速"
+          : "移动鼠标控制方向 · 按住左键或空格加速"}
       </p>
     </div>
   {/if}
@@ -76,3 +92,38 @@
 {#if showTouch}
   <TouchControls {controller} />
 {/if}
+
+<style>
+  .game-hud {
+    --hud-gap: clamp(0.5rem, 1.6dvh, 0.75rem);
+    --hud-small-gap: clamp(0.375rem, 1.067dvh, 0.5rem);
+
+    padding: var(--hud-gap);
+    padding-top: max(var(--hud-gap), var(--hud-safe-top));
+    padding-right: max(var(--hud-gap), var(--hud-safe-right));
+    padding-bottom: max(var(--hud-gap), var(--hud-safe-bottom));
+    padding-left: max(var(--hud-gap), var(--hud-safe-left));
+  }
+
+  .hud-row,
+  .hud-right,
+  .hud-actions {
+    gap: var(--hud-gap);
+  }
+
+  .hud-left,
+  .hud-meta {
+    gap: var(--hud-small-gap);
+  }
+
+  .hud-center,
+  .hud-meta {
+    padding-top: clamp(0.125rem, 0.533dvh, 0.25rem);
+  }
+
+  .hud-gamepad {
+    gap: clamp(0.25rem, 0.8dvh, 0.375rem);
+    padding-block: clamp(0.25rem, 0.8dvh, 0.375rem);
+    padding-inline: clamp(0.625rem, 2dvh, 0.75rem);
+  }
+</style>

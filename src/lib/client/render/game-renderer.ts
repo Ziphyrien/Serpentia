@@ -1,15 +1,19 @@
-import { Application, Container } from "pixi.js";
-import type { FoodState } from "$lib/protocol";
+import { Application, Container, UPDATE_PRIORITY } from "pixi.js";
+import type { FoodConsumedEvent, FoodState } from "$lib/protocol";
 import type { GameController } from "../game.svelte";
 import type { SettingsStore } from "../stores/settings.svelte";
 import { RENDER, ARENA_COLORS } from "../config";
+import { MAP_BORDER } from "$lib/game/arena";
+import { foodRadiusOf, usesEatWreckAudio } from "$lib/game/food-metrics";
+import { predictFoodPresentationPosition } from "$lib/game/star-food-motion";
+import { SNAKE_MOTION, snakeBodyRadius } from "$lib/game/snake-motion";
 import { loadGameTextures } from "./assets";
 import { Camera } from "./camera";
 import { ArenaLayer } from "./arena-layer";
 import { FoodLayer } from "./food-layer";
+import { MovingFoodPresentation } from "./moving-food-presentation";
 import { SnakeLayer, type SnakeRenderView } from "./snake-layer";
 import { FxLayer } from "./fx-layer";
-import { FoodSpeculation } from "../sim/food-speculation";
 
 /**
  * 渲染编排器：拥有 Pixi Application 与所有图层，
@@ -24,20 +28,20 @@ export class GameRenderer {
   private food: FoodLayer | undefined;
   private snakes: SnakeLayer | undefined;
   private fx: FxLayer | undefined;
-  private readonly foodSpeculation = new FoodSpeculation();
+  private readonly movingFoodPresentation = new MovingFoodPresentation();
+  private readonly pendingConsumedFoods: Array<FoodConsumedEvent> = [];
   private started = false;
   private destroyed = false;
-  private selfRadiusSmooth = 11;
   private lastSelfAlive = false;
+  private authoritativeFramePrepared = false;
+  private firstFramePresented = false;
   private readonly handleResize = (): void => this.resize();
-  private readonly unsubscribeSettings: () => void;
 
   constructor(
     private readonly controller: GameController,
     private readonly settings: SettingsStore,
-  ) {
-    this.unsubscribeSettings = settings.subscribe(() => this.applyRenderSettings());
-  }
+    private readonly onFirstFramePresented: () => void,
+  ) {}
 
   async init(host: HTMLElement): Promise<void> {
     const app = new Application();
@@ -54,6 +58,8 @@ export class GameRenderer {
       return;
     }
     this.app = app;
+    // 画布在包含权威快照的首帧提交前保持隐藏，避免暴露场外清屏色。
+    app.canvas.style.visibility = "hidden";
     // resizeTo 只负责画布尺寸，场外底色仍需同步屏幕尺寸
     app.renderer.on("resize", this.handleResize);
     host.appendChild(app.canvas);
@@ -63,9 +69,18 @@ export class GameRenderer {
 
     const rules = this.controller.descriptor.rules;
     this.arena = new ArenaLayer(rules.arenaHalfSize);
-    this.food = new FoodLayer(rules.foodRadius, textures.foods, textures.remainsFood);
-    this.snakes = new SnakeLayer(textures.snakeSkins);
+    this.food = new FoodLayer(
+      rules,
+      {
+        dots: textures.foods,
+        star: textures.starFood,
+        candy: textures.candy,
+      },
+      rules.arenaHalfSize - MAP_BORDER,
+    );
+    this.snakes = new SnakeLayer(textures.skinFrames, textures.speedUp, textures.protect);
     this.fx = new FxLayer();
+    for (const event of this.pendingConsumedFoods.splice(0)) this.presentConsumedFood(event);
 
     app.stage.addChild(this.arena.screenContainer);
     this.world.addChild(this.arena.worldContainer);
@@ -81,14 +96,18 @@ export class GameRenderer {
     if (this.started || !this.app) return;
     this.started = true;
     this.app.ticker.add(({ deltaMS }) => this.frame(deltaMS));
+    // Application.render 以 LOW 优先级运行；UTILITY 回调发生在实际提交之后。
+    this.app.ticker.add(this.afterRender, undefined, UPDATE_PRIORITY.UTILITY);
   }
 
-  /** 食物被吃：移除实体，并在附近播放尸体食物音效。 */
-  foodConsumed(foodId: number): void {
-    const alreadyPresented = this.foodSpeculation.confirm(foodId);
-    const position = this.food?.positionOf(foodId);
-    if (position && !alreadyPresented) this.playFoodAudio(position, this.selfHead());
-    this.food?.remove(foodId);
+  /** 权威碰撞确认后登记食物事件；具体帧位由消费者的呈现时间轴决定。 */
+  foodConsumed(event: FoodConsumedEvent): void {
+    if (this.destroyed) return;
+    if (!this.food) {
+      this.pendingConsumedFoods.push(event);
+      return;
+    }
+    this.presentConsumedFood(event);
   }
 
   /** 蛇死亡：沿身体爆裂（由控制器在事件到达时调用）。 */
@@ -99,7 +118,7 @@ export class GameRenderer {
     const stride = Math.max(1, Math.floor(last.body.length / samples));
     for (let index = 0; index < last.body.length; index += stride) {
       const point = last.body[index];
-      this.fx?.burst(point.x, point.y, last.skin.body, 5, 180, 4);
+      this.fx?.burst(point.x, point.y, last.bodyColor, 5, 180, 4);
     }
   }
 
@@ -110,9 +129,10 @@ export class GameRenderer {
 
   destroy(): void {
     this.destroyed = true;
-    this.unsubscribeSettings();
+    this.app?.ticker.remove(this.afterRender);
     this.app?.renderer.off("resize", this.handleResize);
-    this.foodSpeculation.reset();
+    this.pendingConsumedFoods.length = 0;
+    this.movingFoodPresentation.reset();
     this.snakes?.destroy();
     this.food?.destroy();
     this.fx?.destroy();
@@ -120,23 +140,15 @@ export class GameRenderer {
     this.app = undefined;
   }
 
+  /** 对齐原版 `cc.view.enableRetina(true)`：启动时始终启用高 DPI 后备缓冲。 */
   private renderResolution(): number {
-    return this.settings.highQuality
-      ? Math.min(RENDER.maxDevicePixelRatio, window.devicePixelRatio || 1)
-      : 1;
-  }
-
-  private applyRenderSettings(): void {
-    const app = this.app;
-    if (!app) return;
-    const resolution = this.renderResolution();
-    if (app.renderer.resolution === resolution) return;
-    app.renderer.resize(app.screen.width, app.screen.height, resolution);
+    return Math.min(RENDER.maxDevicePixelRatio, window.devicePixelRatio || 1);
   }
 
   private frame(deltaMS: number): void {
     if (!this.app || !this.arena || !this.food || !this.snakes || !this.fx) return;
     const controller = this.controller;
+    const rules = controller.descriptor.rules;
     const clock = controller.clockSync;
     const serverNow = clock.serverNow() ?? Date.now();
     const localNow = performance.now();
@@ -148,13 +160,24 @@ export class GameRenderer {
     // 2. 组装本帧蛇视图
     const views: Array<SnakeRenderView> = [];
     const renderTime = serverNow - controller.snapshotBuffer.interpolationDelay();
+    const sourceFramesPerTick = Math.max(
+      1,
+      Math.round(SNAKE_MOTION.sourceFrameRate / controller.descriptor.tickRate),
+    );
+    const remotePresentationTick = controller.snapshotBuffer.presentationTick(renderTime);
+    const remotePresentationSourceFrame =
+      remotePresentationTick === undefined
+        ? undefined
+        : remotePresentationTick * sourceFramesPerTick;
     for (const remote of controller.snapshotBuffer.sampleRemoteSnakes(renderTime)) {
       views.push({
         id: remote.id,
         nickname: remote.nickname,
+        skinId: remote.skinId,
         body: remote.body,
         angle: remote.angle,
-        radius: remote.radius,
+        bodyScale: remote.bodyScale,
+        boosting: remote.boosting && remote.length > rules.minimumLength,
         invulnerable: remote.invulnerable,
         isSelf: false,
       });
@@ -165,22 +188,20 @@ export class GameRenderer {
     );
     const selfState = controller.selfPredictor.renderState();
     const selfAlive = Boolean(selfState && selfSnapshot?.alive);
-    if (selfAlive && !this.lastSelfAlive && selfSnapshot) {
-      this.camera.reset();
-      this.selfRadiusSmooth = selfSnapshot.radius;
-    }
+    if (selfAlive && !this.lastSelfAlive) this.camera.reset();
     this.lastSelfAlive = selfAlive;
 
     let selfHead: { x: number; y: number } | undefined;
     if (selfState && selfSnapshot?.alive) {
-      const radius = selfSnapshot.radius;
-      this.selfRadiusSmooth += (radius - this.selfRadiusSmooth) * 0.08;
       views.push({
         id: selfSnapshot.id,
         nickname: selfSnapshot.nickname,
+        skinId: selfSnapshot.skinId,
         body: selfState.body,
         angle: selfState.angle,
-        radius: this.selfRadiusSmooth,
+        bodyScale: selfState.bodyScale,
+        boosting:
+          selfState.boosting && controller.selfPredictor.currentLength > rules.minimumLength,
         invulnerable: selfSnapshot.invulnerable,
         isSelf: true,
       });
@@ -189,13 +210,15 @@ export class GameRenderer {
 
     // 3. 相机
     if (selfHead && selfSnapshot?.alive) {
-      this.camera.update(selfHead.x, selfHead.y, this.selfRadiusSmooth, deltaMS);
+      this.camera.update(selfHead.x, selfHead.y, controller.selfPredictor.currentLength);
     }
     const { width, height } = this.app.screen;
-    this.world.scale.set(this.camera.zoom);
+    // 原版 Canvas 固定高度：纵向始终是 750 设计单位，宽屏只增加左右视野。
+    const worldScale = this.camera.worldScale(width, height);
+    this.world.scale.set(worldScale);
     this.world.position.set(
-      width / 2 - this.camera.x * this.camera.zoom,
-      height / 2 - this.camera.y * this.camera.zoom,
+      width / 2 - this.camera.x * worldScale,
+      height / 2 - this.camera.y * worldScale,
     );
 
     // 4. 图层同步
@@ -203,49 +226,78 @@ export class GameRenderer {
     const nowMs = performance.now();
     const latestSnapshot = controller.latestSnapshot;
     if (latestSnapshot) {
-      const hiddenFoods = this.foodSpeculation.update({
-        foods: latestSnapshot.foods,
-        authoritativeTick: latestSnapshot.tick,
-        predictedTick: selfState?.collisionTick ?? latestSnapshot.tick,
-        head: selfHead,
-        predictedHeadAtTick: (tick) =>
-          tick === selfState?.collisionTick
-            ? selfState.collisionHead
-            : controller.selfPredictor.headAtTick(tick),
-        snakeRadius: selfSnapshot?.radius ?? 0,
-        foodRadius: controller.descriptor.rules.foodRadius,
-        alive: selfAlive,
-      });
-      for (const foodId of this.foodSpeculation.takeNewlyHiddenFoodIds()) {
-        const consumed = latestSnapshot.foods.find((food) => food.id === foodId);
-        if (consumed) {
-          this.playFoodAudio(
-            { x: consumed.position.x, y: consumed.position.y, kind: consumed.kind },
-            selfHead,
-          );
-        }
-      }
-      this.food.sync(latestSnapshot.foods, viewBounds, hiddenFoods);
-    } else {
-      this.foodSpeculation.reset();
+      const authoritativeSourceFrame = latestSnapshot.tick * sourceFramesPerTick;
+      const presentedFoods =
+        selfState && selfSnapshot?.alive
+          ? latestSnapshot.foods.map((food) => {
+              const position = predictFoodPresentationPosition(
+                food,
+                authoritativeSourceFrame,
+                selfState.presentationSourceFrame,
+                rules.arenaHalfSize - MAP_BORDER,
+                foodRadiusOf(food, rules),
+              );
+              return position === undefined ? food : { ...food, position };
+            })
+          : controller.snapshotBuffer.sampleFoods(renderTime);
+      const smoothedFoods =
+        selfState && selfSnapshot?.alive
+          ? this.movingFoodPresentation.sample(presentedFoods, deltaMS)
+          : presentedFoods;
+      if (!selfState || !selfSnapshot?.alive) this.movingFoodPresentation.reset();
+      this.food.sync(smoothedFoods, viewBounds, authoritativeSourceFrame, latestSnapshot.foods);
+    }
+    if (selfHead && selfState && selfSnapshot?.alive) {
+      const predictedFoods = this.food.predictSelfContacts(
+        selfSnapshot.id,
+        selfHead,
+        selfState.collisionHead,
+        snakeBodyRadius(selfState.bodyScale),
+        rules.eatDistanceFactor,
+        selfState.presentationSourceFrame,
+        selfState.collisionSourceFrame,
+      );
+      for (const food of predictedFoods) this.playFoodAudio(food);
+    }
+    const presentationHeads = new Map<string, { readonly x: number; readonly y: number }>();
+    for (const view of views) {
+      const head = view.body[0];
+      if (head !== undefined) presentationHeads.set(view.id, head);
+    }
+    const presentedFoods = this.food.update(
+      viewBounds,
+      (playerId) =>
+        playerId === controller.selfId
+          ? (selfState?.presentationSourceFrame ?? remotePresentationSourceFrame)
+          : remotePresentationSourceFrame,
+      (playerId) => presentationHeads.get(playerId),
+    );
+    for (const event of presentedFoods) {
+      if (event.playerId === controller.selfId) this.playFoodAudio(event.food);
     }
     this.snakes.update(views, viewBounds, this.settings.showNicknames, nowMs);
     this.fx.update(deltaMS);
+    if (controller.status === "online" && latestSnapshot !== undefined) {
+      this.authoritativeFramePrepared = true;
+    }
   }
 
-  private playFoodAudio(
-    position: { readonly x: number; readonly y: number; readonly kind: FoodState["kind"] },
-    selfHead: { readonly x: number; readonly y: number } | undefined,
-  ): void {
-    if (position.kind !== "remains" || !selfHead) return;
-    const distance = Math.hypot(position.x - selfHead.x, position.y - selfHead.y);
-    if (distance < 400) this.controller.sfx.eatRemains();
+  /** Pixi 自动渲染完成后，只报告一次包含权威快照的首帧。 */
+  private readonly afterRender = (): void => {
+    if (this.firstFramePresented || !this.authoritativeFramePrepared) return;
+    this.firstFramePresented = true;
+    this.app?.ticker.remove(this.afterRender);
+    this.app?.canvas.style.removeProperty("visibility");
+    this.onFirstFramePresented();
+  };
+
+  private presentConsumedFood(event: FoodConsumedEvent): void {
+    this.food?.startAbsorb(event);
   }
 
-  private selfHead(): { x: number; y: number } | undefined {
-    const snapshot = this.controller.latestSnapshot?.snakes.find(
-      (snake) => snake.id === this.controller.selfId,
-    );
-    return snapshot?.alive && snapshot.body.length > 0 ? snapshot.body[0] : undefined;
+  private playFoodAudio(food: FoodState): void {
+    if (usesEatWreckAudio(food, this.controller.descriptor.rules)) {
+      this.controller.sfx.eatRemains();
+    }
   }
 }

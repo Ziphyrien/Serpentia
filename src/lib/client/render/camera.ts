@@ -1,31 +1,40 @@
 import { RENDER } from "../config";
 
-/** 相机：平滑跟随目标点，缩放随蛇半径变化（越大视野越广）。 */
+/** 相机缩放系数：单位逻辑长度对应的缩放衰减。 */
+const SCALE_FACTOR = (RENDER.cameraInitScale - RENDER.cameraMinScale) / RENDER.cameraScaleMaxLength;
+
+/**
+ * 相机：跟随蛇头，缩放随逻辑长度线性衰减。
+ *
+ * 世界单位到屏幕像素分两级：先按固定高度设计分辨率折算，再乘相机缩放。
+ * 这样所有屏幕的纵向视野一致，横向视野随宽高比自然增减。
+ */
 export class Camera {
   x = 0;
   y = 0;
-  zoom: number = RENDER.zoomAtBaseRadius;
-  private targetZoom: number = RENDER.zoomAtBaseRadius;
-  private initialized = false;
+  /** 相机缩放，直接对应设计像素与世界单位的比例。 */
+  zoom: number = RENDER.cameraInitScale;
 
-  update(targetX: number, targetY: number, radius: number, dtMs: number): void {
-    if (!this.initialized) {
-      this.x = targetX;
-      this.y = targetY;
-      this.initialized = true;
-    }
-    const t = Math.min(1, Math.max(0, (radius - 11) / (30 - 11)));
-    this.targetZoom =
-      RENDER.zoomAtBaseRadius + (RENDER.zoomAtMaxRadius - RENDER.zoomAtBaseRadius) * t;
-
-    const lerp = 1 - Math.pow(1 - RENDER.cameraLerp, dtMs / 16.7);
-    this.x += (targetX - this.x) * lerp;
-    this.y += (targetY - this.y) * lerp;
-    this.zoom += (this.targetZoom - this.zoom) * lerp * 0.7;
+  /** 缩放只由逻辑长度决定，位置直接跟随蛇头，均不做平滑。 */
+  update(targetX: number, targetY: number, length: number): void {
+    this.x = targetX;
+    this.y = targetY;
+    this.zoom =
+      length < RENDER.cameraScaleMaxLength
+        ? RENDER.cameraInitScale - length * SCALE_FACTOR
+        : RENDER.cameraMinScale;
   }
 
   reset(): void {
-    this.initialized = false;
+    this.zoom = RENDER.cameraInitScale;
+  }
+
+  /**
+   * 固定高度设计分辨率：原版 `cc.Canvas` 使用 `fitHeight=true`、`fitWidth=false`。
+   * 屏幕高度始终映射为 750 设计单位，宽高比只改变左右可见世界。
+   */
+  worldScale(screenWidth: number, screenHeight: number): number {
+    return pixelsPerDesignUnit(screenWidth, screenHeight) * this.zoom;
   }
 
   /** 当前视野的世界坐标范围（含边距），供视口裁剪。 */
@@ -39,8 +48,9 @@ export class Camera {
     right: number;
     bottom: number;
   } {
-    const halfW = screenWidth / 2 / this.zoom + margin;
-    const halfH = screenHeight / 2 / this.zoom + margin;
+    const scale = this.worldScale(screenWidth, screenHeight);
+    const halfW = screenWidth / 2 / scale + margin;
+    const halfH = screenHeight / 2 / scale + margin;
     return {
       left: this.x - halfW,
       top: this.y - halfH,
@@ -48,4 +58,14 @@ export class Camera {
       bottom: this.y + halfH,
     };
   }
+}
+
+/**
+ * 原版正常 `Game` 的 `cc.Canvas` 固定高度适配倍率。
+ *
+ * Canvas 默认 `fitHeight=true`、`fitWidth=false`，所以不论屏幕宽高比如何，
+ * 750 个设计单位始终占满屏幕高度；更宽的屏幕只会显示更多左右世界。
+ */
+export function pixelsPerDesignUnit(_screenWidth: number, screenHeight: number): number {
+  return screenHeight / RENDER.designHeight;
 }

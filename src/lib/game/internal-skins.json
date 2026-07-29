@@ -1,0 +1,1277 @@
+{
+  "source": {
+    "bundle": "internalSkins",
+    "configVersion": "81d07",
+    "archiveVersion": "0c42d"
+  },
+  "defaultSkinId": 1,
+  "skins": [
+    {
+      "id": 1,
+      "atlas": {
+        "path": "/assets/art/skins/1/atlas.png",
+        "width": 128,
+        "height": 256
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -18.0,
+      "bodyColor": 12981782,
+      "frames": {
+        "snakebody0": {
+          "x": 1,
+          "y": 107,
+          "width": 96,
+          "height": 96,
+          "rotated": false
+        },
+        "snakehead": {
+          "x": 1,
+          "y": 1,
+          "width": 112,
+          "height": 104,
+          "rotated": false
+        },
+        "snakewreck": {
+          "x": 99,
+          "y": 107,
+          "width": 16,
+          "height": 16,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "body": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 2,
+      "atlas": {
+        "path": "/assets/art/skins/2/atlas.png",
+        "width": 64,
+        "height": 128
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -18.0,
+      "bodyColor": 3709643,
+      "frames": {
+        "snakebody0": {
+          "x": 1,
+          "y": 55,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakehead": {
+          "x": 1,
+          "y": 1,
+          "width": 56,
+          "height": 52,
+          "rotated": false
+        },
+        "snakewreck": {
+          "x": 1,
+          "y": 105,
+          "width": 16,
+          "height": 16,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "body": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 3,
+      "atlas": {
+        "path": "/assets/art/skins/3/atlas.png",
+        "width": 126,
+        "height": 54
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -18.0,
+      "bodyColor": 15841852,
+      "frames": {
+        "body": {
+          "x": 59,
+          "y": 1,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "head": {
+          "x": 1,
+          "y": 1,
+          "width": 56,
+          "height": 52,
+          "rotated": false
+        },
+        "wreck": {
+          "x": 109,
+          "y": 1,
+          "width": 16,
+          "height": 16,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["head"]
+      },
+      "headSpeed": null,
+      "body": [
+        {
+          "distance": -18.0,
+          "frameTime": 1,
+          "textures": ["body"]
+        }
+      ],
+      "bodySpeed": [],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 4,
+      "atlas": {
+        "path": "/assets/art/skins/4/atlas.png",
+        "width": 64,
+        "height": 128
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -18.7,
+      "bodyColor": 16548274,
+      "frames": {
+        "body": {
+          "x": 1,
+          "y": 55,
+          "width": 50,
+          "height": 48,
+          "rotated": false
+        },
+        "head": {
+          "x": 1,
+          "y": 1,
+          "width": 56,
+          "height": 52,
+          "rotated": false
+        },
+        "wreck": {
+          "x": 1,
+          "y": 105,
+          "width": 16,
+          "height": 16,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["head"]
+      },
+      "headSpeed": null,
+      "body": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["body"]
+        }
+      ],
+      "bodySpeed": [],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 10,
+      "atlas": {
+        "path": "/assets/art/skins/10/atlas.png",
+        "width": 80,
+        "height": 162
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -56.0,
+      "bodyColor": 12565948,
+      "frames": {
+        "munaiyi_body": {
+          "x": 1,
+          "y": 113,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "munaiyi_head": {
+          "x": 1,
+          "y": 1,
+          "width": 78,
+          "height": 110,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["munaiyi_head"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["munaiyi_head"]
+      },
+      "body": [
+        {
+          "distance": -17.0,
+          "frameTime": 1,
+          "textures": ["munaiyi_body"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -17.0,
+          "frameTime": 1,
+          "textures": ["munaiyi_body"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 11,
+      "atlas": {
+        "path": "/assets/art/skins/11/atlas.png",
+        "width": 128,
+        "height": 128
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -13.95,
+      "bodyColor": 8021679,
+      "frames": {
+        "snakebody0": {
+          "x": 1,
+          "y": 69,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakehead": {
+          "x": 1,
+          "y": 1,
+          "width": 84,
+          "height": 66,
+          "rotated": false
+        },
+        "snakewreck": {
+          "x": 87,
+          "y": 1,
+          "width": 16,
+          "height": 16,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "body": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 101,
+      "atlas": {
+        "path": "/assets/art/skins/101/atlas.png",
+        "width": 200,
+        "height": 122
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -12.0,
+      "bodyColor": 13620694,
+      "frames": {
+        "20170315043443": {
+          "x": 1,
+          "y": 1,
+          "width": 85,
+          "height": 70,
+          "rotated": false
+        },
+        "20170315043446": {
+          "x": 88,
+          "y": 1,
+          "width": 85,
+          "height": 70,
+          "rotated": false
+        },
+        "20170315043643": {
+          "x": 1,
+          "y": 73,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "20170315043646": {
+          "x": 51,
+          "y": 73,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "20170315043649": {
+          "x": 101,
+          "y": 73,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "20170315043651": {
+          "x": 151,
+          "y": 73,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["20170315043443"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["20170315043446"]
+      },
+      "body": [
+        {
+          "distance": -10.8,
+          "frameTime": 1,
+          "textures": ["20170315043643"]
+        },
+        {
+          "distance": -10.8,
+          "frameTime": 1,
+          "textures": ["20170315043646"]
+        },
+        {
+          "distance": -10.8,
+          "frameTime": 1,
+          "textures": ["20170315043649"]
+        },
+        {
+          "distance": -10.8,
+          "frameTime": 1,
+          "textures": ["20170315043651"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -10.8,
+          "frameTime": 6,
+          "textures": ["20170315043643", "20170315043646", "20170315043649", "20170315043651"]
+        },
+        {
+          "distance": -10.8,
+          "frameTime": 6,
+          "textures": ["20170315043646", "20170315043649", "20170315043651", "20170315043643"]
+        },
+        {
+          "distance": -10.8,
+          "frameTime": 6,
+          "textures": ["20170315043649", "20170315043651", "20170315043643", "20170315043646"]
+        },
+        {
+          "distance": -10.8,
+          "frameTime": 6,
+          "textures": ["20170315043651", "20170315043643", "20170315043646", "20170315043649"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 111,
+      "atlas": {
+        "path": "/assets/art/skins/111/atlas.png",
+        "width": 166,
+        "height": 62
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -16.8,
+      "bodyColor": 13093066,
+      "frames": {
+        "cat_body01": {
+          "x": 67,
+          "y": 1,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "cat_body02": {
+          "x": 117,
+          "y": 1,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "cat_head": {
+          "x": 1,
+          "y": 1,
+          "width": 64,
+          "height": 60,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["cat_head"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["cat_head"]
+      },
+      "body": [
+        {
+          "distance": -18.0,
+          "frameTime": 1,
+          "textures": ["cat_body01"]
+        },
+        {
+          "distance": -18.0,
+          "frameTime": 1,
+          "textures": ["cat_body02"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -18.0,
+          "frameTime": 1,
+          "textures": ["cat_body01"]
+        },
+        {
+          "distance": -18.0,
+          "frameTime": 1,
+          "textures": ["cat_body02"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 112,
+      "atlas": {
+        "path": "/assets/art/skins/112/atlas.png",
+        "width": 54,
+        "height": 166
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -20.4,
+      "bodyColor": 12858913,
+      "frames": {
+        "kele_body01": {
+          "x": 1,
+          "y": 1,
+          "width": 52,
+          "height": 48,
+          "rotated": false
+        },
+        "kele_body02": {
+          "x": 1,
+          "y": 51,
+          "width": 52,
+          "height": 48,
+          "rotated": false
+        },
+        "kele_head": {
+          "x": 1,
+          "y": 101,
+          "width": 48,
+          "height": 64,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["kele_head"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["kele_head"]
+      },
+      "body": [
+        {
+          "distance": -20.4,
+          "frameTime": 1,
+          "textures": ["kele_body01"]
+        },
+        {
+          "distance": -20.4,
+          "frameTime": 1,
+          "textures": ["kele_body02"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -20.4,
+          "frameTime": 1,
+          "textures": ["kele_body01"]
+        },
+        {
+          "distance": -20.4,
+          "frameTime": 1,
+          "textures": ["kele_body02"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 132,
+      "atlas": {
+        "path": "/assets/art/skins/132/atlas.png",
+        "width": 128,
+        "height": 128
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -18.0,
+      "bodyColor": 15780012,
+      "frames": {
+        "snakebody0": {
+          "x": 71,
+          "y": 1,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakebody1": {
+          "x": 71,
+          "y": 51,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakehead": {
+          "x": 1,
+          "y": 1,
+          "width": 68,
+          "height": 84,
+          "rotated": false
+        },
+        "snakewreck": {
+          "x": 1,
+          "y": 101,
+          "width": 16,
+          "height": 16,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "body": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody1"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody1"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 133,
+      "atlas": {
+        "path": "/assets/art/skins/133/atlas.png",
+        "width": 128,
+        "height": 128
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -36.0,
+      "bodyColor": 16777215,
+      "frames": {
+        "snakebody0": {
+          "x": 79,
+          "y": 53,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakebody1": {
+          "x": 79,
+          "y": 1,
+          "width": 48,
+          "height": 50,
+          "rotated": false
+        },
+        "snakehead": {
+          "x": 1,
+          "y": 1,
+          "width": 76,
+          "height": 94,
+          "rotated": false
+        },
+        "snakewreck": {
+          "x": 1,
+          "y": 103,
+          "width": 16,
+          "height": 16,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "body": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody1"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody1"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 139,
+      "atlas": {
+        "path": "/assets/art/skins/139/atlas.png",
+        "width": 128,
+        "height": 128
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -15.45,
+      "bodyColor": 16230089,
+      "frames": {
+        "snakebody0": {
+          "x": 1,
+          "y": 73,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakebody1": {
+          "x": 51,
+          "y": 73,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakehead": {
+          "x": 1,
+          "y": 1,
+          "width": 80,
+          "height": 70,
+          "rotated": false
+        },
+        "snakewreck": {
+          "x": 101,
+          "y": 1,
+          "width": 16,
+          "height": 16,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "body": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody1"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody1"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 401,
+      "atlas": {
+        "path": "/assets/art/skins/401/atlas.png",
+        "width": 128,
+        "height": 128
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -22.5,
+      "bodyColor": 16768901,
+      "frames": {
+        "snakebody0": {
+          "x": 1,
+          "y": 77,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakebody1": {
+          "x": 51,
+          "y": 77,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakebody2": {
+          "x": 73,
+          "y": 1,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakehead": {
+          "x": 1,
+          "y": 1,
+          "width": 70,
+          "height": 74,
+          "rotated": false
+        },
+        "snakewreck": {
+          "x": 73,
+          "y": 51,
+          "width": 16,
+          "height": 16,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "body": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody1"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody2"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody1"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody2"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 403,
+      "atlas": {
+        "path": "/assets/art/skins/403/atlas.png",
+        "width": 128,
+        "height": 256
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -35.0,
+      "bodyColor": 8842150,
+      "frames": {
+        "snakebody0": {
+          "x": 1,
+          "y": 69,
+          "width": 50,
+          "height": 48,
+          "rotated": false
+        },
+        "snakebody1": {
+          "x": 53,
+          "y": 69,
+          "width": 50,
+          "height": 48,
+          "rotated": false
+        },
+        "snakehead": {
+          "x": 1,
+          "y": 1,
+          "width": 66,
+          "height": 88,
+          "rotated": true
+        },
+        "snaketail": {
+          "x": 1,
+          "y": 119,
+          "width": 38,
+          "height": 44,
+          "rotated": true
+        },
+        "snakewreck": {
+          "x": 91,
+          "y": 1,
+          "width": 18,
+          "height": 18,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 1,
+        "textures": ["snakehead"]
+      },
+      "body": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody1"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody1"]
+        }
+      ],
+      "tail": {
+        "distance": -6.0,
+        "frameTime": 1,
+        "textures": ["snaketail"]
+      },
+      "tailSpeed": {
+        "distance": -6.0,
+        "frameTime": 1,
+        "textures": ["snaketail"]
+      }
+    },
+    {
+      "id": 411,
+      "atlas": {
+        "path": "/assets/art/skins/411/atlas.png",
+        "width": 256,
+        "height": 512
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -31.0,
+      "bodyColor": 0,
+      "frames": {
+        "snakebody0": {
+          "x": 197,
+          "y": 1,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakebody1": {
+          "x": 197,
+          "y": 51,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakefood": {
+          "x": 197,
+          "y": 101,
+          "width": 16,
+          "height": 16,
+          "rotated": false
+        },
+        "snakehead0": {
+          "x": 1,
+          "y": 1,
+          "width": 96,
+          "height": 86,
+          "rotated": false
+        },
+        "snakehead1": {
+          "x": 99,
+          "y": 1,
+          "width": 96,
+          "height": 86,
+          "rotated": false
+        },
+        "snakehead2": {
+          "x": 1,
+          "y": 89,
+          "width": 96,
+          "height": 86,
+          "rotated": false
+        },
+        "snakehead3": {
+          "x": 99,
+          "y": 89,
+          "width": 96,
+          "height": 86,
+          "rotated": false
+        },
+        "snakehead4": {
+          "x": 1,
+          "y": 177,
+          "width": 96,
+          "height": 86,
+          "rotated": false
+        },
+        "snakehead5": {
+          "x": 99,
+          "y": 177,
+          "width": 96,
+          "height": 86,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 60,
+        "textures": ["snakehead0"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 3,
+        "textures": [
+          "snakehead1",
+          "snakehead2",
+          "snakehead3",
+          "snakehead4",
+          "snakehead5",
+          "snakehead4",
+          "snakehead3",
+          "snakehead2",
+          "snakehead1",
+          "snakehead1",
+          "snakehead1",
+          "snakehead1"
+        ]
+      },
+      "body": [
+        {
+          "distance": -16.0,
+          "frameTime": 60,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 60,
+          "textures": ["snakebody1"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -16.0,
+          "frameTime": 60,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 60,
+          "textures": ["snakebody1"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    },
+    {
+      "id": 701,
+      "atlas": {
+        "path": "/assets/art/skins/701/atlas.png",
+        "width": 256,
+        "height": 512
+      },
+      "bodyRenderWidthRate": 1.0,
+      "bodyDistance": -32.0,
+      "bodyColor": 16777215,
+      "frames": {
+        "snakebody0": {
+          "x": 1,
+          "y": 229,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakebody1": {
+          "x": 51,
+          "y": 229,
+          "width": 48,
+          "height": 48,
+          "rotated": false
+        },
+        "snakefood": {
+          "x": 101,
+          "y": 229,
+          "width": 16,
+          "height": 16,
+          "rotated": false
+        },
+        "snakehead0": {
+          "x": 1,
+          "y": 1,
+          "width": 80,
+          "height": 74,
+          "rotated": false
+        },
+        "snakehead1": {
+          "x": 83,
+          "y": 1,
+          "width": 80,
+          "height": 74,
+          "rotated": false
+        },
+        "snakehead2": {
+          "x": 165,
+          "y": 1,
+          "width": 80,
+          "height": 74,
+          "rotated": false
+        },
+        "snakehead3": {
+          "x": 1,
+          "y": 77,
+          "width": 80,
+          "height": 74,
+          "rotated": false
+        },
+        "snakehead4": {
+          "x": 83,
+          "y": 77,
+          "width": 80,
+          "height": 74,
+          "rotated": false
+        },
+        "snakehead5": {
+          "x": 165,
+          "y": 77,
+          "width": 80,
+          "height": 74,
+          "rotated": false
+        },
+        "snakehead6": {
+          "x": 1,
+          "y": 153,
+          "width": 80,
+          "height": 74,
+          "rotated": false
+        },
+        "snakehead7": {
+          "x": 83,
+          "y": 153,
+          "width": 80,
+          "height": 74,
+          "rotated": false
+        },
+        "snakehead8": {
+          "x": 165,
+          "y": 153,
+          "width": 80,
+          "height": 74,
+          "rotated": false
+        }
+      },
+      "head": {
+        "distance": 0.0,
+        "frameTime": 6,
+        "textures": ["snakehead0", "snakehead1"]
+      },
+      "headSpeed": {
+        "distance": 0.0,
+        "frameTime": 6,
+        "textures": [
+          "snakehead2",
+          "snakehead3",
+          "snakehead4",
+          "snakehead5",
+          "snakehead6",
+          "snakehead7",
+          "snakehead8"
+        ]
+      },
+      "body": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody1"]
+        }
+      ],
+      "bodySpeed": [
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody0"]
+        },
+        {
+          "distance": -16.0,
+          "frameTime": 1,
+          "textures": ["snakebody1"]
+        }
+      ],
+      "tail": null,
+      "tailSpeed": null
+    }
+  ]
+}

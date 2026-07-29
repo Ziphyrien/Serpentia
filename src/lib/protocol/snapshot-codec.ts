@@ -4,6 +4,7 @@ import type { SnapshotMessage } from "./game";
 import {
   PlayerId,
   type DeathEvent,
+  type FoodConsumedEvent,
   type FoodKind,
   type FoodState,
   type LeaderboardEntry,
@@ -16,6 +17,8 @@ const FORMAT_VERSION = GAME_PROTOCOL_VERSION;
 const STREAM_FULL_FRAME = 0xf0;
 const STREAM_DELTA_FRAME_BASE = 0xc0;
 const NUMBER_SCALE = 4;
+/** 身体缩放在线路上保留三位小数，避免被通用四分之一坐标量化破坏。 */
+const BODY_SCALE_NUMBER_SCALE = 1_000;
 const QUANTIZATION_TOLERANCE = 1 / (NUMBER_SCALE * 2);
 const TAU = Math.PI * 2;
 const ANGLE_LEVELS = 65_536;
@@ -625,7 +628,8 @@ function snakeFromScalars(
     nickname,
     body,
     angle: decodeAngle(scalars.angle),
-    radius: dequantize(scalars.radius),
+    skinId: scalars.skinId,
+    bodyScale: dequantizeBodyScale(scalars.bodyScale),
     length: dequantize(scalars.length),
     score: dequantize(scalars.score),
     kills: scalars.kills,
@@ -644,7 +648,8 @@ function snakeFromScalars(
 interface DecodedSnakeScalars {
   angle: number;
   targetAngle: number | null;
-  radius: number;
+  skinId: number;
+  bodyScale: number;
   length: number;
   score: number;
   kills: number;
@@ -681,7 +686,8 @@ function encodeSnakeScalars(snake: SnakeSnapshot): Uint8Array {
       snake.targetAngle === undefined ? null : encodeAngle(snake.targetAngle),
     ),
   );
-  writeUnsignedVarint(bytes, quantizeUnsigned(snake.radius));
+  writeUnsignedVarint(bytes, quantizeBodyScale(snake.bodyScale));
+  writeUnsignedVarint(bytes, snake.skinId);
   writeUnsignedVarint(bytes, quantizeUnsigned(snake.length));
   writeUnsignedVarint(bytes, quantizeUnsigned(snake.score));
   writeUnsignedVarint(bytes, snake.kills * 16 + flags);
@@ -697,8 +703,10 @@ function decodeSnakeScalars(bytes: Uint8Array): DecodedSnakeScalars {
   offset = angle.offset;
   const targetAngleCode = readUnsignedVarint(bytes, offset);
   offset = targetAngleCode.offset;
-  const radius = readUnsignedVarint(bytes, offset);
-  offset = radius.offset;
+  const bodyScale = readUnsignedVarint(bytes, offset);
+  offset = bodyScale.offset;
+  const skinId = readUnsignedVarint(bytes, offset);
+  offset = skinId.offset;
   const length = readUnsignedVarint(bytes, offset);
   offset = length.offset;
   const score = readUnsignedVarint(bytes, offset);
@@ -719,7 +727,8 @@ function decodeSnakeScalars(bytes: Uint8Array): DecodedSnakeScalars {
       targetAngleCode.value === 0
         ? null
         : (angle.value + zigzagDecode(targetAngleCode.value - 1) + ANGLE_LEVELS) % ANGLE_LEVELS,
-    radius: radius.value,
+    skinId: skinId.value,
+    bodyScale: bodyScale.value,
     length: length.value,
     score: score.value,
     kills: Math.floor(killsAndFlags.value / 16),
@@ -734,7 +743,8 @@ function scalarValues(snake: SnakeSnapshot): DecodedSnakeScalars {
   return {
     angle: encodeAngle(snake.angle),
     targetAngle: snake.targetAngle === undefined ? null : encodeAngle(snake.targetAngle),
-    radius: quantizeUnsigned(snake.radius),
+    skinId: snake.skinId,
+    bodyScale: quantizeBodyScale(snake.bodyScale),
     length: quantizeUnsigned(snake.length),
     score: quantizeUnsigned(snake.score),
     kills: snake.kills,
@@ -761,13 +771,14 @@ function encodeSnakeScalarsDelta(current: SnakeSnapshot, previous: SnakeSnapshot
   let mask = 0;
   if (next.angle !== prior.angle) mask |= 1;
   if (next.targetAngle !== prior.targetAngle) mask |= 2;
-  if (next.radius !== prior.radius) mask |= 64;
+  if (next.bodyScale !== prior.bodyScale) mask |= 64;
   if (next.length !== prior.length) mask |= 4;
   if (next.score !== prior.score) mask |= 8;
   if (next.kills !== prior.kills || next.flags !== prior.flags) mask |= 16;
   if (next.respawnAtTick !== prior.respawnAtTick) mask |= 128;
   if (next.lastInputSequence !== prior.lastInputSequence) mask |= 32;
   if (next.lastInputAppliedTick !== prior.lastInputAppliedTick) mask |= 256;
+  if (next.skinId !== prior.skinId) mask |= 512;
 
   const delta: Array<number> = [];
   writeUnsignedVarint(delta, mask + 1);
@@ -775,7 +786,7 @@ function encodeSnakeScalarsDelta(current: SnakeSnapshot, previous: SnakeSnapshot
   if ((mask & 2) !== 0) {
     writeUnsignedVarint(delta, encodeTargetAngleCode(next.angle, next.targetAngle));
   }
-  if ((mask & 64) !== 0) writeSignedVarint(delta, next.radius - prior.radius);
+  if ((mask & 64) !== 0) writeSignedVarint(delta, next.bodyScale - prior.bodyScale);
   if ((mask & 4) !== 0) writeSignedVarint(delta, next.length - prior.length);
   if ((mask & 8) !== 0) writeSignedVarint(delta, next.score - prior.score);
   if ((mask & 16) !== 0) writeUnsignedVarint(delta, next.kills * 16 + next.flags);
@@ -786,6 +797,7 @@ function encodeSnakeScalarsDelta(current: SnakeSnapshot, previous: SnakeSnapshot
   if ((mask & 256) !== 0) {
     writeSignedVarint(delta, next.lastInputAppliedTick - prior.lastInputAppliedTick);
   }
+  if ((mask & 512) !== 0) writeUnsignedVarint(delta, next.skinId);
   const deltaEncoded = Uint8Array.from(delta);
   return deltaEncoded.length < fullEncoded.length ? deltaEncoded : fullEncoded;
 }
@@ -794,7 +806,7 @@ function decodeSnakeScalarsDelta(bytes: Uint8Array, previous: SnakeSnapshot): De
   const tag = readUnsignedVarint(bytes, 0);
   if (tag.value === 0) return decodeSnakeScalars(bytes.subarray(tag.offset));
   const mask = tag.value - 1;
-  if (mask > 0x1ff) throw new Error("Invalid snapshot scalar delta mask");
+  if (mask > 0x3ff) throw new Error("Invalid snapshot scalar delta mask");
 
   let offset = tag.offset;
   const prior = scalarValues(previous);
@@ -813,9 +825,9 @@ function decodeSnakeScalarsDelta(bytes: Uint8Array, previous: SnakeSnapshot): De
         : (next.angle + zigzagDecode(target.value - 1) + ANGLE_LEVELS) % ANGLE_LEVELS;
   }
   if ((mask & 64) !== 0) {
-    const radius = readSignedVarint(bytes, offset);
-    offset = radius.offset;
-    next.radius = prior.radius + radius.value;
+    const bodyScale = readSignedVarint(bytes, offset);
+    offset = bodyScale.offset;
+    next.bodyScale = prior.bodyScale + bodyScale.value;
   }
   if ((mask & 4) !== 0) {
     const length = readSignedVarint(bytes, offset);
@@ -850,9 +862,15 @@ function decodeSnakeScalarsDelta(bytes: Uint8Array, previous: SnakeSnapshot): De
     offset = appliedTick.offset;
     next.lastInputAppliedTick = prior.lastInputAppliedTick + appliedTick.value;
   }
+  if ((mask & 512) !== 0) {
+    const skinId = readUnsignedVarint(bytes, offset);
+    offset = skinId.offset;
+    next.skinId = skinId.value;
+  }
   if (offset !== bytes.length) throw new Error("Trailing snapshot scalar delta data");
   if (
-    next.radius < 0 ||
+    next.bodyScale < 0 ||
+    next.skinId <= 0 ||
     next.length < 0 ||
     next.score < 0 ||
     next.kills < 0 ||
@@ -1048,8 +1066,20 @@ function sameFood(left: FoodState, right: FoodState): boolean {
     left.id === right.id &&
     left.kind === right.kind &&
     quantizeUnsigned(left.value) === quantizeUnsigned(right.value) &&
+    quantizeUnsigned(left.lengthValue) === quantizeUnsigned(right.lengthValue) &&
+    left.variant === right.variant &&
+    left.generation === right.generation &&
+    sameStarFoodMotion(left.motion, right.motion) &&
     quantizeSigned(left.position.x) === quantizeSigned(right.position.x) &&
     quantizeSigned(left.position.y) === quantizeSigned(right.position.y)
+  );
+}
+
+function sameStarFoodMotion(left: FoodState["motion"], right: FoodState["motion"]): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    left.directionDegrees === right.directionDegrees &&
+    left.linearFramesRemaining === right.linearFramesRemaining
   );
 }
 
@@ -1061,7 +1091,17 @@ function writeFoodRecord(target: Array<number>, food: FoodState): void {
 function writeFoodPayload(target: Array<number>, food: FoodState): void {
   writeSignedVarint(target, quantizeSigned(food.position.x));
   writeSignedVarint(target, quantizeSigned(food.position.y));
-  writeUnsignedVarint(target, quantizeUnsigned(food.value) * 2 + encodeFoodKind(food.kind));
+  writeUnsignedVarint(
+    target,
+    quantizeUnsigned(food.value) * FOOD_KIND_BASE + encodeFoodKind(food.kind),
+  );
+  writeUnsignedVarint(target, quantizeUnsigned(food.lengthValue));
+  const motionFlag = food.motion === undefined ? 0 : 1;
+  writeUnsignedVarint(target, food.variant * 4 + food.generation * 2 + motionFlag);
+  if (food.motion !== undefined) {
+    writeUnsignedVarint(target, food.motion.directionDegrees);
+    writeUnsignedVarint(target, food.motion.linearFramesRemaining);
+  }
 }
 
 function readFoodRecord(bytes: Uint8Array, offset: number): { food: FoodState; offset: number } {
@@ -1077,14 +1117,39 @@ function readFoodPayload(
   const x = readSignedVarint(bytes, offset);
   const y = readSignedVarint(bytes, x.offset);
   const valueAndKind = readUnsignedVarint(bytes, y.offset);
+  const lengthValue = readUnsignedVarint(bytes, valueAndKind.offset);
+  const variantAndFlags = readUnsignedVarint(bytes, lengthValue.offset);
+  const hasMotion = variantAndFlags.value % 2 === 1;
+  const generation = Math.floor(variantAndFlags.value / 2) % 2 === 0 ? 0 : 1;
+  const variant = Math.floor(variantAndFlags.value / 4);
+  const directionDegrees = hasMotion
+    ? readUnsignedVarint(bytes, variantAndFlags.offset)
+    : undefined;
+  if (directionDegrees !== undefined && directionDegrees.value >= 360) {
+    throw new Error("Invalid compact star direction");
+  }
+  const linearFramesRemaining =
+    directionDegrees === undefined ? undefined : readUnsignedVarint(bytes, directionDegrees.offset);
+  const finalOffset = linearFramesRemaining?.offset ?? variantAndFlags.offset;
   return {
     food: {
       id,
       position: { x: dequantize(x.value), y: dequantize(y.value) },
-      value: dequantize(Math.floor(valueAndKind.value / 2)),
-      kind: decodeFoodKind(valueAndKind.value % 2),
+      value: dequantize(Math.floor(valueAndKind.value / FOOD_KIND_BASE)),
+      lengthValue: dequantize(lengthValue.value),
+      variant,
+      generation,
+      ...(directionDegrees === undefined || linearFramesRemaining === undefined
+        ? {}
+        : {
+            motion: {
+              directionDegrees: directionDegrees.value,
+              linearFramesRemaining: linearFramesRemaining.value,
+            },
+          }),
+      kind: decodeFoodKind(valueAndKind.value % FOOD_KIND_BASE),
     },
-    offset: valueAndKind.offset,
+    offset: finalOffset,
   };
 }
 
@@ -1208,8 +1273,14 @@ function encodeEvents(
         writeUnsignedVarint(bytes, requirePlayerIndex(death.cause.killerId, playerIndex));
       }
     }
-    writeUnsignedVarint(bytes, event.consumedFoodIds.length);
-    for (const foodId of event.consumedFoodIds) writeUnsignedVarint(bytes, foodId);
+    writeUnsignedVarint(bytes, event.consumedFoods.length);
+    for (const consumed of event.consumedFoods) {
+      writeUnsignedVarint(bytes, requirePlayerIndex(consumed.playerId, playerIndex));
+      writeUnsignedVarint(bytes, consumed.sourceFrame);
+      writeFoodRecord(bytes, consumed.food);
+      writeSignedVarint(bytes, quantizeSigned(consumed.target.x));
+      writeSignedVarint(bytes, quantizeSigned(consumed.target.y));
+    }
     writeUnsignedVarint(bytes, event.respawnedPlayerIds.length);
     for (const playerId of event.respawnedPlayerIds) {
       writeUnsignedVarint(bytes, requirePlayerIndex(playerId, playerIndex));
@@ -1261,11 +1332,20 @@ function decodeEvents(
     }
     const consumedCount = readUnsignedVarint(bytes, offset);
     offset = consumedCount.offset;
-    const consumedFoodIds: Array<number> = [];
+    const consumedFoods: Array<FoodConsumedEvent> = [];
     for (let foodIndex = 0; foodIndex < consumedCount.value; foodIndex += 1) {
-      const food = readUnsignedVarint(bytes, offset);
-      offset = food.offset;
-      consumedFoodIds.push(food.value);
+      const consumer = readUnsignedVarint(bytes, offset);
+      const sourceFrame = readUnsignedVarint(bytes, consumer.offset);
+      const decodedFood = readFoodRecord(bytes, sourceFrame.offset);
+      const targetX = readSignedVarint(bytes, decodedFood.offset);
+      const targetY = readSignedVarint(bytes, targetX.offset);
+      offset = targetY.offset;
+      consumedFoods.push({
+        playerId: requireSnake(consumer.value, snakes).id,
+        sourceFrame: sourceFrame.value,
+        food: decodedFood.food,
+        target: { x: dequantize(targetX.value), y: dequantize(targetY.value) },
+      });
     }
     const respawnCount = readUnsignedVarint(bytes, offset);
     offset = respawnCount.offset;
@@ -1275,7 +1355,7 @@ function decodeEvents(
       offset = respawned.offset;
       respawnedPlayerIds.push(requireSnake(respawned.value, snakes).id);
     }
-    events.push({ tick: tick.value, deaths, consumedFoodIds, respawnedPlayerIds });
+    events.push({ tick: tick.value, deaths, consumedFoods, respawnedPlayerIds });
   }
   if (offset !== bytes.length) throw new Error("Trailing compact event data");
   return events;
@@ -1303,8 +1383,17 @@ function quantizeUnsigned(value: number): number {
   return Math.round(value * NUMBER_SCALE);
 }
 
+function quantizeBodyScale(value: number): number {
+  if (!Number.isFinite(value) || value < 0) throw new Error("Cannot encode an invalid body scale");
+  return Math.round(value * BODY_SCALE_NUMBER_SCALE);
+}
+
 function dequantize(value: number): number {
   return value / NUMBER_SCALE;
+}
+
+function dequantizeBodyScale(value: number): number {
+  return value / BODY_SCALE_NUMBER_SCALE;
 }
 
 function encodeAngle(value: number): number {
@@ -1318,12 +1407,18 @@ function decodeAngle(value: number): number {
   return angle > Math.PI ? angle - TAU : angle;
 }
 
+/** 食物类型与取值打包在同一个变长整数里，基数需覆盖所有类型。 */
+const FOOD_KINDS: ReadonlyArray<FoodKind> = ["ambient", "remains", "boost-remains"];
+const FOOD_KIND_BASE = 4;
+
 function encodeFoodKind(kind: FoodKind): number {
-  return kind === "ambient" ? 0 : 1;
+  const index = FOOD_KINDS.indexOf(kind);
+  if (index === -1) throw new Error(`Invalid food kind: ${kind}`);
+  return index;
 }
 
 function decodeFoodKind(kind: number): FoodKind {
-  if (kind === 0) return "ambient";
-  if (kind === 1) return "remains";
-  throw new Error(`Invalid food kind: ${kind}`);
+  const decoded = FOOD_KINDS[kind];
+  if (decoded === undefined) throw new Error(`Invalid food kind: ${kind}`);
+  return decoded;
 }

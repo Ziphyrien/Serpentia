@@ -3,7 +3,10 @@ import { MAX_CLIENT_MESSAGE_BYTES } from "../src/lib/protocol";
 import { verifySession, SESSION_COOKIE_NAME } from "../src/lib/server/access/session";
 import { ApiRouter } from "../src/lib/server/http/api-router";
 import { readCookie } from "../src/lib/server/http/cookies";
-import type { ConnectionIdentity } from "../src/lib/server/room/connection-identity";
+import {
+  normalizeSkinId,
+  type ConnectionIdentity,
+} from "../src/lib/server/room/connection-identity";
 import type { GameRoomConnection } from "../src/lib/server/room/game-room";
 import { createBackendDescriptor, createRoomMetadata } from "../src/lib/server/room/room-settings";
 import { loadRuntimeConfig } from "../src/lib/server/runtime/config";
@@ -62,6 +65,7 @@ const server = Bun.serve<WebSocketData>({
           identity: {
             playerId: session.playerId,
             nickname: session.nickname,
+            skinId: normalizeSkinId(session.skinId),
             sessionExpiresAt: session.expiresAt,
           },
         },

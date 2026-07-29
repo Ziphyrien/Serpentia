@@ -5,13 +5,40 @@
   let { feed }: { feed: ReadonlyArray<KillFeedEntry> } = $props();
 </script>
 
-<div class="pointer-events-none flex flex-col items-center gap-1.5">
+<div class="kill-feed pointer-events-none flex flex-col items-center">
   {#each feed as entry (entry.id)}
     <div
-      class="feed-in flex items-center gap-1.5 rounded-full border border-panel-border bg-panel px-4 py-1 text-xs font-bold text-white/90 backdrop-blur-sm"
+      class="kill-feed-item feed-in flex items-center rounded-full border border-panel-border bg-panel text-xs font-bold text-white/90 backdrop-blur-sm"
     >
       <Skull size={12} class="text-red-400" />
       {entry.text}
     </div>
   {/each}
 </div>
+
+<style>
+  .kill-feed {
+    gap: clamp(0.25rem, 0.8dvh, 0.375rem);
+  }
+
+  .kill-feed-item {
+    gap: clamp(0.25rem, 0.8dvh, 0.375rem);
+    padding-block: clamp(0.125rem, 0.533dvh, 0.25rem);
+    padding-inline: clamp(0.75rem, 2.133dvh, 1rem);
+  }
+
+  .feed-in {
+    animation: feed-in 0.18s ease-out;
+  }
+
+  @keyframes feed-in {
+    from {
+      opacity: 0;
+      transform: translateY(-8px) scale(0.95);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+</style>

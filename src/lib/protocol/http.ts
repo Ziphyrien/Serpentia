@@ -1,18 +1,26 @@
 import { Schema } from "effect";
+import { DEFAULT_SKIN_ID } from "../game/internal-skins";
 import { BackendDescriptor, IceServer } from "./game";
 import { PlayerId } from "./state";
 
+/** 内置皮肤 ID；服务端仍会按官方清单校验取值是否存在。 */
+const SkinId = Schema.Int.check(Schema.isGreaterThan(0));
+
 export class SessionRequest extends Schema.Class<SessionRequest>("SessionRequest")({
   nickname: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  skinId: Schema.optionalKey(SkinId),
 }) {}
 
 export const SessionInfo = Schema.Struct({
   authenticated: Schema.Literal(true),
   playerId: PlayerId,
   nickname: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
+  skinId: SkinId,
   expiresAt: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 export type SessionInfo = typeof SessionInfo.Type;
+
+export { DEFAULT_SKIN_ID };
 
 export const AnonymousSession = Schema.Struct({
   authenticated: Schema.Literal(false),

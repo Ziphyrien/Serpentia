@@ -126,16 +126,21 @@ export const IceServer = Schema.Struct({
 });
 export type IceServer = typeof IceServer.Type;
 
+/**
+ * 客户端需要的权威规则。
+ *
+ * 运动本身由共享的离散模型描述（固定点距、每帧点数、每帧转向），
+ * 因此这里只传长度边界与判定尺寸，速度不再作为独立常量下发。
+ */
 export const ClientGameRules = Schema.Struct({
   arenaHalfSize: Schema.Finite.check(Schema.isGreaterThan(0)),
-  baseSpeed: Schema.Finite.check(Schema.isGreaterThan(0)),
-  boostSpeed: Schema.Finite.check(Schema.isGreaterThan(0)),
-  turnRate: Schema.Finite.check(Schema.isGreaterThan(0)),
   initialLength: Schema.Finite.check(Schema.isGreaterThan(0)),
   minimumLength: Schema.Finite.check(Schema.isGreaterThan(0)),
-  boostMinimumLength: Schema.Finite.check(Schema.isGreaterThan(0)),
-  boostDrainPerSecond: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
-  foodRadius: Schema.Finite.check(Schema.isGreaterThan(0)),
+  /** 身体采样点数、体型与相机的封顶长度；逻辑 length/score 可继续增长。 */
+  maximumLength: Schema.Finite.check(Schema.isGreaterThan(0)),
+  eatDistanceFactor: Schema.Finite.check(Schema.isGreaterThan(0)),
+  /** 取值达到这个门槛的环境食物按星星渲染与判定。 */
+  starFoodValue: Schema.Finite.check(Schema.isGreaterThan(0)),
   respawnDelayTicks: NonNegativeInteger,
   respawnInvulnerabilityTicks: NonNegativeInteger,
 });

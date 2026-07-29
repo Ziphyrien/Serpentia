@@ -14,7 +14,7 @@ import {
   signSession,
   verifySession,
 } from "../access/session";
-import { normalizeNickname } from "../room/connection-identity";
+import { normalizeNickname, normalizeSkinId } from "../room/connection-identity";
 import type { RuntimeConfig } from "../runtime/config";
 import type { RuntimeServices } from "../runtime/services";
 import { createCoturnCredentials } from "../voice/coturn";
@@ -95,14 +95,16 @@ export class ApiRouter {
       authenticated: true,
       playerId: claims.playerId,
       nickname: claims.nickname,
+      skinId: claims.skinId,
       expiresAt: claims.expiresAt,
     });
   }
 
   private async createSession(request: Request, clientAddress: string): Promise<Response> {
     if (!isJsonRequest(request)) return sessionError("INVALID_REQUEST", 400);
-    if (!this.services.sessionAttempts.allow(clientAddress.slice(0, 128))) {
-      return sessionError("RATE_LIMITED", 429);
+    const sessionAttempt = this.services.sessionAttempts.take(clientAddress.slice(0, 128));
+    if (!sessionAttempt.allowed) {
+      return sessionError("RATE_LIMITED", 429, retryAfterHeaders(sessionAttempt));
     }
 
     let input: SessionRequest;
@@ -116,13 +118,14 @@ export class ApiRouter {
     const nickname = normalizeNickname(input.nickname);
     if (nickname === undefined) return sessionError("INVALID_REQUEST", 400);
 
+    const skinId = normalizeSkinId(input.skinId);
     try {
       const playerId = crypto.randomUUID();
       const expiresAt = Date.now() + SESSION_TTL_SECONDS * 1_000;
-      const claims = SessionClaims.make({ playerId, nickname, expiresAt });
+      const claims = SessionClaims.make({ playerId, nickname, skinId, expiresAt });
       const token = await signSession(claims, this.config.sessionSigningSecret);
       return sessionJson(
-        { authenticated: true, playerId, nickname, expiresAt },
+        { authenticated: true, playerId, nickname, skinId, expiresAt },
         sessionCookie(token, SESSION_TTL_SECONDS, this.secureCookie(request)),
       );
     } catch {
@@ -140,8 +143,9 @@ export class ApiRouter {
         : await verifySession(token, this.config.sessionSigningSecret);
     if (session === undefined) return turnError("UNAUTHORIZED", 401);
     if (this.config.coturn === undefined) return turnError("SERVER_MISCONFIGURED", 503);
-    if (!this.services.turnCredentialAttempts.allow(session.playerId)) {
-      return turnError("RATE_LIMITED", 429, { "retry-after": "600" });
+    const turnAttempt = this.services.turnCredentialAttempts.take(session.playerId);
+    if (!turnAttempt.allowed) {
+      return turnError("RATE_LIMITED", 429, retryAfterHeaders(turnAttempt));
     }
 
     try {
@@ -173,14 +177,26 @@ function methodNotAllowed(allow: string): Response {
   return new Response("Method not allowed", { status: 405, headers: { allow } });
 }
 
-function sessionError(error: SessionErrorCode, status: number): Response {
-  return Response.json({ error }, { status, headers: { "cache-control": "no-store" } });
+function sessionError(
+  error: SessionErrorCode,
+  status: number,
+  headers: HeadersInit = {},
+): Response {
+  const responseHeaders = new Headers(headers);
+  responseHeaders.set("cache-control", "no-store");
+  return Response.json({ error }, { status, headers: responseHeaders });
 }
 
 function sessionJson(status: SessionStatus, cookie?: string): Response {
   const headers = new Headers({ "cache-control": "no-store" });
   if (cookie !== undefined) headers.set("set-cookie", cookie);
   return Response.json(status, { headers });
+}
+
+function retryAfterHeaders(decision: { readonly retryAfterMilliseconds: number }): HeadersInit {
+  return {
+    "retry-after": String(Math.max(1, Math.ceil(decision.retryAfterMilliseconds / 1000))),
+  };
 }
 
 function turnError(

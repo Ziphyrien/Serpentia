@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { GameSnapshot, SnakeSnapshot } from "$lib/protocol";
+import { DEFAULT_SKIN_ID } from "$lib/game/internal-skins";
+import type { FoodState, GameSnapshot, SnakeSnapshot } from "$lib/protocol";
 import { SnapshotBuffer } from "./snapshot-buffer";
 
-function snake(id: string, x: number, alive = true): SnakeSnapshot {
+function snake(id: string, x: number, alive = true, skinId = DEFAULT_SKIN_ID): SnakeSnapshot {
   return {
     id,
     nickname: id,
+    skinId,
     body: [{ x, y: 0 }],
     angle: 0,
     targetAngle: 0,
-    radius: 11,
+    bodyScale: 1,
     length: 100,
     score: 0,
     kills: 0,
@@ -22,11 +24,29 @@ function snake(id: string, x: number, alive = true): SnakeSnapshot {
   };
 }
 
-function snapshot(tick: number, x: number): GameSnapshot {
+function food(id: number, x: number, y = 0): FoodState {
+  return {
+    id,
+    position: { x, y },
+    value: 10,
+    lengthValue: 10,
+    variant: 0,
+    generation: 0,
+    kind: "ambient",
+  };
+}
+
+function snapshot(
+  tick: number,
+  x: number,
+  bodyScale = 1,
+  remoteSkinId = DEFAULT_SKIN_ID,
+  foods: ReadonlyArray<FoodState> = [],
+): GameSnapshot {
   return {
     tick,
-    snakes: [snake("self", x), snake("remote", x)],
-    foods: [],
+    snakes: [snake("self", x), { ...snake("remote", x, true, remoteSkinId), bodyScale }],
+    foods,
     leaderboard: [],
   };
 }
@@ -71,5 +91,63 @@ describe("snapshot buffer", () => {
     expect(buffer.latestSnapshot?.tick).toBe(4);
     expect(remotes).toHaveLength(1);
     expect(remotes[0].id).toBe("remote");
+  });
+
+  it("maps the remote render clock to the same fractional tick as snake interpolation", () => {
+    const buffer = new SnapshotBuffer(() => "self");
+    buffer.push(snapshot(20, 100), 1_000);
+    buffer.push(snapshot(22, 200), 1_100);
+
+    expect(buffer.presentationTick(1_000)).toBe(20);
+    expect(buffer.presentationTick(1_025)).toBeCloseTo(20.5, 12);
+    expect(buffer.presentationTick(1_075)).toBeCloseTo(21.5, 12);
+    expect(buffer.presentationTick(1_100)).toBe(22);
+  });
+
+  it("smoothly interpolates continuous star movement", () => {
+    const buffer = new SnapshotBuffer(() => "self");
+    buffer.push(snapshot(2, 100, 1, DEFAULT_SKIN_ID, [food(1, 0)]), 100);
+    buffer.push(snapshot(4, 200, 1, DEFAULT_SKIN_ID, [food(1, 18)]), 200);
+
+    expect(buffer.sampleFoods(125)[0]?.position.x).toBeCloseTo(4.5);
+    expect(buffer.sampleFoods(150)[0]?.position.x).toBeCloseTo(9);
+    expect(buffer.sampleFoods(175)[0]?.position.x).toBeCloseTo(13.5);
+  });
+
+  it("does not interpolate a same-id safe respawn across the map", () => {
+    const buffer = new SnapshotBuffer(() => "self");
+    buffer.push(snapshot(2, 100, 1, DEFAULT_SKIN_ID, [food(1, 0)]), 100);
+    const nextGeneration: FoodState = { ...food(1, 200, -200), generation: 1 };
+    buffer.push(snapshot(4, 200, 1, DEFAULT_SKIN_ID, [nextGeneration]), 200);
+
+    expect(buffer.sampleFoods(199)[0]?.position).toEqual({ x: 0, y: 0 });
+    expect(buffer.sampleFoods(200)[0]?.position).toEqual({ x: 200, y: -200 });
+  });
+
+  it("switches disappearing and newly appearing foods only at the upper snapshot", () => {
+    const disappearing = new SnapshotBuffer(() => "self");
+    disappearing.push(snapshot(2, 100, 1, DEFAULT_SKIN_ID, [food(1, 0)]), 100);
+    disappearing.push(snapshot(4, 200), 200);
+    expect(disappearing.sampleFoods(199)).toHaveLength(1);
+    expect(disappearing.sampleFoods(200)).toEqual([]);
+
+    const appearing = new SnapshotBuffer(() => "self");
+    appearing.push(snapshot(2, 100), 100);
+    appearing.push(snapshot(4, 200, 1, DEFAULT_SKIN_ID, [food(1, 10)]), 200);
+    expect(appearing.sampleFoods(199)).toEqual([]);
+    expect(appearing.sampleFoods(200)).toHaveLength(1);
+  });
+
+  it("keeps discrete authoritative fields throughout an interpolation interval", () => {
+    const buffer = new SnapshotBuffer(() => "self");
+    const before = snapshot(2, 100, 1, 1);
+    const after = snapshot(4, 200, 1.1, 403);
+    buffer.push(before, 100);
+    buffer.push(after, 200);
+
+    expect(buffer.sampleRemoteSnakes(199)[0]?.bodyScale).toBe(1);
+    expect(buffer.sampleRemoteSnakes(199)[0]?.skinId).toBe(1);
+    expect(buffer.sampleRemoteSnakes(200)[0]?.bodyScale).toBe(1.1);
+    expect(buffer.sampleRemoteSnakes(200)[0]?.skinId).toBe(403);
   });
 });

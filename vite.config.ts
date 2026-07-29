@@ -18,7 +18,7 @@ export default defineConfig({
           filename.split(/[/\\]/).includes("node_modules") ? undefined : true,
       },
       adapter: adapter({
-        fallback: "index.html",
+        fallback: "200.html",
         precompress: true,
         strict: true,
       }),
@@ -32,7 +32,7 @@ export default defineConfig({
         test: {
           name: "server",
           environment: "node",
-          include: ["src/**/*.{test,spec}.{js,ts}"],
+          include: ["src/**/*.spec.{js,ts}", "tests/integration/**/*.integration.spec.{js,ts}"],
           exclude: ["src/**/*.svelte.{test,spec}.{js,ts}"],
         },
       },

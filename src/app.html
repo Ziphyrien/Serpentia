@@ -7,14 +7,35 @@
       content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
     />
     <meta name="text-scale" content="scale" />
-    <meta name="theme-color" content="#0b1020" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#ebecf4" />
     <meta name="application-name" content="蛇域" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="蛇域" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <style>
+      html,
+      body {
+        min-height: 100%;
+        margin: 0;
+        background-color: #ebecf4;
+      }
+
+      html {
+        color-scheme: light;
+      }
+
+      body {
+        background-image:
+          linear-gradient(#cdcdd6 1px, transparent 1px),
+          linear-gradient(90deg, #cdcdd6 1px, transparent 1px);
+        background-position: center;
+        background-size: 32px 32px;
+      }
+    </style>
     <title>蛇域</title>
     %sveltekit.head%
   </head>

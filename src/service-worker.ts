@@ -6,8 +6,10 @@ import { base, build, files, prerendered, version } from "$service-worker";
 const worker = self as unknown as ServiceWorkerGlobalScope;
 const CACHE_PREFIX = "serpentia-";
 const CACHE_NAME = `${CACHE_PREFIX}${version}`;
-const APP_SHELL = `${base}/`;
-const PRECACHE_URLS = [...new Set([...build, ...files, ...prerendered, APP_SHELL])];
+const APP_SHELL = `${base}/200.html`;
+// 大型 BGM 走独立 CDN/运行时缓存，不能阻塞 Service Worker 安装。
+const PRECACHE_FILES = files.filter((path) => !path.includes("/assets/audio/bgm/"));
+const PRECACHE_URLS = [...new Set([...build, ...PRECACHE_FILES, ...prerendered, APP_SHELL])];
 const PRECACHE_PATHS = new Set(PRECACHE_URLS);
 
 worker.addEventListener("install", (event) => {
@@ -51,10 +53,10 @@ async function networkFirstNavigation(request: Request): Promise<Response> {
   const cache = await caches.open(CACHE_NAME);
   try {
     const response = await fetch(request);
-    if (response.ok) await cache.put(APP_SHELL, response.clone());
+    if (response.ok) await cache.put(request, response.clone());
     return response;
   } catch {
-    return (await cache.match(APP_SHELL)) ?? Response.error();
+    return (await cache.match(request)) ?? (await cache.match(APP_SHELL)) ?? Response.error();
   }
 }
 

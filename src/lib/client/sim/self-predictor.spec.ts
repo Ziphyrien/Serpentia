@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
+import { DEFAULT_SKIN_ID } from "$lib/game/internal-skins";
 import type { ClientGameRules, SnakeSnapshot } from "$lib/protocol";
-import { advanceSnakeMotion, normalizeAngle, type SnakeMotionState } from "../../game/snake-motion";
+import {
+  advanceSnakeMotion,
+  applySnakeBoostInput,
+  createBody,
+  normalizeAngle,
+  snakeMotionRules,
+  targetSnakeBodyScale,
+  type SnakeMotionState,
+} from "../../game/snake-motion";
 import { SelfPredictor } from "./self-predictor";
 
 const TICK_RATE = 20;
@@ -8,45 +17,57 @@ const TICK_MS = 1000 / TICK_RATE;
 
 const rules: ClientGameRules = {
   arenaHalfSize: 1000,
-  baseSpeed: 100,
-  boostSpeed: 200,
-  turnRate: 4,
-  initialLength: 100,
-  minimumLength: 50,
-  boostMinimumLength: 60,
-  boostDrainPerSecond: 10,
-  foodRadius: 5,
+  initialLength: 80,
+  minimumLength: 80,
+  maximumLength: 100_000,
+  eatDistanceFactor: 1.6,
+  starFoodValue: 10,
   respawnDelayTicks: 30,
   respawnInvulnerabilityTicks: 40,
 };
 
+const motion = snakeMotionRules({
+  tickRate: TICK_RATE,
+  minimumLength: rules.minimumLength,
+  maximumLength: rules.maximumLength,
+});
+
 function initialMotion(): SnakeMotionState {
+  // 长度高于下限，加速相关断言才有意义。
+  const length = rules.minimumLength + 120;
   return {
-    body: [
-      { x: 0, y: 0 },
-      { x: -100, y: 0 },
-    ],
+    body: createBody({ x: 0, y: 0 }, 0, length, motion),
     angle: 0,
     targetAngle: 0,
-    length: 100,
+    length,
+    bodyScale: targetSnakeBodyScale(length, rules.minimumLength),
     boosting: false,
+    boostInputHeld: false,
+    boostFrames: 0,
   };
+}
+
+/** 一个 tick 前进的世界距离。 */
+function tickDistance(boosting = false): number {
+  const points = boosting ? motion.boostPointsPerFrame : motion.pointsPerFrame;
+  return motion.sourceFramesPerTick * points * motion.pointSpacing;
 }
 
 function stepMotion(state: SnakeMotionState, targetAngle: number, boosting: boolean): void {
   state.targetAngle = targetAngle;
-  state.boosting = boosting;
-  advanceSnakeMotion(state, rules, TICK_MS / 1000);
+  applySnakeBoostInput(state, boosting, motion.minimumLength);
+  advanceSnakeMotion(state, motion);
 }
 
 function snapshotOf(state: SnakeMotionState): SnakeSnapshot {
   return {
     id: "self",
     nickname: "Self",
+    skinId: DEFAULT_SKIN_ID,
     body: state.body.map((point) => ({ ...point })),
     angle: state.angle,
     targetAngle: state.targetAngle,
-    radius: 10,
+    bodyScale: state.bodyScale,
     length: state.length,
     score: 0,
     kills: 0,
@@ -131,7 +152,9 @@ describe("self prediction", () => {
       const travelled = Math.hypot(head(rendered!).x - neck.x, head(rendered!).y - neck.y);
       if (travelled < 1e-6) continue;
       const bodyHeading = Math.atan2(head(rendered!).y - neck.y, head(rendered!).x - neck.x);
-      expect(Math.abs(normalizeAngle(rendered!.angle - bodyHeading))).toBeLessThan(0.2);
+      expect(Math.abs(normalizeAngle(rendered!.angle - bodyHeading))).toBeLessThan(
+        motion.turnPerFrame + 0.001,
+      );
     }
   });
 
@@ -147,6 +170,7 @@ describe("self prediction", () => {
 
     let previous = predictor.renderState();
     expect(previous).toBeDefined();
+    const step = tickDistance(true) * (5 / TICK_MS);
     for (let now = 5; now <= 200; now += 5) {
       predictor.advance(now);
       const current = predictor.renderState();
@@ -155,12 +179,108 @@ describe("self prediction", () => {
         head(current!).x - head(previous!).x,
         head(current!).y - head(previous!).y,
       );
-      expect(distance).toBeGreaterThan(0.9);
-      expect(distance).toBeLessThan(1.1);
+      expect(distance).toBeGreaterThan(step * 0.85);
+      expect(distance).toBeLessThan(step * 1.15);
       expect(current!.angle).toBeGreaterThanOrEqual(previous!.angle);
-      expect(current!.angle - previous!.angle).toBeLessThanOrEqual(0.061);
+      expect(current!.angle - previous!.angle).toBeLessThanOrEqual(
+        motion.sourceFramesPerTick * motion.turnPerFrame * (5 / TICK_MS) + 0.001,
+      );
       previous = current;
     }
+  });
+
+  it("does not auto-boost when authoritative food arrives during a rejected held press", () => {
+    const server = initialMotion();
+    server.length = rules.minimumLength;
+    server.bodyScale = targetSnakeBodyScale(server.length, rules.minimumLength);
+    server.body = createBody({ x: 0, y: 0 }, 0, server.length, motion);
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(server), 0, 0);
+
+    const rejectedTick = predictor.nextInputTick;
+    predictor.scheduleInput({ sequence: 1, targetTick: rejectedTick, angle: 0, boosting: true });
+    predictor.advance(50);
+
+    advanceSnakeMotion(server, motion);
+    advanceSnakeMotion(server, motion);
+    applySnakeBoostInput(server, true, motion.minimumLength);
+    advanceSnakeMotion(server, motion);
+    server.length += 1;
+    predictor.reconcile(
+      {
+        ...snapshotOf(server),
+        lastInputSequence: 1,
+        lastInputAppliedTick: rejectedTick,
+      },
+      rejectedTick,
+      50,
+    );
+
+    const afterFood = head(predictor.renderState()!);
+    predictor.advance(100);
+    const stillHeld = predictor.renderState();
+    expect(stillHeld?.boosting).toBe(false);
+    expect(head(stillHeld!).x - afterFood.x).toBeCloseTo(tickDistance(), 8);
+
+    predictor.scheduleInput({
+      sequence: 2,
+      targetTick: predictor.nextInputTick,
+      angle: 0,
+      boosting: true,
+    });
+    predictor.advance(150);
+    expect(predictor.renderState()?.boosting).toBe(false);
+
+    predictor.scheduleInput({
+      sequence: 3,
+      targetTick: predictor.nextInputTick,
+      angle: 0,
+      boosting: false,
+    });
+    predictor.advance(200);
+    const beforeFreshPress = head(predictor.renderState()!);
+    predictor.scheduleInput({
+      sequence: 4,
+      targetTick: predictor.nextInputTick,
+      angle: 0,
+      boosting: true,
+    });
+    predictor.advance(250);
+    const freshPress = predictor.renderState();
+    expect(freshPress?.boosting).toBe(true);
+    expect(
+      Math.hypot(
+        head(freshPress!).x - beforeFreshPress.x,
+        head(freshPress!).y - beforeFreshPress.y,
+      ),
+    ).toBeCloseTo(tickDistance(true), 8);
+  });
+
+  it("samples boost collision at one source frame instead of the whole tick endpoint", () => {
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
+    const before = predictor.renderState();
+    expect(before).toBeDefined();
+    const targetTick = predictor.nextInputTick;
+    predictor.scheduleInput({
+      sequence: 1,
+      targetTick,
+      angle: 0,
+      boosting: true,
+    });
+    const tickEndpoint = predictor.headAtTick(targetTick);
+    expect(tickEndpoint).toBeDefined();
+
+    predictor.advance(1);
+    const collision = predictor.renderState();
+    expect(collision).toBeDefined();
+    expect(collision!.collisionSourceFrame).toBe(Math.ceil(collision!.presentationSourceFrame));
+    expect(collision!.collisionHead.x - before!.collisionHead.x).toBeCloseTo(
+      motion.boostPointsPerFrame * motion.pointSpacing,
+      8,
+    );
+    expect(collision!.collisionHead.x).toBeLessThan(tickEndpoint!.x);
+    expect(collision!.collisionHead.y).toBeCloseTo(0, 8);
   });
 
   it("does not rewrite an interpolation segment after it becomes visible", () => {
@@ -249,7 +369,7 @@ describe("self prediction", () => {
     for (let now = 5; now < TICK_MS; now += 5) {
       predictor.advance(now);
       const rendered = head(predictor.renderState()!);
-      expect(distanceToSegment(rendered, start!, end!)).toBeLessThan(segmentLength * 0.04);
+      expect(distanceToSegment(rendered, start!, end!)).toBeLessThan(segmentLength * 0.06);
     }
   });
 
@@ -363,12 +483,10 @@ describe("self prediction", () => {
     const predictor = new SelfPredictor(rules, TICK_RATE);
     predictor.reconcile(snapshotOf(initialMotion()), 0, 0);
     const farAway = initialMotion();
-    farAway.body = [
-      { x: 200, y: 0 },
-      { x: 100, y: 0 },
-    ];
+    farAway.body = createBody({ x: 200, y: 0 }, 0, farAway.length, motion);
     predictor.reconcile(snapshotOf(farAway), 1, 50);
-    expect(head(predictor.renderState()!).x).toBe(210);
+    // 重基线后立即补上预测提前量，两个 tick 的推进距离可由规则算出。
+    expect(head(predictor.renderState()!).x).toBeCloseTo(200 + 2 * tickDistance(), 6);
   });
 
   it("keeps an applied ack input available until its target tick is simulated", () => {

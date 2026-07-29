@@ -1,43 +1,51 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { GameController } from "$lib/client/game.svelte";
-  import type { SessionStore } from "$lib/client/stores/session.svelte";
+  import { gamePresentationPhase } from "$lib/client/game-readiness";
+  import type { SessionState } from "$lib/client/stores/session.svelte";
   import type { SettingsStore } from "$lib/client/stores/settings.svelte";
   import Hud from "./hud.svelte";
 
   let {
     session,
     settings,
-    sessionStore,
+    onReturnHome,
+    onSessionExpired,
   }: {
-    session: Extract<SessionStore["state"], { status: "authenticated" }>;
+    session: Extract<SessionState, { status: "authenticated" }>;
     settings: SettingsStore;
-    sessionStore: SessionStore;
+    onReturnHome: () => void | Promise<void>;
+    onSessionExpired: () => void;
   } = $props();
 
   let canvasHost = $state<HTMLDivElement>();
-  // 组件仅在已认证分支渲染，登录态变化会整树重建，这里只需读取一次初始 props
-  /* svelte-ignore state_referenced_locally */
-  const controller = new GameController(session.descriptor, session.session, settings, () =>
-    sessionStore.markExpired(),
+  let controller = $state<GameController>();
+  const presentationPhase = $derived(
+    controller === undefined
+      ? "loading"
+      : gamePresentationPhase(controller.status, controller.gameReady),
   );
 
   onMount(() => {
-    if (canvasHost) void controller.attachRenderer(canvasHost);
-    return () => controller.destroy();
+    const activeController = new GameController(
+      session.descriptor,
+      session.session,
+      settings,
+      onSessionExpired,
+    );
+    controller = activeController;
+    if (canvasHost) void activeController.attachRenderer(canvasHost);
+    return () => {
+      activeController.destroy();
+      if (controller === activeController) controller = undefined;
+    };
   });
 </script>
 
-<div class="fixed inset-0 overflow-hidden bg-night-950">
-  <div bind:this={canvasHost} class="absolute inset-0"></div>
+<div class="game-map-background fixed inset-0 overflow-hidden">
+  <div bind:this={canvasHost} class="absolute inset-0" data-game-canvas></div>
 
-  {#if controller.status === "connecting" || controller.status === "reconnecting"}
-    <div class="absolute inset-x-0 top-0 z-30 flex justify-center pt-20 landscape-short:pt-12">
-      <div class="rounded-full bg-panel px-6 py-2 text-sm font-bold text-white/90 backdrop-blur-sm">
-        {controller.status === "connecting" ? "正在进入蛇域…" : "连接断了，正在重连…"}
-      </div>
-    </div>
-  {:else if controller.status === "closed"}
+  {#if controller !== undefined && presentationPhase === "closed"}
     <div class="absolute inset-0 z-30 flex items-center justify-center bg-night-950/80">
       <div class="flex flex-col items-center gap-4">
         <p class="text-lg font-bold text-white">{controller.notice ?? "连接已关闭"}</p>
@@ -49,7 +57,27 @@
         </button>
       </div>
     </div>
+  {:else if presentationPhase === "loading" || presentationPhase === "reconnecting"}
+    <div class="game-loading-notice absolute inset-x-0 top-0 z-30 flex justify-center">
+      <div class="rounded-full bg-panel px-6 py-2 text-sm font-bold text-white/90 backdrop-blur-sm">
+        {presentationPhase === "reconnecting" ? "连接断了，正在重连…" : "正在进入蛇域…"}
+      </div>
+    </div>
   {/if}
 
-  <Hud {controller} {settings} onLogout={() => void sessionStore.logout()} />
+  {#if controller !== undefined && (presentationPhase === "ready" || presentationPhase === "reconnecting")}
+    <Hud {controller} {settings} onReturnHome={() => void onReturnHome()} />
+  {/if}
 </div>
+
+<style>
+  .game-loading-notice {
+    padding-top: 5rem;
+  }
+
+  @media (orientation: landscape) and (max-height: 30rem) {
+    .game-loading-notice {
+      padding-top: 3rem;
+    }
+  }
+</style>

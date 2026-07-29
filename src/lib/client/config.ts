@@ -1,62 +1,19 @@
-export interface SkinDefinition {
-  readonly id: string;
-  readonly textureIndex: number;
-  /** 用于死亡粒子等非 Sprite 特效的代表色。 */
-  readonly body: number;
-}
-
-/** Snake-Demo 游戏场景实际配置的四套蛇皮肤。 */
-export const SKINS: ReadonlyArray<SkinDefinition> = [
-  { id: "snake-demo-red", textureIndex: 0, body: 0xd71915 },
-  { id: "snake-demo-blue", textureIndex: 1, body: 0x278fd0 },
-  { id: "snake-demo-blue-alt", textureIndex: 2, body: 0x3190c7 },
-  { id: "snake-demo-yellow", textureIndex: 3, body: 0xf1dc2e },
-];
-
-/** 由 playerId 稳定推导皮肤，保证所有客户端看到的一致。 */
-export function skinForPlayer(playerId: string): SkinDefinition {
-  let hash = 0;
-  for (let index = 0; index < playerId.length; index += 1) {
-    hash = (hash * 31 + playerId.charCodeAt(index)) | 0;
-  }
-  return SKINS[Math.abs(hash) % SKINS.length];
+/** 按序号生成同一组资源的路径，避免逐条手写。 */
+function numberedPaths(directory: string, prefix: string, count: number): ReadonlyArray<string> {
+  return Array.from({ length: count }, (_, index) => `${directory}/${prefix}-${index + 1}.png`);
 }
 
 export const ASSET_PATHS = {
-  bgTile: "/assets/art/bg-tile.webp",
-  logo: "/assets/art/logo.png",
-  loginHero: "/assets/art/login-hero.webp",
-  snakeDemo: {
-    snakeSkins: [
-      {
-        head: "/assets/art/snake-demo/snake-1-head.png",
-        body: "/assets/art/snake-demo/snake-1-body.png",
-      },
-      {
-        head: "/assets/art/snake-demo/snake-2-head.png",
-        body: "/assets/art/snake-demo/snake-2-body.png",
-      },
-      {
-        head: "/assets/art/snake-demo/snake-3-head.png",
-        body: "/assets/art/snake-demo/snake-3-body.png",
-      },
-      {
-        head: "/assets/art/snake-demo/snake-4-head.png",
-        body: "/assets/art/snake-demo/snake-4-body.png",
-      },
-    ],
-    foods: [
-      "/assets/art/snake-demo/food-1.png",
-      "/assets/art/snake-demo/food-2.png",
-      "/assets/art/snake-demo/food-3.png",
-      "/assets/art/snake-demo/food-4.png",
-      "/assets/art/snake-demo/food-5.png",
-      "/assets/art/snake-demo/food-6.png",
-      "/assets/art/snake-demo/food-7.png",
-      "/assets/art/snake-demo/food-8.png",
-    ],
-    remainsFood: "/assets/art/snake-demo/food-remains.png",
+  effects: {
+    speedUp: "/assets/art/effects/speed-up.png",
+    protect: "/assets/art/effects/protect.png",
   },
+  food: {
+    dots: numberedPaths("/assets/art/food", "dot", 7),
+    star: "/assets/art/food/star.png",
+  },
+  /** 残骸贴图：加速掉落与死亡残骸共用这一组糖果帧。 */
+  wrecks: numberedPaths("/assets/art/wrecks", "candy", 20),
 } as const;
 
 export const RENDER = {
@@ -64,9 +21,18 @@ export const RENDER = {
   minInterpolationDelayMs: 90,
   maxInterpolationDelayMs: 260,
   maxDevicePixelRatio: 2,
-  zoomAtBaseRadius: 1.45,
-  zoomAtMaxRadius: 0.78,
-  cameraLerp: 0.12,
+  /**
+   * 固定设计分辨率。
+   *
+   * 原版正常 `Game` 使用 Cocos `FIXED_HEIGHT`：世界单位先按 `高/750`
+   * 折算到设计像素，再乘相机缩放。宽高比只改变左右可见范围。
+   */
+  designWidth: 1334,
+  designHeight: 750,
+  /** 相机缩放：出生 1.3，长度达到 cameraScaleMaxLength 时降到 0.6。 */
+  cameraInitScale: 1.3,
+  cameraMinScale: 0.6,
+  cameraScaleMaxLength: 100_000,
 } as const;
 
 export const INPUT = {
@@ -75,10 +41,20 @@ export const INPUT = {
 } as const;
 
 export const ARENA_COLORS = {
-  /** 场外虚空：深色收边，让亮色场地更突出。 */
-  surround: 0x161a26,
-  /** 场地底色，取自原版背景主色 #ebecf4。 */
-  floor: 0xeef0f6,
-  gridMinor: 0xd8dce9,
-  gridMajor: 0xc4cade,
+  /** 场外底色。 */
+  surround: 0x6c241f,
+  /** 场地底色。 */
+  floor: 0xebecf4,
+  /** 网格线。 */
+  grid: 0xcdcdd6,
+  /** 场地边框。 */
+  border: 0xeb4f71,
+} as const;
+
+/** 场地几何：网格间距、边框宽度与外扩量。 */
+export const ARENA_GEOMETRY = {
+  gridSpacing: 32,
+  gridLineWidth: 1,
+  borderWidth: 4,
+  borderOutset: 2,
 } as const;

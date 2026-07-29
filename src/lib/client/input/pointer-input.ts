@@ -17,30 +17,24 @@ export class PointerInput {
     window.addEventListener("contextmenu", this.onContextMenu);
   }
 
-  private pointerActive = false;
-  private keyActive = false;
-
   private onPointerMove = (event: PointerEvent): void => {
     if (event.pointerType === "touch") return; // 触屏交给摇杆
     const dx = event.clientX - window.innerWidth / 2;
     const dy = event.clientY - window.innerHeight / 2;
     if (dx * dx + dy * dy < 4) return; // 中心死区，避免抖动
-    this.state.angle = Math.atan2(dy, dx);
-    this.state.hasDirection = true;
+    this.state.setDirection("pointer", Math.atan2(dy, dx));
   };
 
   private onPointerDown = (event: PointerEvent): void => {
     if (event.pointerType === "touch" || event.button !== 0) return;
     const target = event.target as HTMLElement | null;
     if (target?.closest("button, a, input, [data-ui]")) return; // 不抢 UI 点击
-    this.pointerActive = true;
-    this.state.boosting = true;
+    this.state.setBoosting("pointer", true);
   };
 
   private onPointerUp = (event: PointerEvent): void => {
     if (event.pointerType === "touch" || event.button !== 0) return;
-    this.pointerActive = false;
-    this.state.boosting = this.keyActive;
+    this.state.setBoosting("pointer", false);
   };
 
   private onKeyDown = (event: KeyboardEvent): void => {
@@ -48,20 +42,18 @@ export class PointerInput {
     const target = event.target as HTMLElement | null;
     if (target?.closest("input, textarea")) return;
     event.preventDefault();
-    this.keyActive = true;
-    this.state.boosting = true;
+    this.state.setBoosting("keyboard", true);
   };
 
   private onKeyUp = (event: KeyboardEvent): void => {
     if (event.code !== "Space") return;
-    this.keyActive = false;
-    this.state.boosting = this.pointerActive;
+    this.state.setBoosting("keyboard", false);
   };
 
   private onBlur = (): void => {
-    this.pointerActive = false;
-    this.keyActive = false;
-    this.state.boosting = false;
+    this.state.releaseDirection("pointer");
+    this.state.setBoosting("pointer", false);
+    this.state.setBoosting("keyboard", false);
   };
 
   private onContextMenu = (event: Event): void => {
@@ -79,5 +71,8 @@ export class PointerInput {
     window.removeEventListener("keyup", this.onKeyUp);
     window.removeEventListener("blur", this.onBlur);
     window.removeEventListener("contextmenu", this.onContextMenu);
+    this.state.releaseDirection("pointer");
+    this.state.setBoosting("pointer", false);
+    this.state.setBoosting("keyboard", false);
   }
 }

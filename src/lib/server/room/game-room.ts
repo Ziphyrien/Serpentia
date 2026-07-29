@@ -68,7 +68,7 @@ export class GameRoom {
     const result = this.controller.join(connection.id, identity);
     if (result._tag === "Rejected") {
       this.sendError(connection, result.reason, false);
-      connection.close(4409, "Nickname is already in use");
+      connection.close(4409, "昵称已被占用，请更换昵称");
       return;
     }
 
@@ -353,6 +353,7 @@ export class GameRoom {
     const snapshotInterval = Math.max(1, Math.round(defaultGameConfig.tickRate / SNAPSHOT_RATE));
     const urgent =
       result.events.deaths.length > 0 ||
+      result.events.consumedFoods.length > 0 ||
       result.events.respawnedPlayerIds.length > 0 ||
       result.expiredPlayerIds.length > 0;
     if (urgent || this.controller.currentTick % snapshotInterval === 0) {
