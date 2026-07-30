@@ -87,7 +87,9 @@
   >
     <section class="order-2 flex min-w-0 flex-col items-center justify-center md:order-1 md:items-end">
       <div class="flex w-80 max-w-full flex-col items-center">
-        <SnakeSkinPreview skin={selectedSkin} width={320} height={180} animated />
+        <div class="relative h-45 w-80 max-w-full" data-ui>
+          <SnakeSkinPreview skin={selectedSkin} width={320} height={180} animated />
+        </div>
         <button
           type="button"
           onclick={() => (skinPickerOpen = true)}

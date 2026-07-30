@@ -19,6 +19,7 @@
   } = $props();
 
   let canvas = $state<HTMLCanvasElement>();
+  let ready = $state(false);
 
   $effect(() => {
     const target = canvas;
@@ -42,15 +43,23 @@
       started = true;
       startedAt = performance.now();
       render(startedAt);
+      ready = true;
+    };
+    const failed = (): void => {
+      if (!disposed) ready = false;
     };
 
+    ready = false;
     image.addEventListener("load", loaded);
+    image.addEventListener("error", failed);
     image.src = skin.atlas.path;
     if (image.complete && image.naturalWidth > 0) loaded();
 
     return () => {
       disposed = true;
+      ready = false;
       image.removeEventListener("load", loaded);
+      image.removeEventListener("error", failed);
       if (animationFrame !== 0) cancelAnimationFrame(animationFrame);
     };
   });
@@ -230,6 +239,8 @@
 <canvas
   bind:this={canvas}
   aria-hidden="true"
-  class="block h-auto max-w-full touch-pan-y"
+  class="pointer-events-none block max-w-full touch-pan-y transition-opacity duration-150"
+  class:opacity-0={!ready}
   style:width="{width}px"
+  style:height="{height}px"
 ></canvas>
