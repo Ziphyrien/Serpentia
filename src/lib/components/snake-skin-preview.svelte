@@ -241,6 +241,6 @@
   aria-hidden="true"
   class="pointer-events-none block max-w-full touch-pan-y transition-opacity duration-150"
   class:opacity-0={!ready}
+  style:aspect-ratio="{width} / {height}"
   style:width="{width}px"
-  style:height="{height}px"
 ></canvas>
