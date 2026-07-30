@@ -47,7 +47,7 @@
 
 <style>
   .magnet-status {
-    bottom: max(2.8dvh, var(--hud-safe-bottom));
+    bottom: 2.8dvh;
     width: 8dvh;
     height: 8dvh;
   }

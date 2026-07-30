@@ -102,10 +102,6 @@
     --hud-small-gap: clamp(0.375rem, 1.067dvh, 0.5rem);
 
     padding: var(--hud-gap);
-    padding-top: max(var(--hud-gap), var(--hud-safe-top));
-    padding-right: max(var(--hud-gap), var(--hud-safe-right));
-    padding-bottom: max(var(--hud-gap), var(--hud-safe-bottom));
-    padding-left: max(var(--hud-gap), var(--hud-safe-left));
   }
 
   .hud-row,

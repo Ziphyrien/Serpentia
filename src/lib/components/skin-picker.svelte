@@ -42,7 +42,7 @@
 
 <div class="game-map-background fixed inset-0 z-50 overflow-hidden text-map-ink">
   <div class="relative flex h-full flex-col">
-    <header class="safe-panel-padding flex items-center justify-between border-b border-map-grid bg-map-floor/90 backdrop-blur-sm">
+    <header class="flex items-center justify-between border-b border-map-grid bg-map-floor/90 p-3 backdrop-blur-sm">
       <button
         type="button"
         aria-label="返回"
@@ -100,7 +100,7 @@
       {/if}
     </div>
 
-    <footer class="safe-panel-padding border-t border-map-grid bg-map-floor/92 backdrop-blur-sm">
+    <footer class="border-t border-map-grid bg-map-floor/92 p-3 backdrop-blur-sm">
       <button
         type="button"
         onclick={onClose}
@@ -111,12 +111,3 @@
     </footer>
   </div>
 </div>
-
-<style>
-  .safe-panel-padding {
-    padding-top: max(0.75rem, var(--hud-safe-top));
-    padding-right: max(0.75rem, var(--hud-safe-right));
-    padding-bottom: max(0.75rem, var(--hud-safe-bottom));
-    padding-left: max(0.75rem, var(--hud-safe-left));
-  }
-</style>
