@@ -55,7 +55,7 @@
   <Dialog.Portal>
     <Dialog.Overlay class="fixed inset-0 z-40 bg-night-950/70 backdrop-blur-sm" />
     <Dialog.Content
-      class="fixed top-1/2 left-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(92vw,22rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-panel-border bg-night-900 p-6 shadow-2xl"
+      class="fixed top-1/2 left-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(92vw,22rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-panel-border bg-night-900 p-6 text-white shadow-2xl"
     >
       <div class="mb-5 flex items-center justify-between">
         <Dialog.Title class="text-lg font-black tracking-wide">队伍语音</Dialog.Title>
@@ -98,7 +98,7 @@
 
       <Button
         intent={controller.voiceJoined ? "danger" : "primary"}
-        class="mb-5 w-full"
+        class="w-full"
         onclick={() => controller.toggleVoice()}
       >
         {#if controller.voiceJoined}
@@ -110,40 +110,42 @@
         {/if}
       </Button>
 
-      <div class="flex max-h-56 flex-col gap-2 overflow-y-auto">
-        {#each controller.voicePeers as peer (peer.playerId)}
-          <div class="rounded-2xl bg-white/5 px-4 py-3">
-            <div class="flex items-center gap-2.5">
-              <span
-                class="flex size-8 items-center justify-center rounded-full bg-white/10 text-white/80 {peer.speaking
-                  ? 'speaking-ring'
-                  : ''}"
-              >
-                {#if !peer.microphoneEnabled}
-                  <Headphones size={15} />
-                {:else if peer.muted}
-                  <MicOff size={15} />
-                {:else}
-                  <Mic size={15} />
-                {/if}
-              </span>
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-black text-white">{peer.nickname}</p>
-                <p class="text-xs text-white/50">{peerStatus(peer)}</p>
+      {#if controller.voicePeers.length > 0}
+        <div class="mt-5 flex max-h-56 flex-col gap-2 overflow-y-auto">
+          {#each controller.voicePeers as peer (peer.playerId)}
+            <div class="rounded-2xl bg-white/5 px-4 py-3">
+              <div class="flex items-center gap-2.5">
+                <span
+                  class="flex size-8 items-center justify-center rounded-full bg-white/10 text-white/80 {peer.speaking
+                    ? 'speaking-ring'
+                    : ''}"
+                >
+                  {#if !peer.microphoneEnabled}
+                    <Headphones size={15} />
+                  {:else if peer.muted}
+                    <MicOff size={15} />
+                  {:else}
+                    <Mic size={15} />
+                  {/if}
+                </span>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-black text-white">{peer.nickname}</p>
+                  <p class="text-xs text-white/50">{peerStatus(peer)}</p>
+                </div>
               </div>
+              {#if peer.microphoneEnabled}
+                <div class="mt-2.5 flex items-center gap-2 pl-10">
+                  <span class="text-xs text-white/50">音量</span>
+                  <Slider
+                    value={peer.volume}
+                    onValueChange={(v) => controller.setPeerVolume(peer.playerId, v)}
+                  />
+                </div>
+              {/if}
             </div>
-            {#if peer.microphoneEnabled}
-              <div class="mt-2.5 flex items-center gap-2 pl-10">
-                <span class="text-xs text-white/40">音量</span>
-                <Slider
-                  value={peer.volume}
-                  onValueChange={(v) => controller.setPeerVolume(peer.playerId, v)}
-                />
-              </div>
-            {/if}
-          </div>
-        {/each}
-      </div>
+          {/each}
+        </div>
+      {/if}
     </Dialog.Content>
   </Dialog.Portal>
 </Dialog.Root>
