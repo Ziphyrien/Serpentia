@@ -3,6 +3,7 @@ import { DEFAULT_SKIN_ID } from "$lib/game/internal-skins";
 import type { ClientGameRules, SnakeSnapshot } from "$lib/protocol";
 import {
   advanceSnakeMotion,
+  advanceSnakeSourceFrame,
   applySnakeBoostInput,
   createBody,
   normalizeAngle,
@@ -254,6 +255,135 @@ describe("self prediction", () => {
         head(freshPress!).y - beforeFreshPress.y,
       ),
     ).toBeCloseTo(tickDistance(true), 8);
+  });
+
+  it("replays a future boost press after food raises length above minimum", () => {
+    const server = initialMotion();
+    server.length = rules.minimumLength;
+    server.bodyScale = targetSnakeBodyScale(server.length, rules.minimumLength);
+    server.body = createBody({ x: 0, y: 0 }, 0, server.length, motion);
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(server), 0, 0);
+
+    const boostTick = predictor.nextInputTick;
+    predictor.scheduleInput({ sequence: 1, targetTick: boostTick, angle: 0, boosting: true });
+    predictor.advance(TICK_MS);
+    expect(predictor.renderState()?.boosting).toBe(false);
+
+    advanceSnakeMotion(server, motion);
+    advanceSnakeMotion(server, motion);
+    server.length += 1;
+    const beforeFoodSnapshot = predictor.renderState();
+    expect(beforeFoodSnapshot).toBeDefined();
+    predictor.reconcile(snapshotOf(server), 2, TICK_MS);
+    const afterFoodSnapshot = predictor.renderState();
+    expect(afterFoodSnapshot).toBeDefined();
+    if (beforeFoodSnapshot === undefined || afterFoodSnapshot === undefined) {
+      throw new Error("predicted snake disappeared before its future boost press");
+    }
+    expectSamePose(beforeFoodSnapshot, afterFoodSnapshot);
+    expect(afterFoodSnapshot.boosting).toBe(true);
+  });
+
+  it("replays predicted future without snapping when food prevents boost exhaustion", () => {
+    const server = initialMotion();
+    server.length = rules.minimumLength + 1;
+    server.bodyScale = targetSnakeBodyScale(server.length, rules.minimumLength);
+    server.body = createBody({ x: 0, y: 0 }, 0, server.length, motion);
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(server), 0, 0);
+
+    const boostTick = predictor.nextInputTick;
+    predictor.scheduleInput({ sequence: 1, targetTick: boostTick, angle: 0, boosting: true });
+    for (let now = TICK_MS; now <= 8 * TICK_MS; now += TICK_MS) predictor.advance(now);
+    expect(predictor.renderState()?.boosting).toBe(false);
+
+    for (let tick = 1; tick <= 8; tick += 1) {
+      if (tick === boostTick) applySnakeBoostInput(server, true, motion.minimumLength);
+      advanceSnakeMotion(server, motion);
+    }
+    expect(server.boosting).toBe(true);
+    expect(server.boostFrames).toBe(18);
+    server.length += 1;
+
+    const beforeFoodSnapshot = predictor.renderState();
+    expect(beforeFoodSnapshot).toBeDefined();
+    predictor.reconcile(
+      {
+        ...snapshotOf(server),
+        lastInputSequence: 1,
+        lastInputAppliedTick: boostTick,
+      },
+      8,
+      8 * TICK_MS,
+    );
+    const afterFoodSnapshot = predictor.renderState();
+    expect(afterFoodSnapshot).toBeDefined();
+    if (beforeFoodSnapshot === undefined || afterFoodSnapshot === undefined) {
+      throw new Error("predicted snake disappeared around food reconciliation");
+    }
+    expectSamePose(beforeFoodSnapshot, afterFoodSnapshot);
+    expect(afterFoodSnapshot.boosting).toBe(true);
+  });
+
+  it("smooths an authoritative food correction after boost already diverged", () => {
+    const server = initialMotion();
+    server.length = rules.minimumLength + 1;
+    server.bodyScale = targetSnakeBodyScale(server.length, rules.minimumLength);
+    server.body = createBody({ x: 0, y: 0 }, 0, server.length, motion);
+    const predictor = new SelfPredictor(rules, TICK_RATE);
+    predictor.reconcile(snapshotOf(server), 0, 0);
+
+    const boostTick = predictor.nextInputTick;
+    predictor.scheduleInput({ sequence: 1, targetTick: boostTick, angle: 0, boosting: true });
+    for (let now = TICK_MS; now <= 9 * TICK_MS; now += TICK_MS) predictor.advance(now);
+    expect(predictor.renderState()?.boosting).toBe(false);
+
+    for (let tick = 1; tick <= 8; tick += 1) {
+      if (tick === boostTick) applySnakeBoostInput(server, true, motion.minimumLength);
+      advanceSnakeMotion(server, motion);
+    }
+    advanceSnakeSourceFrame(server, motion);
+    server.length += 1;
+    advanceSnakeSourceFrame(server, motion);
+    advanceSnakeSourceFrame(server, motion);
+    expect(server.boosting).toBe(true);
+    expect(server.length).toBe(rules.minimumLength + 1);
+
+    const beforeCorrection = predictor.renderState();
+    expect(beforeCorrection).toBeDefined();
+    const authoritativeSnapshot = {
+      ...snapshotOf(server),
+      lastInputSequence: 1,
+      lastInputAppliedTick: boostTick,
+    };
+    const baseline = new SelfPredictor(rules, TICK_RATE);
+    baseline.reconcile(authoritativeSnapshot, 9, 9 * TICK_MS);
+    predictor.reconcile(authoritativeSnapshot, 9, 9 * TICK_MS);
+    const afterCorrection = predictor.renderState();
+    expect(afterCorrection).toBeDefined();
+    if (beforeCorrection === undefined || afterCorrection === undefined) {
+      throw new Error("predicted snake disappeared during boost correction");
+    }
+    expectSamePose(beforeCorrection, afterCorrection);
+    expect(afterCorrection.boosting).toBe(true);
+
+    let previous = afterCorrection;
+    for (let now = 9 * TICK_MS + 10; now <= 9 * TICK_MS + 180; now += 10) {
+      predictor.advance(now);
+      baseline.advance(now);
+      const current = predictor.renderState();
+      expect(current).toBeDefined();
+      if (current === undefined) throw new Error("predicted snake disappeared while smoothing");
+      expect(
+        Math.hypot(head(current).x - head(previous).x, head(current).y - head(previous).y),
+      ).toBeLessThan(8);
+      previous = current;
+    }
+    const baselineAfterSmoothing = baseline.renderState();
+    expect(baselineAfterSmoothing).toBeDefined();
+    if (baselineAfterSmoothing === undefined) throw new Error("baseline snake disappeared");
+    expectSamePose(baselineAfterSmoothing, previous);
   });
 
   it("samples boost collision at one source frame instead of the whole tick endpoint", () => {

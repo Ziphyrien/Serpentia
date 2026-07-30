@@ -56,6 +56,10 @@ const MAX_REPLAY_TICKS = 64;
 const DEFAULT_PREDICTION_LEAD_TICKS = 2;
 const POSITION_MATCH_TOLERANCE = 0.5;
 const ANGLE_MATCH_TOLERANCE = 0.001;
+const LENGTH_MATCH_TOLERANCE = 0.001;
+/** 用约 11 个 60Hz 渲染帧消化进食引起的预测位置差，避免蛇头单帧跳到权威未来。 */
+const PRESENTATION_CORRECTION_DURATION_MS = 180;
+const PRESENTATION_CORRECTION_EPSILON = 0.001;
 
 /**
  * Deterministic local prediction with a small future-tick lead.
@@ -77,6 +81,9 @@ export class SelfPredictor {
   private lastConfirmedSequence = -1;
   /** 服务端最近确认的聚合加速按住状态；实际 boosting 可能因长度不足而为 false。 */
   private confirmedBoostInputHeld = false;
+  private presentationCorrectionX = 0;
+  private presentationCorrectionY = 0;
+  private presentationCorrectionRemainingMs = 0;
   private readonly inputsBySequence = new Map<number, ScheduledInput>();
   private readonly statesByTick = new Map<number, PredictedStep>();
 
@@ -171,6 +178,12 @@ export class SelfPredictor {
 
     const previousAccumulator = this.accumulatorMs;
     const previousLocalTime = this.lastLocalTime;
+    const preserveFoodBoostPresentation =
+      predictedAtSnapshot !== undefined &&
+      snapshot.length > predictedAtSnapshot.length + LENGTH_MATCH_TOLERANCE &&
+      snapshot.boosting !== predictedAtSnapshot.boosting;
+    const visibleBeforeRebase = preserveFoodBoostPresentation ? this.renderState() : undefined;
+    if (!preserveFoodBoostPresentation) this.clearPresentationCorrection();
     this.confirmInputs(snapshot.lastInputSequence);
     this.current = fromSnapshot(
       snapshot,
@@ -184,6 +197,9 @@ export class SelfPredictor {
     }
     this.accumulatorMs = previousAccumulator;
     this.lastLocalTime = previousLocalTime;
+    if (visibleBeforeRebase !== undefined) {
+      this.preservePresentationAfterReplay(visibleBeforeRebase);
+    }
     this.lastServerTick = Math.max(this.lastServerTick, snapshotTick);
     this.pruneHistory(this.current.tick - MAX_REPLAY_TICKS);
   }
@@ -197,6 +213,7 @@ export class SelfPredictor {
     this.lastServerTick = 0;
     this.lastConfirmedSequence = -1;
     this.confirmedBoostInputHeld = false;
+    this.clearPresentationCorrection();
     this.inputsBySequence.clear();
     this.statesByTick.clear();
   }
@@ -217,6 +234,7 @@ export class SelfPredictor {
     if (this.lastLocalTime === undefined) this.lastLocalTime = localNow;
     const elapsed = Math.min(250, Math.max(0, localNow - this.lastLocalTime));
     this.lastLocalTime = localNow;
+    this.decayPresentationCorrection(elapsed);
     this.accumulatorMs += elapsed;
 
     let processed = 0;
@@ -249,8 +267,13 @@ export class SelfPredictor {
     }
     const collisionHead = collisionState.body[0];
     if (collisionHead === undefined) return undefined;
+    const body = interpolateBodyContinuously(previous?.body, current.body, next.body, ratio);
+    for (const point of body) {
+      point.x += this.presentationCorrectionX;
+      point.y += this.presentationCorrectionY;
+    }
     return {
-      body: interpolateBodyContinuously(previous?.body, current.body, next.body, ratio),
+      body,
       angle: normalizeAngle(
         current.angle + normalizeSnakeDirectionDelta(next.angle - current.angle) * ratio,
       ),
@@ -273,6 +296,7 @@ export class SelfPredictor {
     this.lastServerTick = snapshotTick;
     this.activeLeadTicks = this.configuredLeadTicks;
     this.alive = true;
+    this.clearPresentationCorrection();
     this.statesByTick.clear();
     this.recordCurrent();
 
@@ -328,17 +352,50 @@ export class SelfPredictor {
     predictedAtSnapshot: PredictedStep,
   ): void {
     const lengthDelta = snapshot.length - predictedAtSnapshot.length;
+    const lengthChanged = Math.abs(lengthDelta) > LENGTH_MATCH_TOLERANCE;
     const states = [...this.statesByTick.entries()]
       .filter(([tick]) => tick >= snapshotTick)
       .sort(([left], [right]) => left - right);
+    const heldBoostStopsInFuture = states.some(
+      ([tick, state]) => tick > snapshotTick && !state.boosting && state.boostInputHeld,
+    );
+    const boostInputChangesInFuture = states.some(
+      ([tick, state]) =>
+        tick > snapshotTick && state.boostInputHeld !== predictedAtSnapshot.boostInputHeld,
+    );
+    const requiresMotionReplay =
+      lengthChanged &&
+      (boostInputChangesInFuture ||
+        (predictedAtSnapshot.boosting && (lengthDelta < 0 || heldBoostStopsInFuture)));
+    if (requiresMotionReplay) {
+      // 长度会改变未来是否触底减速；不能只平移 length，必须从该权威 tick 重放运动。
+      const visibleBeforeReplay = this.renderState();
+      const horizonTick = this.current?.tick;
+      if (horizonTick === undefined) return;
+
+      this.current = cloneStep(predictedAtSnapshot, snapshotTick);
+      this.current.length = snapshot.length;
+      this.current.bodyScale = snapshot.bodyScale;
+      resizeBody(this.current.body, bodyPointCount(this.current.length, this.motion));
+      for (const tick of this.statesByTick.keys()) {
+        if (tick > snapshotTick) this.statesByTick.delete(tick);
+      }
+      this.recordCurrent();
+      for (let tick = snapshotTick + 1; tick <= horizonTick; tick += 1) {
+        this.simulateTick(tick);
+      }
+      if (visibleBeforeReplay !== undefined) {
+        this.preservePresentationAfterReplay(visibleBeforeReplay);
+      }
+      return;
+    }
 
     for (const [tick, state] of states) {
-      if (Math.abs(lengthDelta) > 0.001) {
+      if (lengthChanged) {
         state.length =
           tick === snapshotTick ? snapshot.length : Math.max(0, state.length + lengthDelta);
         resizeBody(state.body, bodyPointCount(state.length, this.motion));
       }
-
       if (tick === snapshotTick) {
         state.bodyScale = snapshot.bodyScale;
         continue;
@@ -361,6 +418,36 @@ export class SelfPredictor {
     current.length = authoritativeCurrent.length;
     current.bodyScale = authoritativeCurrent.bodyScale;
     resizeBody(current.body, bodyPointCount(current.length, this.motion));
+  }
+
+  private preservePresentationAfterReplay(previous: SelfRenderState): void {
+    const current = this.renderState();
+    const previousHead = previous.body[0];
+    const currentHead = current?.body[0];
+    if (previousHead === undefined || currentHead === undefined) return;
+    const correctionX = previousHead.x - currentHead.x;
+    const correctionY = previousHead.y - currentHead.y;
+    if (Math.hypot(correctionX, correctionY) <= PRESENTATION_CORRECTION_EPSILON) return;
+    this.presentationCorrectionX += correctionX;
+    this.presentationCorrectionY += correctionY;
+    this.presentationCorrectionRemainingMs = PRESENTATION_CORRECTION_DURATION_MS;
+  }
+
+  private decayPresentationCorrection(elapsedMs: number): void {
+    const previousRemaining = this.presentationCorrectionRemainingMs;
+    if (previousRemaining <= 0 || elapsedMs <= 0) return;
+    const remaining = Math.max(0, previousRemaining - elapsedMs);
+    const ratio = remaining / previousRemaining;
+    this.presentationCorrectionX *= ratio;
+    this.presentationCorrectionY *= ratio;
+    this.presentationCorrectionRemainingMs = remaining;
+    if (remaining === 0) this.clearPresentationCorrection();
+  }
+
+  private clearPresentationCorrection(): void {
+    this.presentationCorrectionX = 0;
+    this.presentationCorrectionY = 0;
+    this.presentationCorrectionRemainingMs = 0;
   }
 
   private confirmInputs(sequence: number): void {
