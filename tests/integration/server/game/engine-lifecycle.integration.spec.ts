@@ -1,10 +1,37 @@
 import { describe, it } from "vite-plus/test";
 import { borderCollisionDistance } from "$lib/game/arena";
-import { snakeBodyRadius, targetSnakeBodyScale } from "$lib/game/snake-motion";
+import { NORMAL_GAME_PI } from "$lib/game/normal-game-math";
+import { SNAKE_MOTION, snakeBodyRadius, targetSnakeBodyScale } from "$lib/game/snake-motion";
 import { GameEngine } from "$lib/server/game/engine";
 import { gameConfig } from "../../../fixtures/server/game-config";
 import { requireCondition } from "../../../support/assertions";
 import { approximately, requireSnake } from "../../../support/game-engine";
+
+interface HeadContactSnake {
+  readonly id: string;
+  readonly angle: number;
+  readonly targetHeadX: number;
+}
+
+function addSnakeMeetingAt(engine: GameEngine, snake: HeadContactSnake): void {
+  const moveDistance = SNAKE_MOTION.pointsPerFrame * SNAKE_MOTION.pointSpacing;
+  const cosine = Math.cos(snake.angle);
+  const sine = Math.sin(snake.angle);
+  const head = {
+    x: snake.targetHeadX - moveDistance * cosine,
+    y: -moveDistance * sine,
+  };
+  engine.addSnake(snake.id, snake.id, {
+    angle: snake.angle,
+    body: [
+      head,
+      {
+        x: head.x - SNAKE_MOTION.pointSpacing * cosine,
+        y: head.y - SNAKE_MOTION.pointSpacing * sine,
+      },
+    ],
+  });
+}
 
 describe("authoritative game engine: lifecycle", () => {
   it("identical seeds produce deterministic initial worlds", () => {
@@ -98,6 +125,72 @@ describe("authoritative game engine: lifecycle", () => {
         events.consumedFoods.some((event) => event.food.kind === "remains"),
       "remains were neither left in the arena nor consumed on a later source frame",
     );
+  });
+  it("head-on contact kills exactly one snake using the original direction comparison", () => {
+    const config = gameConfig({ tickRate: 60, arenaHalfSize: 1_000 });
+    const cases = [
+      {
+        alphaAngle: 0,
+        bravoAngle: (NORMAL_GAME_PI * 2) / 3,
+        alphaHeadX: -8,
+        bravoHeadX: 8,
+        expectedVictim: "alpha",
+      },
+      {
+        alphaAngle: 0,
+        bravoAngle: NORMAL_GAME_PI,
+        alphaHeadX: 0,
+        bravoHeadX: 0,
+        expectedVictim: "alpha",
+      },
+      {
+        alphaAngle: NORMAL_GAME_PI,
+        bravoAngle: 0,
+        alphaHeadX: 0,
+        bravoHeadX: 0,
+        expectedVictim: "bravo",
+      },
+    ] as const;
+
+    for (const scenario of cases) {
+      const snakes = [
+        {
+          id: "alpha",
+          angle: scenario.alphaAngle,
+          targetHeadX: scenario.alphaHeadX,
+        },
+        {
+          id: "bravo",
+          angle: scenario.bravoAngle,
+          targetHeadX: scenario.bravoHeadX,
+        },
+      ] as const;
+      for (const order of [snakes, snakes.toReversed()]) {
+        const engine = new GameEngine(config, 1, false);
+        for (const snake of order) addSnakeMeetingAt(engine, snake);
+
+        const events = engine.step();
+        const expectedWinner = scenario.expectedVictim === "alpha" ? "bravo" : "alpha";
+        requireCondition(events.deaths.length === 1, "head-on contact did not have one victim");
+        requireCondition(
+          events.deaths[0].playerId === scenario.expectedVictim,
+          "head-on direction comparison chose the wrong victim",
+        );
+        requireCondition(
+          events.deaths[0].cause._tag === "Snake" &&
+            events.deaths[0].cause.killerId === expectedWinner,
+          "head-on death did not credit the survivor",
+        );
+        requireCondition(
+          requireSnake(engine.snapshot(), expectedWinner).alive,
+          "head-on winner did not survive",
+        );
+        requireCondition(
+          requireSnake(engine.snapshot(), expectedWinner).kills === 1,
+          "head-on winner was not credited with one kill",
+        );
+      }
+    }
   });
   it("death is followed by fast protected respawn", () => {
     const config = gameConfig({

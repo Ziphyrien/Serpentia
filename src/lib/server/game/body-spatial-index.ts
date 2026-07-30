@@ -2,6 +2,7 @@ import type { Point } from "./geometry";
 
 export interface BodySegment {
   readonly snakeId: string;
+  readonly segmentIndex: number;
   readonly start: Point;
   readonly end: Point;
 }

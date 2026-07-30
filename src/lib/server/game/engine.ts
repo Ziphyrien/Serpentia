@@ -17,7 +17,7 @@ import {
   type SnakeMotionRules,
 } from "../../game/snake-motion";
 import { hasCrossedBorder, MAP_BORDER } from "../../game/arena";
-import { normalGameDegreesToRadians } from "../../game/normal-game-math";
+import { NORMAL_GAME_PI, normalGameDegreesToRadians } from "../../game/normal-game-math";
 import {
   DEFAULT_SKIN_ID,
   bodyPointIndexes,
@@ -409,6 +409,7 @@ export class GameEngine {
       for (let index = 1; index < other.body.length; index += 1) {
         bodyIndex.add({
           snakeId: other.id,
+          segmentIndex: index,
           start: other.body[index - 1],
           end: other.body[index],
         });
@@ -416,6 +417,7 @@ export class GameEngine {
     }
 
     for (const snake of snakes) {
+      if (pending.has(snake.id)) continue;
       const head = snake.body[0];
       if (hasCrossedBorder(head, snakeBodyRadius(snake.bodyScale), this.config.arenaHalfSize)) {
         pending.set(snake.id, { _tag: "Boundary" });
@@ -427,16 +429,29 @@ export class GameEngine {
       for (const segmentOrder of bodyIndex.query(head, queryDistance)) {
         const segment = bodyIndex.get(segmentOrder);
         if (segment === undefined || segment.snakeId === snake.id) continue;
+        if (pending.has(segment.snakeId)) continue;
         const other = this.snakes.get(segment.snakeId);
         if (other === undefined) continue;
         const collisionDistance = snakeCollisionDistance(snake.bodyScale, other.bodyScale);
+        const collisionDistanceSquared = collisionDistance * collisionDistance;
         if (
-          pointToSegmentDistanceSquared(head, segment.start, segment.end) <
-          collisionDistance * collisionDistance
+          pointToSegmentDistanceSquared(head, segment.start, segment.end) >=
+          collisionDistanceSquared
         ) {
-          pending.set(snake.id, { _tag: "Snake", killerId: segment.snakeId });
-          break;
+          continue;
         }
+        const otherHead = other.body[0];
+        const collidesWithHead =
+          segment.segmentIndex === 1 &&
+          otherHead !== undefined &&
+          head.x === otherHead.x &&
+          head.y === otherHead.y;
+        if (collidesWithHead && currentSnakeWinsHeadCollision(snake.angle, other.angle)) {
+          pending.set(other.id, { _tag: "Snake", killerId: snake.id });
+        } else {
+          pending.set(snake.id, { _tag: "Snake", killerId: other.id });
+        }
+        break;
       }
     }
 
@@ -799,6 +814,26 @@ export class GameEngine {
     const limit = this.config.arenaHalfSize - MAP_BORDER;
     return Math.min(limit, Math.max(-limit, value));
   }
+}
+
+function currentSnakeWinsHeadCollision(currentAngle: number, otherAngle: number): boolean {
+  const currentDifference = normalGameDegreeDifference(normalGameAngleDegrees(currentAngle), 0);
+  const otherDifference = normalGameDegreeDifference(normalGameAngleDegrees(otherAngle), 0);
+  return currentDifference >= otherDifference;
+}
+
+function normalGameAngleDegrees(angle: number): number {
+  let degrees = Math.round((angle / NORMAL_GAME_PI) * 180);
+  while (degrees < 0) degrees += 360;
+  while (degrees > 360) degrees -= 360;
+  return degrees;
+}
+
+function normalGameDegreeDifference(left: number, right: number): number {
+  if (left < 0) left += 360;
+  if (right < 0) right += 360;
+  const difference = Math.abs(left - right);
+  return difference > 180 ? 360 - difference : difference;
 }
 
 function starFoodMotionState(motion: StarFoodMotion): NonNullable<FoodState["motion"]> {
