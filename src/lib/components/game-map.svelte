@@ -42,6 +42,12 @@
       >
         {#if marker.kind === "top"}
           <Crown size={17} strokeWidth={3} class={rankColor(marker.rank)} />
+        {:else if marker.kind === "player"}
+          <span
+            class="grid size-4 place-items-center rounded-full bg-slate-800/80 text-[10px] leading-none font-bold text-slate-200 ring-1 ring-white/25"
+          >
+            {marker.rank}
+          </span>
         {:else}
           <MapPin size={18} strokeWidth={3} class="fill-lime-300/20 text-lime-300" />
         {/if}

@@ -11,8 +11,8 @@ export interface HudRankEntry {
 
 export interface GameMapMarker {
   readonly playerId: string;
-  readonly kind: "top" | "me";
-  /** 榜首标记的实际名次；本机标记不携带名次。 */
+  readonly kind: "top" | "player" | "me";
+  /** 其他玩家标记的实际名次；本机标记不携带名次。 */
   readonly rank?: number;
   readonly position: Point;
 }
@@ -53,8 +53,7 @@ export function visibleHudRanks(
 }
 
 /**
- * 正常新无尽小地图只保留一个领先目标和本机。
- * 本机已经第一时，领先目标顺延为第二名，避免两个图标完全重叠后失去参照。
+ * 正常新无尽小地图：除本机（图钉）外，前三名用皇冠标记（金/银/铜），其余存活玩家用名次数字标记。
  */
 export function selectGameMapMarkers(
   ranked: ReadonlyArray<HudRankEntry>,
@@ -62,18 +61,17 @@ export function selectGameMapMarkers(
   selfId: string | undefined,
 ): Array<GameMapMarker> {
   const snakesById = new Map(snakes.map((snake) => [snake.id, snake]));
-  const selfRank = ranked.find((entry) => entry.playerId === selfId)?.rank;
-  const target = selfRank === 1 ? ranked[1] : ranked[0];
   const markers: Array<GameMapMarker> = [];
 
-  if (target !== undefined) {
-    const snake = snakesById.get(target.playerId);
+  for (const entry of ranked) {
+    if (entry.playerId === selfId) continue;
+    const snake = snakesById.get(entry.playerId);
     const head = snake?.alive ? snake.body[0] : undefined;
     if (head !== undefined) {
       markers.push({
-        playerId: target.playerId,
-        kind: "top",
-        rank: target.rank,
+        playerId: entry.playerId,
+        kind: entry.rank <= 3 ? "top" : "player",
+        rank: entry.rank,
         position: head,
       });
     }

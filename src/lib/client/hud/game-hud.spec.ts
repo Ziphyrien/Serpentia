@@ -72,12 +72,45 @@ describe("original endless minimap", () => {
     ]);
   });
 
-  it("keeps second place as the target when the local player leads", () => {
+  it("crowns second place when the local player leads", () => {
     const snakes = [snake("me", 30), snake("target", 20)];
     const markers = selectGameMapMarkers(rankAliveSnakes(snakes), snakes, "me");
 
     expect(markers.map(({ playerId, kind, rank }) => ({ playerId, kind, rank }))).toEqual([
       { playerId: "target", kind: "top", rank: 2 },
+      { playerId: "me", kind: "me", rank: undefined },
+    ]);
+  });
+
+  it("crowns the top three and marks the rest with rank numbers", () => {
+    const snakes = [
+      snake("leader", 50, { x: 400, y: 0 }),
+      snake("third", 30, { x: -100, y: 100 }),
+      snake("me", 40, { x: 0, y: -200 }),
+      snake("fourth", 20, { x: 50, y: 50 }),
+      snake("dead", 999, { x: 1, y: 1 }, false),
+    ];
+    const markers = selectGameMapMarkers(rankAliveSnakes(snakes), snakes, "me");
+
+    expect(markers.map(({ playerId, kind, rank }) => ({ playerId, kind, rank }))).toEqual([
+      { playerId: "leader", kind: "top", rank: 1 },
+      { playerId: "third", kind: "top", rank: 3 },
+      { playerId: "fourth", kind: "player", rank: 4 },
+      { playerId: "me", kind: "me", rank: undefined },
+    ]);
+  });
+
+  it("crowns second place even when the local player trails", () => {
+    const snakes = [
+      snake("leader", 50, { x: 400, y: 0 }),
+      snake("second", 40, { x: -100, y: 100 }),
+      snake("me", 30, { x: 0, y: -200 }),
+    ];
+    const markers = selectGameMapMarkers(rankAliveSnakes(snakes), snakes, "me");
+
+    expect(markers.map(({ playerId, kind, rank }) => ({ playerId, kind, rank }))).toEqual([
+      { playerId: "leader", kind: "top", rank: 1 },
+      { playerId: "second", kind: "top", rank: 2 },
       { playerId: "me", kind: "me", rank: undefined },
     ]);
   });
