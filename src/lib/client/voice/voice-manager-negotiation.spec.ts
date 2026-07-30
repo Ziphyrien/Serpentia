@@ -28,6 +28,9 @@ class FakeSender {
 class FakeTransceiver {
   readonly sender: FakeSender;
   direction: string;
+  currentDirection: string | null = null;
+  mid: string | null = null;
+  receiver = { track: { kind: "audio" } };
 
   constructor(track: unknown, direction: string) {
     this.sender = new FakeSender(track);
@@ -60,6 +63,10 @@ class FakePeerConnection {
     return transceiver;
   }
 
+  getTransceivers(): Array<FakeTransceiver> {
+    return this.transceivers;
+  }
+
   async createOffer(): Promise<{ readonly type: "offer"; readonly sdp: string }> {
     this.offerCount += 1;
     return { type: "offer", sdp: `offer-${this.offerCount}` };
@@ -74,7 +81,12 @@ class FakePeerConnection {
     readonly sdp?: string;
   }): Promise<void> {
     if (description.type === "offer") this.signalingState = "have-local-offer";
-    else this.signalingState = "stable";
+    else {
+      this.signalingState = "stable";
+      for (const transceiver of this.transceivers) {
+        transceiver.currentDirection = transceiver.direction;
+      }
+    }
     this.onsignalingstatechange?.();
   }
 
@@ -83,6 +95,17 @@ class FakePeerConnection {
     readonly sdp?: string;
   }): Promise<void> {
     this.remoteDescription = description;
+    if (
+      description.type === "offer" &&
+      !this.transceivers.some((transceiver) => transceiver.mid === "0")
+    ) {
+      const transceiver = new FakeTransceiver(null, "recvonly");
+      transceiver.mid = "0";
+      this.transceivers.push(transceiver);
+    }
+    if (description.type === "answer" && this.transceivers[0] !== undefined) {
+      this.transceivers[0].currentDirection = "sendrecv";
+    }
     this.signalingState = description.type === "offer" ? "have-remote-offer" : "stable";
     this.onsignalingstatechange?.();
   }
@@ -247,11 +270,16 @@ describe("voice microphone publication", () => {
       if (selfId < remoteId) {
         await manager.handleSignal(remoteId, { _tag: "answer", sdp: "initial-answer" });
       } else {
-        await manager.handleSignal(remoteId, { _tag: "offer", sdp: "initial-offer" });
+        await manager.handleSignal(remoteId, {
+          _tag: "offer",
+          sdp: "v=0\r\nm=audio 9 RTP/AVP 111\r\na=mid:0\r\na=sendrecv\r\n",
+        });
       }
       const peer = FakePeerConnection.instances[0];
-      expect(peer.transceivers[0].direction).toBe("sendrecv");
-      peer.transceivers[0].sender.rejectNextNonNullReplacement = true;
+      const transceiver = peer.transceivers[0];
+      expect(transceiver?.direction).toBe("sendrecv");
+      if (transceiver === undefined) throw new Error("test transceiver missing");
+      transceiver.sender.rejectNextNonNullReplacement = true;
 
       await manager.join();
 
@@ -292,14 +320,44 @@ describe("voice microphone publication", () => {
     manager.updateRoster([participant("friend-a", false)]);
     const peer = FakePeerConnection.instances[0];
     expect(peer.offerCount).toBe(0);
-    expect(peer.transceivers[0].direction).toBe("sendrecv");
-    expect(peer.transceivers[0].sender.track).toBeNull();
+    expect(peer.transceivers).toHaveLength(0);
 
-    await manager.handleSignal("friend-a", { _tag: "offer", sdp: "initial-offer" });
+    await manager.handleSignal("friend-a", {
+      _tag: "offer",
+      sdp: "v=0\r\nm=audio 9 RTP/AVP 111\r\na=mid:0\r\na=sendrecv\r\n",
+    });
     await manager.join();
 
+    expect(peer.transceivers).toHaveLength(1);
+    expect(peer.transceivers[0].direction).toBe("sendrecv");
     expect(peer.transceivers[0].sender.track).toBe(media.track);
     expect(peer.offerCount).toBe(0);
+    expect(recorded.signals.filter((call) => call.signal._tag === "answer")).toHaveLength(1);
+    manager.dispose();
+  });
+
+  it("attaches a microphone that starts before the answerer receives its offer", async () => {
+    const media = fakeStream();
+    installBrowserFakes(() => Promise.resolve(media.stream));
+    const recorded = recorder();
+    const manager = new VoiceManager(() => "friend-b", recorded.events, "/turn");
+
+    await manager.startListening();
+    manager.updateRoster([participant("friend-a", false)]);
+    const peer = FakePeerConnection.instances[0];
+
+    await manager.join();
+
+    expect(manager.isJoined).toBe(true);
+    expect(peer.transceivers).toHaveLength(0);
+
+    await manager.handleSignal("friend-a", {
+      _tag: "offer",
+      sdp: "v=0\r\nm=audio 9 RTP/AVP 111\r\na=mid:0\r\na=sendrecv\r\n",
+    });
+
+    expect(peer.transceivers).toHaveLength(1);
+    expect(peer.transceivers[0].sender.track).toBe(media.track);
     expect(recorded.signals.filter((call) => call.signal._tag === "answer")).toHaveLength(1);
     manager.dispose();
   });

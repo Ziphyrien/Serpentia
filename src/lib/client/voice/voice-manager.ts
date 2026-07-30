@@ -16,7 +16,7 @@ interface AudioMeter {
 interface PeerEntry {
   pc: RTCPeerConnection;
   audio: HTMLAudioElement;
-  audioTransceiver: RTCRtpTransceiver;
+  audioTransceiver: RTCRtpTransceiver | undefined;
   nickname: string;
   makingOffer: boolean;
   negotiationPending: boolean;
@@ -284,17 +284,16 @@ export class VoiceManager {
     const audio = new Audio();
     audio.autoplay = true;
     audio.volume = this.volumes.get(participant.playerId) ?? 1;
+    const isOfferOwner = this.selfId() < participant.playerId;
     const localTrack = this.localStream?.getAudioTracks()[0];
-    // Negotiate the bidirectional audio m-line up front. With no microphone,
-    // the sender simply has a null track; a later replaceTrack() can start
-    // publication without racing a second offer/answer exchange.
-    const audioTransceiver =
-      localTrack !== undefined && this.localStream !== undefined
+    const audioTransceiver = isOfferOwner
+      ? localTrack !== undefined && this.localStream !== undefined
         ? pc.addTransceiver(localTrack, {
             direction: "sendrecv",
             streams: [this.localStream],
           })
-        : pc.addTransceiver("audio", { direction: "sendrecv" });
+        : pc.addTransceiver("audio", { direction: "sendrecv" })
+      : undefined;
     const entry: PeerEntry = {
       pc,
       audio,
@@ -337,7 +336,7 @@ export class VoiceManager {
       if (pc.connectionState === "failed") this.schedulePeerRestart(participant.playerId, entry);
     };
 
-    if (this.selfId() < participant.playerId) {
+    if (isOfferOwner) {
       this.requestOffer(participant.playerId, entry, false);
     }
     return entry;
@@ -354,6 +353,14 @@ export class VoiceManager {
         await pc.setLocalDescription({ type: "rollback" });
       }
       await pc.setRemoteDescription({ type: "offer", sdp: signal.sdp });
+      const transceiver = findAudioTransceiver(pc, signal.sdp);
+      if (transceiver === undefined) throw new Error("Audio transceiver was not created");
+      entry.audioTransceiver = transceiver;
+      transceiver.direction = answerDirectionForOffer(signal.sdp);
+      const localTrack = this.localStream?.getAudioTracks()[0];
+      if (localTrack !== undefined && !(await this.attachTrack(transceiver, localTrack))) {
+        throw new Error("Microphone track could not be attached");
+      }
       await this.flushPendingIce(entry);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -493,20 +500,23 @@ export class VoiceManager {
     let ready = true;
     for (const [playerId, peer] of Array.from(this.peers)) {
       if (this.peers.get(playerId) !== peer) continue;
-      let attached = false;
-      try {
-        await peer.audioTransceiver.sender.replaceTrack(track);
-        attached = peer.audioTransceiver.sender.track === track;
-      } catch {
-        // Leave attached false so the caller rolls the entire microphone join back.
-      }
-
-      // A replacement peer would need a fresh offer/answer before its sender
-      // could publish. Treat replacement failure as a failed join instead of
-      // reporting a microphone attached to an unnegotiated connection.
+      if (peer.audioTransceiver === undefined) continue;
+      const attached = await this.attachTrack(peer.audioTransceiver, track);
       ready &&= attached;
     }
     return ready;
+  }
+
+  private async attachTrack(
+    transceiver: RTCRtpTransceiver,
+    track: MediaStreamTrack,
+  ): Promise<boolean> {
+    try {
+      await transceiver.sender.replaceTrack(track);
+      return transceiver.sender.track === track;
+    } catch {
+      return false;
+    }
   }
 
   private async fetchCredentialsWithRetry(operation: number): Promise<boolean> {
@@ -584,7 +594,9 @@ export class VoiceManager {
 
   private stopMicrophoneResources(): void {
     for (const peer of this.peers.values()) {
-      void peer.audioTransceiver.sender.replaceTrack(null).catch(() => undefined);
+      if (peer.audioTransceiver !== undefined) {
+        void peer.audioTransceiver.sender.replaceTrack(null).catch(() => undefined);
+      }
     }
     this.localStream?.getTracks().forEach((track) => track.stop());
     this.localStream = undefined;
@@ -734,6 +746,40 @@ function wait(milliseconds: number): Promise<void> {
 
 function stopStream(stream: MediaStream): void {
   stream.getTracks().forEach((track) => track.stop());
+}
+
+function findAudioTransceiver(pc: RTCPeerConnection, sdp: string): RTCRtpTransceiver | undefined {
+  const audioMid = audioMidFromSdp(sdp);
+  if (audioMid !== undefined) {
+    const matching = pc.getTransceivers().find((transceiver) => transceiver.mid === audioMid);
+    if (matching !== undefined) return matching;
+  }
+  return pc.getTransceivers().find((transceiver) => transceiver.receiver.track.kind === "audio");
+}
+
+function audioMidFromSdp(sdp: string): string | undefined {
+  let inAudioSection = false;
+  for (const line of sdp.split(/\r?\n/u)) {
+    if (line.startsWith("m=")) inAudioSection = line.startsWith("m=audio ");
+    else if (inAudioSection && line.startsWith("a=mid:")) return line.slice("a=mid:".length);
+  }
+  return undefined;
+}
+
+function answerDirectionForOffer(sdp: string): RTCRtpTransceiverDirection {
+  let inAudioSection = false;
+  for (const line of sdp.split(/\r?\n/u)) {
+    if (line.startsWith("m=")) {
+      inAudioSection = line.startsWith("m=audio ");
+      continue;
+    }
+    if (!inAudioSection) continue;
+    if (line === "a=sendrecv") return "sendrecv";
+    if (line === "a=recvonly") return "sendonly";
+    if (line === "a=sendonly") return "recvonly";
+    if (line === "a=inactive") return "inactive";
+  }
+  return "sendrecv";
 }
 
 function toRtcIceServers(servers: ReadonlyArray<IceServer>): Array<RTCIceServer> {
