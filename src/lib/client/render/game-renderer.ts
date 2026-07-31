@@ -2,6 +2,10 @@ import { Application, Container, UPDATE_PRIORITY } from "pixi.js";
 import type { FoodConsumedEvent, FoodState, MagnetConsumedEvent } from "$lib/protocol";
 import type { GameController } from "../game.svelte";
 import type { SettingsStore } from "../stores/settings.svelte";
+import {
+  RemoteSnakePresentation,
+  type PresentedRemoteSnake,
+} from "../sim/remote-snake-presentation";
 import { RENDER, ARENA_COLORS } from "../config";
 import { MAP_BORDER } from "$lib/game/arena";
 import { MAGNET, magnetPositionAfterSourceFrames } from "$lib/game/magnet";
@@ -32,6 +36,7 @@ export class GameRenderer {
   private snakes: SnakeLayer | undefined;
   private fx: FxLayer | undefined;
   private readonly movingFoodPresentation = new MovingFoodPresentation();
+  private readonly remoteSnakePresentation: RemoteSnakePresentation;
   private readonly pendingConsumedFoods: Array<FoodConsumedEvent> = [];
   private readonly pendingConsumedMagnets: Array<MagnetConsumedEvent> = [];
   private started = false;
@@ -45,7 +50,12 @@ export class GameRenderer {
     private readonly controller: GameController,
     private readonly settings: SettingsStore,
     private readonly onFirstFramePresented: () => void,
-  ) {}
+  ) {
+    this.remoteSnakePresentation = new RemoteSnakePresentation(
+      controller.descriptor.rules,
+      controller.descriptor.tickRate,
+    );
+  }
 
   async init(host: HTMLElement): Promise<void> {
     const app = new Application();
@@ -155,6 +165,7 @@ export class GameRenderer {
     this.pendingConsumedFoods.length = 0;
     this.pendingConsumedMagnets.length = 0;
     this.movingFoodPresentation.reset();
+    this.remoteSnakePresentation.reset();
     this.snakes?.destroy();
     this.food?.destroy();
     this.magnetTools?.destroy();
@@ -183,18 +194,40 @@ export class GameRenderer {
     controller.selfPredictor.advance(localNow);
 
     // 2. 组装本帧蛇视图
+    const latestSnapshot = controller.latestSnapshot;
+    const selfSnapshot = latestSnapshot?.snakes.find((snake) => snake.id === controller.selfId);
+    const selfState = controller.selfPredictor.renderState();
+    const selfAlive = Boolean(selfState && selfSnapshot?.alive);
+    if (selfAlive && !this.lastSelfAlive) this.camera.reset();
+    this.lastSelfAlive = selfAlive;
+
     const views: Array<SnakeRenderView> = [];
     const renderTime = serverNow - controller.snapshotBuffer.interpolationDelay();
     const sourceFramesPerTick = Math.max(
       1,
       Math.round(SNAKE_MOTION.sourceFrameRate / controller.descriptor.tickRate),
     );
-    const remotePresentationTick = controller.snapshotBuffer.presentationTick(renderTime);
-    const remotePresentationSourceFrame =
-      remotePresentationTick === undefined
-        ? undefined
-        : remotePresentationTick * sourceFramesPerTick;
-    for (const remote of controller.snapshotBuffer.sampleRemoteSnakes(renderTime)) {
+    let remotePresentationSourceFrame: number | undefined;
+    let remoteSnakes: ReadonlyArray<PresentedRemoteSnake>;
+    if (selfState && selfSnapshot?.alive && latestSnapshot !== undefined) {
+      remotePresentationSourceFrame = selfState.presentationSourceFrame;
+      remoteSnakes = this.remoteSnakePresentation.sample(
+        latestSnapshot.snakes,
+        latestSnapshot.tick,
+        selfState.presentationSourceFrame,
+        deltaMS,
+        controller.selfId,
+      );
+    } else {
+      this.remoteSnakePresentation.reset();
+      const remotePresentationTick = controller.snapshotBuffer.presentationTick(renderTime);
+      remotePresentationSourceFrame =
+        remotePresentationTick === undefined
+          ? undefined
+          : remotePresentationTick * sourceFramesPerTick;
+      remoteSnakes = controller.snapshotBuffer.sampleRemoteSnakes(renderTime);
+    }
+    for (const remote of remoteSnakes) {
       views.push({
         id: remote.id,
         nickname: remote.nickname,
@@ -211,14 +244,6 @@ export class GameRenderer {
         isSelf: false,
       });
     }
-
-    const selfSnapshot = controller.latestSnapshot?.snakes.find(
-      (snake) => snake.id === controller.selfId,
-    );
-    const selfState = controller.selfPredictor.renderState();
-    const selfAlive = Boolean(selfState && selfSnapshot?.alive);
-    if (selfAlive && !this.lastSelfAlive) this.camera.reset();
-    this.lastSelfAlive = selfAlive;
 
     let selfHead: { x: number; y: number } | undefined;
     if (selfState && selfSnapshot?.alive) {
@@ -256,7 +281,6 @@ export class GameRenderer {
     // 4. 图层同步
     const viewBounds = this.camera.viewBounds(width, height);
     const nowMs = performance.now();
-    const latestSnapshot = controller.latestSnapshot;
     if (latestSnapshot) {
       const authoritativeSourceFrame = latestSnapshot.tick * sourceFramesPerTick;
       const presentedFoods =
