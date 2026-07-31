@@ -1,10 +1,13 @@
 import { Schema } from "effect";
 import {
+  MusicSearchResponse,
   MusicSourceErrorCode,
   MusicSourceErrorResponse,
   MusicSourceResolveResponse,
   MusicSourceStatusResponse,
   type BackendDescriptor,
+  type MusicSearchRequest,
+  type MusicSearchResponse as MusicSearchResponseType,
   type MusicSourceErrorCode as MusicSourceErrorCodeType,
   type MusicSourceResolveRequest,
   type MusicSourceResolveResponse as MusicSourceResolveResponseType,
@@ -25,6 +28,7 @@ export class MusicClientError extends Schema.TaggedErrorClass<MusicClientError>(
 export class MusicClient {
   constructor(
     private readonly statusPath = "/api/music",
+    private readonly searchPath = "/api/music/search",
     private readonly resolvePath = "/api/music/resolve",
     private readonly fetcher: MusicFetch = globalThis.fetch,
   ) {}
@@ -33,7 +37,12 @@ export class MusicClient {
     descriptor: BackendDescriptor,
     fetcher: MusicFetch = globalThis.fetch,
   ): MusicClient {
-    return new MusicClient(descriptor.musicPath, descriptor.musicResolvePath, fetcher);
+    return new MusicClient(
+      descriptor.musicPath,
+      descriptor.musicSearchPath,
+      descriptor.musicResolvePath,
+      fetcher,
+    );
   }
 
   async readStatus(signal?: AbortSignal): Promise<MusicSourceStatusResponseType> {
@@ -43,6 +52,21 @@ export class MusicClient {
     });
     if (!response.ok) throw await this.serverError(response);
     return this.decode(Schema.decodeUnknownPromise(MusicSourceStatusResponse), response, "status");
+  }
+
+  async search(
+    request: MusicSearchRequest,
+    signal?: AbortSignal,
+  ): Promise<MusicSearchResponseType> {
+    const response = await this.request(this.searchPath, {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(request),
+      signal,
+    });
+    if (!response.ok) throw await this.serverError(response);
+    return this.decode(Schema.decodeUnknownPromise(MusicSearchResponse), response, "search");
   }
 
   async resolve(

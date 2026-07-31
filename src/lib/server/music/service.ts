@@ -4,10 +4,13 @@ import { basename, dirname } from "node:path";
 import {
   MusicLyricResolveResult,
   MusicPictureResolveResult,
+  MusicSearchResponse,
+  MusicSearchTrack,
   MusicSourceCapability,
   MusicSourceEntry,
   MusicSourceUpdateInfo,
   MusicUrlResolveResult,
+  type MusicSearchRequest,
   type MusicSourceAction,
   type MusicSourcePlatform,
   type MusicSourceResolveRequest,
@@ -18,6 +21,7 @@ import { isMusicSourceError, musicSourceError } from "./errors";
 import { parseMusicSourceScript } from "./metadata";
 import { MusicOutboundHttp } from "./outbound-http";
 import { MusicRuntime } from "./runtime";
+import { MusicSearchService } from "./search";
 
 const MAX_INFO_BYTES = 16_384;
 const platforms: ReadonlyArray<MusicSourcePlatform> = ["kw", "kg", "tx", "wy", "mg", "local"];
@@ -46,6 +50,7 @@ export interface MusicSourceServiceOptions {
 
 export class MusicSourceService {
   private readonly http: MusicOutboundHttp;
+  private readonly searcher: MusicSearchService;
   private readonly watchFile: boolean;
   private runtime: MusicRuntime | undefined;
   private entry: MusicSourceEntry | undefined;
@@ -59,6 +64,7 @@ export class MusicSourceService {
     options: MusicSourceServiceOptions,
   ) {
     this.http = options.http ?? new MusicOutboundHttp();
+    this.searcher = new MusicSearchService(this.http);
     this.watchFile = options.watch ?? true;
   }
 
@@ -78,6 +84,46 @@ export class MusicSourceService {
 
   status(): MusicSourceStatusResponse {
     return { active: this.entry ?? null, update: this.update };
+  }
+
+  async search(
+    request: MusicSearchRequest,
+    signal?: AbortSignal,
+  ): Promise<MusicSearchResponse> {
+    if (this.runtime === undefined || this.entry === undefined || !this.runtime.alive) {
+      await this.reload(true);
+    }
+    const activeEntry = this.entry;
+    if (activeEntry === undefined) {
+      throw musicSourceError("SOURCE_UNAVAILABLE", "No valid music-source.js is active");
+    }
+    const capability = activeEntry.sources.find((item) => item.source === request.source);
+    if (
+      request.source === "local" ||
+      capability === undefined ||
+      !capability.actions.includes("musicUrl")
+    ) {
+      throw musicSourceError("INVALID_REQUEST", "Music source does not support search");
+    }
+
+    const result = await this.searcher.search(request, signal);
+    const allowedQualitys = new Set(capability.qualitys);
+    const tracks = result.tracks.flatMap((track) => {
+      const qualitys = track.qualitys.filter((quality) => allowedQualitys.has(quality));
+      return qualitys.length === 0
+        ? []
+        : [MusicSearchTrack.make({
+            id: track.id,
+            source: track.source,
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            durationSeconds: track.durationSeconds,
+            qualitys,
+            musicInfo: track.musicInfo,
+          })];
+    });
+    return MusicSearchResponse.make({ source: result.source, total: result.total, tracks });
   }
 
   async resolve(

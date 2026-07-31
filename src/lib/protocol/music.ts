@@ -47,6 +47,38 @@ export const MusicSourceStatusResponse = Schema.Struct({
 });
 export type MusicSourceStatusResponse = typeof MusicSourceStatusResponse.Type;
 
+const MusicSearchQuery = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(80),
+  Schema.isPattern(/\S/u),
+);
+const MusicSearchTotal = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const MusicSearchDuration = Schema.NullOr(
+  Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 86_400 })),
+);
+
+export class MusicSearchRequest extends Schema.Class<MusicSearchRequest>("MusicSearchRequest")({
+  source: MusicSourcePlatform,
+  query: MusicSearchQuery,
+}) {}
+
+export class MusicSearchTrack extends Schema.Class<MusicSearchTrack>("MusicSearchTrack")({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  source: MusicSourcePlatform,
+  title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  artist: Schema.String.check(Schema.isMaxLength(128)),
+  album: Schema.String.check(Schema.isMaxLength(128)),
+  durationSeconds: MusicSearchDuration,
+  qualitys: Schema.Array(MusicSourceQuality).check(Schema.isMaxLength(4)),
+  musicInfo: Schema.Unknown,
+}) {}
+
+export class MusicSearchResponse extends Schema.Class<MusicSearchResponse>("MusicSearchResponse")({
+  source: MusicSourcePlatform,
+  total: MusicSearchTotal,
+  tracks: Schema.Array(MusicSearchTrack).check(Schema.isMaxLength(20)),
+}) {}
+
 export class MusicSourceResolveRequest extends Schema.Class<MusicSourceResolveRequest>(
   "MusicSourceResolveRequest",
 )({

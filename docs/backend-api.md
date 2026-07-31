@@ -127,6 +127,51 @@ GET /api/music
 
 无需会话，返回 metadata、经服务端白名单过滤后的 `sources/actions/qualitys` 以及可选更新信息；文件不存在或没有可用运行时则返回 `{ "active": null, "update": null }`。
 
+### 搜索
+
+```http
+POST /api/music/search
+Content-Type: application/json
+Cookie: serpentia_session=...
+
+{
+  "source": "kw",
+  "query": "周杰伦"
+}
+```
+
+该端点要求有效游戏会话，并按玩家独立限流。服务端使用与 LX Music Desktop 兼容的平台搜索适配器请求 `kw/kg/tx/wy/mg`，每次最多返回 20 首歌曲；`local` 不支持搜索。响应中的 `musicInfo` 是经边界校验、用于后续音源 URL 解析的 LX 新版歌曲信息，前端不要求用户手工填写。
+
+```json
+{
+  "source": "kw",
+  "total": 1,
+  "tracks": [
+    {
+      "id": "kw_123",
+      "source": "kw",
+      "title": "示例歌曲",
+      "artist": "示例歌手",
+      "album": "示例专辑",
+      "durationSeconds": 180,
+      "qualitys": ["128k", "320k"],
+      "musicInfo": {
+        "id": "kw_123",
+        "name": "示例歌曲",
+        "singer": "示例歌手",
+        "source": "kw",
+        "songmid": "123",
+        "interval": "03:00",
+        "albumName": "示例专辑",
+        "types": [{ "type": "128k", "size": "3.0M" }],
+        "_types": { "128k": { "size": "3.0M" } },
+        "meta": { "songId": "123" }
+      }
+    }
+  ]
+}
+```
+
 ### 解析
 
 ```http

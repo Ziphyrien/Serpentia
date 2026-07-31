@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { MusicSourceResolveRequest } from "$lib/protocol";
+import { MusicSearchRequest, MusicSourceResolveRequest } from "$lib/protocol";
 import { MusicClient, MusicClientError, isMusicServerError } from "./music-client";
 
 function requestUrl(input: RequestInfo | URL): string {
@@ -33,19 +33,39 @@ const status = {
 describe("music HTTP client", () => {
   it("validates status and resolve responses", async () => {
     const requests: Array<Request> = [];
-    const client = new MusicClient("/status", "/resolve", async (input, init) => {
+    const client = new MusicClient("/status", "/search", "/resolve", async (input, init) => {
       const request = new Request(new URL(requestUrl(input), "https://snake.example"), init);
       requests.push(request);
-      return request.url.endsWith("/status")
-        ? Response.json(status)
-        : Response.json({
-            source: "kw",
-            action: "musicUrl",
-            data: { type: "320k", url: "https://audio.example/song.mp3" },
-          });
+      if (request.url.endsWith("/status")) return Response.json(status);
+      if (request.url.endsWith("/search")) {
+        return Response.json({
+          source: "kw",
+          total: 1,
+          tracks: [
+            {
+              id: "kw_song",
+              source: "kw",
+              title: "Song",
+              artist: "Artist",
+              album: "Album",
+              durationSeconds: 180,
+              qualitys: ["320k"],
+              musicInfo: { id: "kw_song", source: "kw" },
+            },
+          ],
+        });
+      }
+      return Response.json({
+        source: "kw",
+        action: "musicUrl",
+        data: { type: "320k", url: "https://audio.example/song.mp3" },
+      });
     });
 
     await expect(client.readStatus()).resolves.toEqual(status);
+    await expect(
+      client.search(MusicSearchRequest.make({ source: "kw", query: "Song" })),
+    ).resolves.toMatchObject({ source: "kw", total: 1 });
     await expect(
       client.resolve(
         MusicSourceResolveRequest.make({
@@ -57,10 +77,12 @@ describe("music HTTP client", () => {
     ).resolves.toMatchObject({ action: "musicUrl" });
     expect(requests[1]?.method).toBe("POST");
     expect(requests[1]?.credentials).toBe("same-origin");
+    expect(requests[2]?.method).toBe("POST");
+    expect(requests[2]?.credentials).toBe("same-origin");
   });
 
   it("surfaces stable server error codes", async () => {
-    const client = new MusicClient("/status", "/resolve", async () =>
+    const client = new MusicClient("/status", "/search", "/resolve", async () =>
       Response.json({ error: "SOURCE_UNAVAILABLE" }, { status: 503 }),
     );
 
@@ -71,7 +93,7 @@ describe("music HTTP client", () => {
   });
 
   it("rejects malformed successful responses as protocol errors", async () => {
-    const client = new MusicClient("/status", "/resolve", async () => Response.json({ active: 1 }));
+    const client = new MusicClient("/status", "/search", "/resolve", async () => Response.json({ active: 1 }));
 
     const error = await client.readStatus().catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(MusicClientError);

@@ -11,7 +11,28 @@ const sessionSecret = "test-session-signing-secret-at-least-32-characters";
 
 it("serves root music status and resolves music only for authenticated sessions", async () => {
   const http = new MusicOutboundHttp(
-    async () => Response.json({ url: "https://audio.example.test/song.mp3" }),
+    async (input) => {
+      const url = new URL(input instanceof Request ? input.url : input.toString());
+      if (url.hostname === "search.kuwo.cn") {
+        return Response.json({
+          TOTAL: "1",
+          SHOW: "1",
+          abslist: [
+            {
+              MUSICRID: "MUSIC_123",
+              SONGNAME: "Fixture Song",
+              ARTIST: "Fixture Artist",
+              ALBUM: "Fixture Album",
+              ALBUMID: "album-1",
+              DURATION: "180",
+              N_MINFO:
+                "level:p,bitrate:128,format:mp3,size:3.0M;level:h,bitrate:320,format:mp3,size:7.0M",
+            },
+          ],
+        });
+      }
+      return Response.json({ url: "https://audio.example.test/song.mp3" });
+    },
     async () => [{ address: "8.8.8.8", family: 4 }],
   );
   const music = await MusicSourceService.create({
@@ -48,6 +69,16 @@ it("serves root music status and resolves music only for authenticated sessions"
     );
     expect(unauthorized?.status).toBe(401);
 
+    const unauthorizedSearch = await router.handle(
+      new Request("https://snake.example/api/music/search", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ source: "kw", query: "Fixture" }),
+      }),
+      "127.0.0.1",
+    );
+    expect(unauthorizedSearch?.status).toBe(401);
+
     const login = await router.handle(
       new Request("https://snake.example/api/session", {
         method: "POST",
@@ -58,6 +89,28 @@ it("serves root music status and resolves music only for authenticated sessions"
     );
     const cookie = login?.headers.get("set-cookie")?.split(";", 1)[0];
     expect(cookie).toContain("serpentia_session=");
+
+    const searched = await router.handle(
+      new Request("https://snake.example/api/music/search", {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: cookie ?? "" },
+        body: JSON.stringify({ source: "kw", query: "Fixture" }),
+      }),
+      "127.0.0.1",
+    );
+    expect(searched?.status).toBe(200);
+    expect(await searched?.json()).toMatchObject({
+      source: "kw",
+      total: 1,
+      tracks: [
+        {
+          title: "Fixture Song",
+          artist: "Fixture Artist",
+          qualitys: ["128k", "320k"],
+          musicInfo: { source: "kw", meta: { songId: "123" } },
+        },
+      ],
+    });
 
     const resolved = await router.handle(
       new Request("https://snake.example/api/music/resolve", {

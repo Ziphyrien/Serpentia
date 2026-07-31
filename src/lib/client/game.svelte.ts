@@ -82,6 +82,7 @@ export class GameController {
   voicePeers = $state<Array<VoicePeerView>>([]);
   voiceJoined = $state(false);
   musicState = $state<MusicPlaybackState | undefined>(undefined);
+  musicError = $state<string | undefined>(undefined);
   /** 本地麦克风实时电平（0-1），供 HUD 麦克风按钮显示。 */
   voiceLevel = $state(0);
   voiceError = $state<string | undefined>(undefined);
@@ -130,6 +131,7 @@ export class GameController {
   private killFeedCounter = 0;
   private readonly killFeedTimers = new Set<ReturnType<typeof setTimeout>>();
   private voiceErrorTimer: ReturnType<typeof setTimeout> | undefined;
+  private musicErrorTimer: ReturnType<typeof setTimeout> | undefined;
   private respawnTimer: ReturnType<typeof setInterval> | undefined;
   private respawnAtMs = 0;
   private magnetTimer: ReturnType<typeof setInterval> | undefined;
@@ -221,6 +223,7 @@ export class GameController {
   }
 
   controlMusic(command: MusicControl): void {
+    if (command._tag === "play") this.clearMusicError();
     this.client?.sendMusicControl(command);
   }
 
@@ -241,6 +244,7 @@ export class GameController {
     if (this.respawnTimer) clearInterval(this.respawnTimer);
     if (this.magnetTimer) clearInterval(this.magnetTimer);
     if (this.voiceErrorTimer) clearTimeout(this.voiceErrorTimer);
+    if (this.musicErrorTimer) clearTimeout(this.musicErrorTimer);
     for (const timer of this.killFeedTimers) clearTimeout(timer);
     this.killFeedTimers.clear();
     this.voice.dispose();
@@ -479,11 +483,23 @@ export class GameController {
       this.onSessionExpired();
       return;
     }
+    if (code === "MUSIC_CONTROL_FAILED") {
+      this.musicError = "歌曲解析失败，请更换音质或来源后重试";
+      if (this.musicErrorTimer) clearTimeout(this.musicErrorTimer);
+      this.musicErrorTimer = setTimeout(() => this.clearMusicError(), 5_000);
+      return;
+    }
     if (code === "NICKNAME_IN_USE") this.notice = "昵称已被占用，请更换昵称";
     else if (code === "RATE_LIMITED") this.notice = "操作太频繁，已被限流";
     else if (code === "STALE_INPUT") {
       this.forceInputResend();
     } else if (!retryable) this.notice = `服务器错误：${code}`;
+  }
+
+  private clearMusicError(): void {
+    if (this.musicErrorTimer) clearTimeout(this.musicErrorTimer);
+    this.musicErrorTimer = undefined;
+    this.musicError = undefined;
   }
 
   private handleClose(code: number): void {

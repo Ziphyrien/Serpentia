@@ -174,6 +174,7 @@ export const BackendDescriptor = Schema.Struct({
   sessionPath: Schema.Literal("/api/session"),
   turnCredentialsPath: Schema.Literal("/api/turn-credentials"),
   musicPath: Schema.Literal("/api/music"),
+  musicSearchPath: Schema.Literal("/api/music/search"),
   musicResolvePath: Schema.Literal("/api/music/resolve"),
   websocketPath: Schema.Literal("/api/parties/game-room/friends"),
 });

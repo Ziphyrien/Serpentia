@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import {
+  MusicSearchRequest,
   MusicSourceResolveRequest,
   SessionRequest,
   type BackendDescriptor,
@@ -25,6 +26,7 @@ import { readBoundedJson } from "./bounded-json";
 import { expiredSessionCookie, readCookie, sessionCookie } from "./cookies";
 
 const MAX_SESSION_BODY_BYTES = 2_048;
+const MAX_MUSIC_SEARCH_BODY_BYTES = 512;
 const MAX_MUSIC_BODY_BYTES = 16_384;
 
 export class ApiRouter {
@@ -52,6 +54,7 @@ export class ApiRouter {
       return this.handleTurnCredentials(request);
     }
     if (pathname === this.descriptor.musicPath) return this.handleMusicStatus(request);
+    if (pathname === this.descriptor.musicSearchPath) return this.handleMusicSearch(request);
     if (pathname === this.descriptor.musicResolvePath) return this.handleMusicResolve(request);
     if (pathname === this.descriptor.websocketPath) {
       return new Response("WebSocket upgrade required", {
@@ -169,6 +172,39 @@ export class ApiRouter {
     return Response.json(this.services.music.status(), {
       headers: { "cache-control": "public, max-age=5" },
     });
+  }
+
+  private async handleMusicSearch(request: Request): Promise<Response> {
+    if (request.method !== "POST") return methodNotAllowed("POST");
+    const token = readCookie(request, SESSION_COOKIE_NAME);
+    const session =
+      token === undefined
+        ? undefined
+        : await verifySession(token, this.config.sessionSigningSecret);
+    if (session === undefined) return musicError("UNAUTHORIZED", 401);
+    const attempt = this.services.musicSearchAttempts.take(session.playerId);
+    if (!attempt.allowed) {
+      return musicError("RATE_LIMITED", 429, retryAfterHeaders(attempt));
+    }
+    if (!isJsonRequest(request)) return musicError("INVALID_REQUEST", 400);
+
+    let input: MusicSearchRequest;
+    try {
+      const raw = await readBoundedJson(request, MAX_MUSIC_SEARCH_BODY_BYTES);
+      input = await Schema.decodeUnknownPromise(MusicSearchRequest)(raw);
+    } catch {
+      return musicError("INVALID_REQUEST", 400);
+    }
+
+    try {
+      const result = await this.services.music.search(input, request.signal);
+      return Response.json(result, {
+        headers: { "cache-control": "private, no-store" },
+      });
+    } catch (cause) {
+      if (!isMusicSourceError(cause)) return musicError("RUNTIME_UNAVAILABLE", 503);
+      return musicError(cause.code, musicStatus(cause.code));
+    }
   }
 
   private async handleMusicResolve(request: Request): Promise<Response> {

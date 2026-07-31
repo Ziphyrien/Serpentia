@@ -9,6 +9,7 @@ export class RuntimeServices {
   readonly music: MusicSourceService;
   readonly sessionAttempts = new AttemptLimiter();
   readonly turnCredentialAttempts = new AttemptLimiter(12, 10 * 60_000);
+  readonly musicSearchAttempts = new AttemptLimiter(20, 60_000);
   readonly musicResolveAttempts = new AttemptLimiter(30, 60_000);
 
   constructor(

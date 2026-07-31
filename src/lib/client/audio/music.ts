@@ -1,7 +1,8 @@
 import { Howl, Howler } from "howler";
 import type { MusicPlaybackState } from "$lib/protocol";
 
-const MAX_DRIFT_SECONDS = 0.35;
+const MAX_STARTUP_DRIFT_SECONDS = 0.1;
+const MAX_STEADY_DRIFT_SECONDS = 0.18;
 
 export class MusicPlayback {
   private stateValue: MusicPlaybackState | undefined;
@@ -11,7 +12,7 @@ export class MusicPlayback {
   private readonly correctionTimer: ReturnType<typeof setInterval>;
   private readonly unlock = (): void => {
     void Howler.ctx?.resume?.();
-    this.synchronize();
+    this.synchronize(MAX_STARTUP_DRIFT_SECONDS);
   };
 
   constructor(private readonly serverNow: () => number) {
@@ -35,19 +36,27 @@ export class MusicPlayback {
     if (this.url !== state.track.url || this.sound === undefined) {
       this.releaseSound();
       this.url = state.track.url;
-      const revision = state.revision;
-      this.sound = new Howl({
+      let sound: Howl | undefined;
+      sound = new Howl({
         src: [state.track.url],
         html5: true,
         preload: true,
         volume: this.volume,
         onload: () => {
-          if (this.stateValue?.revision === revision) this.synchronize();
+          if (sound !== undefined && this.sound === sound) this.synchronize();
+        },
+        // HTML5 Audio starts asynchronously after play(); use a stricter one-shot threshold
+        // for that startup latency while periodic corrections stay more conservative.
+        onplay: () => {
+          if (sound !== undefined && this.sound === sound) {
+            this.synchronize(MAX_STARTUP_DRIFT_SECONDS);
+          }
         },
         onplayerror: () => {
-          if (this.stateValue?.revision === revision) void Howler.ctx?.resume?.();
+          if (sound !== undefined && this.sound === sound) void Howler.ctx?.resume?.();
         },
       });
+      this.sound = sound;
     }
     this.synchronize();
   }
@@ -73,7 +82,7 @@ export class MusicPlayback {
     this.stateValue = undefined;
   }
 
-  private synchronize(): void {
+  private synchronize(maxDriftSeconds = MAX_STEADY_DRIFT_SECONDS): void {
     const state = this.stateValue;
     const sound = this.sound;
     if (state === undefined || sound === undefined || sound.state() !== "loaded") return;
@@ -90,7 +99,7 @@ export class MusicPlayback {
       return;
     }
     const actual = sound.seek();
-    if (typeof actual !== "number" || Math.abs(actual - expected) > MAX_DRIFT_SECONDS) {
+    if (typeof actual !== "number" || Math.abs(actual - expected) > maxDriftSeconds) {
       seekTo(sound, expected);
     }
     if (!sound.playing()) sound.play();

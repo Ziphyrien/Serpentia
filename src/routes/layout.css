@@ -23,6 +23,30 @@ body {
   overscroll-behavior: none;
 }
 
+/* 所有可滚动区域统一使用细滚动条；Firefox 与 Chromium/WebKit 分别声明。 */
+* {
+  scrollbar-color: rgb(130 140 170 / 0.48) transparent;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: rgb(130 140 170 / 0.48);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgb(163 230 53 / 0.68);
+}
+
 /* 首页内容约 35rem 高：矮屏按视口高度缩放根字号，让 rem 尺寸整体等比缩小 */
 :root:has([data-login-page]) {
   font-size: min(1rem, calc(100dvh / 35));
