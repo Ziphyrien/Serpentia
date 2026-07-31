@@ -33,6 +33,9 @@ import {
 import { VoiceManager, type VoicePeerView } from "./voice/voice-manager";
 import type { SettingsStore } from "./stores/settings.svelte";
 
+/** 打开共享音乐管理弹窗的窗口事件：设置弹窗经控制器广播，音乐弹窗监听。 */
+export const OPEN_MUSIC_MANAGER_EVENT = "serpentia:open-music-manager";
+
 export interface KillFeedEntry {
   id: number;
   text: string;
@@ -222,9 +225,7 @@ export class GameController {
   }
 
   requestMusicManager(): void {
-    window.dispatchEvent(
-      new CustomEvent("serpentia:open-music-manager", { detail: { controller: this } }),
-    );
+    window.dispatchEvent(new CustomEvent(OPEN_MUSIC_MANAGER_EVENT));
   }
 
   setPeerVolume(playerId: PlayerId, volume: number): void {

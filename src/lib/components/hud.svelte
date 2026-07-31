@@ -11,6 +11,7 @@
   import DeathOverlay from "./death-overlay.svelte";
   import VoicePanel from "./voice-panel.svelte";
   import SettingsDialog from "./settings-dialog.svelte";
+  import MusicDialog from "./music-dialog.svelte";
   import TouchControls from "./touch-controls.svelte";
 
   let {
@@ -73,6 +74,7 @@
           onManageMusic={() => controller.requestMusicManager()}
           {onReturnHome}
         />
+        <MusicDialog {controller} />
       </div>
       <GameMap
         markers={controller.gameMapMarkers}
