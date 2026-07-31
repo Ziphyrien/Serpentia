@@ -15,6 +15,8 @@ import {
   type VoiceSignal,
 } from "../../protocol";
 import { defaultGameConfig } from "../game/config";
+import { MusicCoordinator, type MusicResolver } from "../music/coordinator";
+import { MusicSourceService } from "../music/service";
 import { GameEngine } from "../game/engine";
 import { VoiceRoster } from "../voice/voice-roster";
 import type { ConnectionIdentity } from "./connection-identity";
@@ -43,6 +45,7 @@ export class GameRoom {
     RECONNECT_GRACE_TICKS,
   );
   private readonly voiceRoster = new VoiceRoster();
+  private readonly musicCoordinator: MusicCoordinator;
   private readonly trafficGuard = new ConnectionTrafficGuard();
   private readonly snapshotStream = new SnapshotStreamEncoder();
   private readonly snapshotDelivery = new SnapshotDeliveryState();
@@ -52,7 +55,22 @@ export class GameRoom {
   private nextTickAt = 0;
   private latestSnapshotMessage: SnapshotMessage | undefined;
 
-  constructor(private readonly metadata: RoomMetadata = ROOM_METADATA) {}
+  constructor(
+    private readonly metadata: RoomMetadata = ROOM_METADATA,
+    musicResolver: MusicResolver = MusicSourceService.disabled(),
+  ) {
+    this.musicCoordinator = new MusicCoordinator(musicResolver, {
+      stateChanged: (music) => {
+        this.broadcast({ v: GAME_PROTOCOL_VERSION, _tag: "music-state", music });
+      },
+      commandFailed: (playerId) => {
+        const connectionId = this.controller.connectionIdForPlayer(playerId);
+        const connection =
+          connectionId === undefined ? undefined : this.connections.get(connectionId);
+        if (connection !== undefined) this.sendError(connection, "MUSIC_CONTROL_FAILED", true);
+      },
+    });
+  }
 
   connect(connection: GameRoomConnection): void {
     const identity = connection.identity;
@@ -90,6 +108,7 @@ export class GameRoom {
       room: this.metadata,
       snapshot: result.snapshot,
       voice: this.voiceRoster.snapshot(),
+      music: this.musicCoordinator.state,
     });
     this.broadcastVoiceRoster(connection.id);
     this.startLoop();
@@ -199,6 +218,7 @@ export class GameRoom {
 
   dispose(): void {
     this.stopLoop();
+    this.musicCoordinator.dispose();
     this.snapshotStream.reset();
     this.latestSnapshotMessage = undefined;
     for (const connection of this.connections.values()) {
@@ -219,15 +239,13 @@ export class GameRoom {
         });
         return;
       case "voice-state":
-        this.handleVoiceState(
-          connection,
-          message.listening,
-          message.microphoneEnabled,
-          message.muted,
-        );
+        this.handleVoiceState(connection, message.listening, message.microphoneEnabled);
         return;
       case "voice-signal":
         this.forwardVoiceSignal(connection, message.targetPlayerId, message.signal);
+        return;
+      case "music-control":
+        this.handleMusicControl(connection, message.command);
         return;
       case "input": {
         const accepted = this.controller.applyInput(connection.id, {
@@ -245,7 +263,6 @@ export class GameRoom {
     connection: GameRoomConnection,
     listening: boolean,
     microphoneEnabled: boolean,
-    muted: boolean,
   ): void {
     const identity = connection.identity;
     if (!this.controller.isCurrentConnection(connection.id, identity.playerId)) {
@@ -253,9 +270,24 @@ export class GameRoom {
       return;
     }
     const changed = listening
-      ? this.voiceRoster.upsert(identity.playerId, identity.nickname, microphoneEnabled, muted)
+      ? this.voiceRoster.upsert(identity.playerId, identity.nickname, microphoneEnabled)
       : this.voiceRoster.leave(identity.playerId);
     if (changed) this.broadcastVoiceRoster();
+  }
+
+  private handleMusicControl(
+    connection: GameRoomConnection,
+    command: Extract<ClientMessage, { _tag: "music-control" }>["command"],
+  ): void {
+    const identity = connection.identity;
+    if (!this.controller.isCurrentConnection(connection.id, identity.playerId)) {
+      this.sendError(connection, "MUSIC_CONTROL_FAILED", false);
+      return;
+    }
+    this.musicCoordinator.control(
+      { playerId: identity.playerId, nickname: identity.nickname },
+      command,
+    );
   }
 
   private forwardVoiceSignal(
@@ -440,6 +472,7 @@ export class GameRoom {
 function messageCategory(message: ClientMessage): MessageCategory {
   if (message._tag === "input") return "input";
   if (message._tag === "voice-signal") return "voice-signal";
+  if (message._tag === "music-control") return "music";
   return "control";
 }
 

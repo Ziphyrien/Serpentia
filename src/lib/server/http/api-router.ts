@@ -1,7 +1,9 @@
 import { Schema } from "effect";
 import {
+  MusicSourceResolveRequest,
   SessionRequest,
   type BackendDescriptor,
+  type MusicSourceErrorCode,
   type SessionErrorCode,
   type SessionStatus,
   type TurnCredentialsErrorCode,
@@ -14,6 +16,7 @@ import {
   signSession,
   verifySession,
 } from "../access/session";
+import { isMusicSourceError } from "../music/errors";
 import { normalizeNickname, normalizeSkinId } from "../room/connection-identity";
 import type { RuntimeConfig } from "../runtime/config";
 import type { RuntimeServices } from "../runtime/services";
@@ -22,6 +25,7 @@ import { readBoundedJson } from "./bounded-json";
 import { expiredSessionCookie, readCookie, sessionCookie } from "./cookies";
 
 const MAX_SESSION_BODY_BYTES = 2_048;
+const MAX_MUSIC_BODY_BYTES = 16_384;
 
 export class ApiRouter {
   constructor(
@@ -47,6 +51,8 @@ export class ApiRouter {
     if (pathname === this.descriptor.turnCredentialsPath) {
       return this.handleTurnCredentials(request);
     }
+    if (pathname === this.descriptor.musicPath) return this.handleMusicStatus(request);
+    if (pathname === this.descriptor.musicResolvePath) return this.handleMusicResolve(request);
     if (pathname === this.descriptor.websocketPath) {
       return new Response("WebSocket upgrade required", {
         status: 426,
@@ -158,6 +164,46 @@ export class ApiRouter {
     }
   }
 
+  private handleMusicStatus(request: Request): Response {
+    if (request.method !== "GET") return methodNotAllowed("GET");
+    return Response.json(this.services.music.status(), {
+      headers: { "cache-control": "public, max-age=5" },
+    });
+  }
+
+  private async handleMusicResolve(request: Request): Promise<Response> {
+    if (request.method !== "POST") return methodNotAllowed("POST");
+    const token = readCookie(request, SESSION_COOKIE_NAME);
+    const session =
+      token === undefined
+        ? undefined
+        : await verifySession(token, this.config.sessionSigningSecret);
+    if (session === undefined) return musicError("UNAUTHORIZED", 401);
+    const attempt = this.services.musicResolveAttempts.take(session.playerId);
+    if (!attempt.allowed) {
+      return musicError("RATE_LIMITED", 429, retryAfterHeaders(attempt));
+    }
+    if (!isJsonRequest(request)) return musicError("INVALID_REQUEST", 400);
+
+    let input: MusicSourceResolveRequest;
+    try {
+      const raw = await readBoundedJson(request, MAX_MUSIC_BODY_BYTES);
+      input = await Schema.decodeUnknownPromise(MusicSourceResolveRequest)(raw);
+    } catch {
+      return musicError("INVALID_REQUEST", 400);
+    }
+
+    try {
+      const result = await this.services.music.resolve(input, request.signal);
+      return Response.json(result, {
+        headers: { "cache-control": "private, no-store" },
+      });
+    } catch (cause) {
+      if (!isMusicSourceError(cause)) return musicError("RUNTIME_UNAVAILABLE", 503);
+      return musicError(cause.code, musicStatus(cause.code));
+    }
+  }
+
   private secureCookie(request: Request): boolean {
     if (this.config.cookieSecure) return true;
     const url = new URL(request.url);
@@ -197,6 +243,36 @@ function retryAfterHeaders(decision: { readonly retryAfterMilliseconds: number }
   return {
     "retry-after": String(Math.max(1, Math.ceil(decision.retryAfterMilliseconds / 1000))),
   };
+}
+
+function musicStatus(error: MusicSourceErrorCode): number {
+  switch (error) {
+    case "INVALID_REQUEST":
+      return 400;
+    case "UNAUTHORIZED":
+      return 401;
+    case "RATE_LIMITED":
+      return 429;
+    case "UPSTREAM_FAILED":
+    case "POLICY_DENIED":
+      return 502;
+    case "TIMEOUT":
+      return 504;
+    case "SOURCE_UNAVAILABLE":
+    case "INITIALIZATION_FAILED":
+    case "RUNTIME_UNAVAILABLE":
+      return 503;
+  }
+}
+
+function musicError(
+  error: MusicSourceErrorCode,
+  status: number,
+  headers: HeadersInit = {},
+): Response {
+  const responseHeaders = new Headers(headers);
+  responseHeaders.set("cache-control", "private, no-store");
+  return Response.json({ error }, { status, headers: responseHeaders });
 }
 
 function turnError(

@@ -4,18 +4,16 @@ import type { VoiceParticipant } from "../../protocol/state";
 export class VoiceRoster {
   private readonly participants = new Map<string, VoiceParticipant>();
 
-  upsert(playerId: string, nickname: string, microphoneEnabled: boolean, muted: boolean): boolean {
+  upsert(playerId: string, nickname: string, microphoneEnabled: boolean): boolean {
     const participant: VoiceParticipant = {
       playerId,
       nickname,
       microphoneEnabled,
-      muted: !microphoneEnabled || muted,
     };
     const previous = this.participants.get(playerId);
     if (
       previous?.nickname === participant.nickname &&
-      previous.microphoneEnabled === participant.microphoneEnabled &&
-      previous.muted === participant.muted
+      previous.microphoneEnabled === participant.microphoneEnabled
     ) {
       return false;
     }

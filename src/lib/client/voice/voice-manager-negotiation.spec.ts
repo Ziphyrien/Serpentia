@@ -205,7 +205,6 @@ function participant(playerId: string, microphoneEnabled: boolean): VoicePartici
     playerId,
     nickname: playerId,
     microphoneEnabled,
-    muted: !microphoneEnabled,
   };
 }
 

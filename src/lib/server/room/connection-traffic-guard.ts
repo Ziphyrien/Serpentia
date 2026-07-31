@@ -1,10 +1,11 @@
 import {
   MAX_INPUT_MESSAGES_PER_SECOND,
+  MAX_MUSIC_CONTROL_MESSAGES_PER_SECOND,
   MAX_TOTAL_MESSAGES_PER_SECOND,
   MAX_VOICE_SIGNALS_PER_SECOND,
 } from "../../protocol/game";
 
-export type MessageCategory = "input" | "voice-signal" | "control";
+export type MessageCategory = "input" | "voice-signal" | "music" | "control";
 
 interface WindowCounter {
   startedAt: number;
@@ -15,6 +16,7 @@ interface ConnectionCounters {
   readonly total: WindowCounter;
   readonly input: WindowCounter;
   readonly voiceSignal: WindowCounter;
+  readonly music: WindowCounter;
   invalidMessages: number;
 }
 
@@ -40,6 +42,9 @@ export class ConnectionTrafficGuard {
     if (category === "voice-signal") {
       return increment(counters.voiceSignal, MAX_VOICE_SIGNALS_PER_SECOND, now);
     }
+    if (category === "music") {
+      return increment(counters.music, MAX_MUSIC_CONTROL_MESSAGES_PER_SECOND, now);
+    }
     return true;
   }
 
@@ -60,6 +65,7 @@ export class ConnectionTrafficGuard {
       total: { startedAt: now, count: 0 },
       input: { startedAt: now, count: 0 },
       voiceSignal: { startedAt: now, count: 0 },
+      music: { startedAt: now, count: 0 },
       invalidMessages: 0,
     };
     this.counters.set(connectionId, counters);

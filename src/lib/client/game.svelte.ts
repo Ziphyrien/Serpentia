@@ -2,6 +2,8 @@ import type {
   BackendDescriptor,
   GameSnapshot,
   ServerMessage,
+  MusicControl,
+  MusicPlaybackState,
   SessionInfo,
   TickEventBatch,
 } from "$lib/protocol";
@@ -17,6 +19,7 @@ import { PointerInput } from "./input/pointer-input";
 import { JoystickInput } from "./input/joystick-input";
 import { GamepadInput } from "./input/gamepad-input";
 import { nextNetworkInput, type NetworkInputCommand } from "./input/network-input";
+import { MusicPlayback } from "./audio/music";
 import { Sfx } from "./audio/sfx";
 import type { GameConnectionStatus } from "./game-readiness";
 import { terminalGameCloseNotice } from "./game-close-notice";
@@ -55,6 +58,7 @@ export interface HudSelf {
 export class GameController {
   readonly input = new InputState();
   readonly sfx = new Sfx();
+  readonly music: MusicPlayback;
 
   status = $state<GameConnectionStatus>("connecting");
   /** 网络、纹理和包含权威快照的首个 Pixi 帧均已完成。 */
@@ -74,7 +78,7 @@ export class GameController {
   pingMs = $state(0);
   voicePeers = $state<Array<VoicePeerView>>([]);
   voiceJoined = $state(false);
-  voiceMuted = $state(false);
+  musicState = $state<MusicPlaybackState | undefined>(undefined);
   /** 本地麦克风实时电平（0-1），供 HUD 麦克风按钮显示。 */
   voiceLevel = $state(0);
   voiceError = $state<string | undefined>(undefined);
@@ -134,6 +138,7 @@ export class GameController {
     private readonly settings: SettingsStore,
     private readonly onSessionExpired: () => void,
   ) {
+    this.music = new MusicPlayback(() => this.clock.serverNow() ?? Date.now());
     this.predictor = new SelfPredictor(descriptor.rules, descriptor.tickRate);
     this.pointer = new PointerInput(this.input);
     this.joystick = new JoystickInput(this.input);
@@ -141,9 +146,8 @@ export class GameController {
       () => this.selfId ?? session.playerId,
       {
         onPeersChanged: (peers) => (this.voicePeers = peers),
-        onJoinedChanged: (joined, muted) => {
+        onJoinedChanged: (joined) => {
           this.voiceJoined = joined;
-          this.voiceMuted = muted;
         },
         onLocalLevel: (level) => (this.voiceLevel = level),
         onError: (message) => {
@@ -155,13 +159,13 @@ export class GameController {
           }, 4000);
         },
         sendVoiceSignal: (target, signal) => this.client?.sendVoiceSignal(target, signal),
-        sendVoiceState: (listening, microphoneEnabled, muted) =>
-          this.client?.sendVoiceState(listening, microphoneEnabled, muted),
+        sendVoiceState: (listening, microphoneEnabled) =>
+          this.client?.sendVoiceState(listening, microphoneEnabled),
       },
       descriptor.turnCredentialsPath,
     );
     this.sfx.setVolume(settings.sfxVolume);
-    this.sfx.setMuted(settings.sfxMuted);
+    this.music.setVolume(settings.musicVolume);
     this.unsubscribeInput = this.input.subscribe(() => this.scheduleInputSend());
     this.gamepad = new GamepadInput(this.input, (gamepad) => {
       this.gamepadConnected = gamepad !== undefined;
@@ -213,8 +217,14 @@ export class GameController {
     else if (!this.voice.isJoining) void this.voice.join();
   }
 
-  setVoiceMuted(muted: boolean): void {
-    this.voice.setMuted(muted);
+  controlMusic(command: MusicControl): void {
+    this.client?.sendMusicControl(command);
+  }
+
+  requestMusicManager(): void {
+    window.dispatchEvent(
+      new CustomEvent("serpentia:open-music-manager", { detail: { controller: this } }),
+    );
   }
 
   setPeerVolume(playerId: PlayerId, volume: number): void {
@@ -238,6 +248,7 @@ export class GameController {
     this.joystick.detach();
     this.gamepad.dispose();
     this.sfx.dispose();
+    this.music.dispose();
     this.renderer?.destroy();
   }
 
@@ -282,6 +293,9 @@ export class GameController {
       case "voice-signal":
         void this.voice.handleSignal(message.fromPlayerId, message.signal);
         break;
+      case "music-state":
+        this.acceptMusicState(message.music);
+        break;
       case "error":
         this.handleServerError(message.code, message.retryable);
         break;
@@ -300,9 +314,15 @@ export class GameController {
     this.buffer.reset();
     this.pingSentAt.clear();
     this.handleSnapshot(message.snapshot, message.serverTime, []);
+    this.acceptMusicState(message.music, true);
     this.voice.handleSignalingReconnect(message.voice);
     void this.voice.startListening();
     this.startLoops();
+  }
+
+  private acceptMusicState(state: MusicPlaybackState, force = false): void {
+    this.musicState = state;
+    this.music.apply(state, force);
   }
 
   private handleSnapshot(

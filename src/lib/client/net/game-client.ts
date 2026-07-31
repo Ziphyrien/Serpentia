@@ -4,6 +4,7 @@ import {
   GAME_PROTOCOL_VERSION,
   SnapshotStreamDecoder,
   type ClientMessage,
+  type MusicControl,
   type ServerMessage,
   type VoiceSignal,
 } from "$lib/protocol";
@@ -72,14 +73,17 @@ export class GameClient {
     this.send({ v: GAME_PROTOCOL_VERSION, _tag: "ping", nonce });
   }
 
-  sendVoiceState(listening: boolean, microphoneEnabled: boolean, muted: boolean): void {
+  sendVoiceState(listening: boolean, microphoneEnabled: boolean): void {
     this.send({
       v: GAME_PROTOCOL_VERSION,
       _tag: "voice-state",
       listening,
       microphoneEnabled,
-      muted,
     });
+  }
+
+  sendMusicControl(command: MusicControl): void {
+    this.send({ v: GAME_PROTOCOL_VERSION, _tag: "music-control", command });
   }
 
   sendVoiceSignal(targetPlayerId: PlayerId, signal: VoiceSignal): void {

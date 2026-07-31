@@ -33,7 +33,6 @@ export interface VoicePeerView {
   playerId: PlayerId;
   nickname: string;
   microphoneEnabled: boolean;
-  muted: boolean;
   speaking: boolean;
   volume: number;
   connected: boolean;
@@ -41,11 +40,11 @@ export interface VoicePeerView {
 
 export interface VoiceManagerEvents {
   onPeersChanged(peers: Array<VoicePeerView>): void;
-  onJoinedChanged(joined: boolean, muted: boolean): void;
+  onJoinedChanged(joined: boolean): void;
   onLocalLevel(level: number): void;
   onError(message: string): void;
   sendVoiceSignal(targetPlayerId: PlayerId, signal: VoiceSignal): void;
-  sendVoiceState(listening: boolean, microphoneEnabled: boolean, muted: boolean): void;
+  sendVoiceState(listening: boolean, microphoneEnabled: boolean): void;
 }
 
 const decodeTurnCredentials = Schema.decodeUnknownSync(TurnCredentialsResponse);
@@ -53,6 +52,7 @@ const CREDENTIAL_RETRY_MS = 30_000;
 const SILENT_LISTEN_RETRY_DELAYS_MS: ReadonlyArray<number> = [150, 300, 600];
 const PEER_RESTART_DELAY_MS = 1_000;
 const NEGOTIATION_RETRY_DELAY_MS = 250;
+const DEFAULT_PEER_VOLUME = 1;
 
 /** Cancellable P2P voice lifecycle with deterministic offer ownership. */
 export class VoiceManager {
@@ -74,7 +74,6 @@ export class VoiceManager {
   private listeningRequest: Promise<boolean> | undefined;
   private listeningOperation = 0;
   private microphoneOperation = 0;
-  private muted = false;
   private audioUnlockInstalled = false;
 
   constructor(
@@ -138,7 +137,7 @@ export class VoiceManager {
       stopStream(stream);
       this.lifecycle = "idle";
       this.events.onError("语音服务暂时不可用");
-      this.events.onJoinedChanged(false, false);
+      this.events.onJoinedChanged(false);
       return;
     }
 
@@ -153,16 +152,15 @@ export class VoiceManager {
       this.lifecycle = "idle";
       this.stopMicrophoneResources();
       this.events.onError("麦克风发布失败，请重试");
-      this.events.onJoinedChanged(false, false);
+      this.events.onJoinedChanged(false);
       return;
     }
 
     this.lifecycle = "joined";
-    this.muted = false;
-    this.events.sendVoiceState(true, true, false);
+    this.events.sendVoiceState(true, true);
     this.attachLocalMeter();
     this.startLevelMeter();
-    this.events.onJoinedChanged(true, false);
+    this.events.onJoinedChanged(true);
     this.emitPeers();
   }
 
@@ -173,20 +171,8 @@ export class VoiceManager {
     this.microphoneOperation += 1;
     this.lifecycle = "idle";
     this.stopMicrophoneResources();
-    if (wasJoined && this.listening) this.events.sendVoiceState(true, false, true);
-    this.muted = false;
-    this.events.onJoinedChanged(false, false);
-    this.emitPeers();
-  }
-
-  setMuted(muted: boolean): void {
-    if (this.lifecycle !== "joined") return;
-    this.muted = muted;
-    this.localStream?.getAudioTracks().forEach((track) => {
-      track.enabled = !muted;
-    });
-    if (this.listening) this.events.sendVoiceState(true, true, muted);
-    this.events.onJoinedChanged(true, muted);
+    if (wasJoined && this.listening) this.events.sendVoiceState(true, false);
+    this.events.onJoinedChanged(false);
     this.emitPeers();
   }
 
@@ -218,7 +204,7 @@ export class VoiceManager {
     this.roster = new Map(participants.map((participant) => [participant.playerId, participant]));
     if (this.listening) {
       const microphoneEnabled = this.lifecycle === "joined";
-      this.events.sendVoiceState(true, microphoneEnabled, !microphoneEnabled || this.muted);
+      this.events.sendVoiceState(true, microphoneEnabled);
     }
     this.reconcilePeers();
     this.emitPeers();
@@ -243,11 +229,11 @@ export class VoiceManager {
     this.microphoneOperation += 1;
     this.listeningOperation += 1;
     this.lifecycle = "disposed";
-    if (this.listening) this.events.sendVoiceState(false, false, true);
+    if (this.listening) this.events.sendVoiceState(false, false);
     this.listening = false;
     this.listeningRequest = undefined;
     this.stopListeningResources();
-    this.events.onJoinedChanged(false, false);
+    this.events.onJoinedChanged(false);
     this.emitPeers();
   }
 
@@ -283,7 +269,7 @@ export class VoiceManager {
     });
     const audio = new Audio();
     audio.autoplay = true;
-    audio.volume = this.volumes.get(participant.playerId) ?? 1;
+    audio.volume = this.volumes.get(participant.playerId) ?? DEFAULT_PEER_VOLUME;
     const isOfferOwner = this.selfId() < participant.playerId;
     const localTrack = this.localStream?.getAudioTracks()[0];
     const audioTransceiver = isOfferOwner
@@ -487,7 +473,7 @@ export class VoiceManager {
     this.listening = true;
     this.installAudioUnlock();
     const microphoneEnabled = this.lifecycle === "joined";
-    this.events.sendVoiceState(true, microphoneEnabled, !microphoneEnabled || this.muted);
+    this.events.sendVoiceState(true, microphoneEnabled);
     this.reconcilePeers();
     this.emitPeers();
     return true;
@@ -711,7 +697,7 @@ export class VoiceManager {
 
   private sampleLocalLevel(): void {
     let level = 0;
-    if (this.localMeter && !this.muted) {
+    if (this.localMeter) {
       level = Math.min(1, VoiceManager.rms(this.localMeter) / 40);
     }
     const rounded = Math.round(level * 100) / 100;
@@ -729,9 +715,8 @@ export class VoiceManager {
         playerId,
         nickname: participant.nickname,
         microphoneEnabled: participant.microphoneEnabled,
-        muted: participant.muted,
         speaking: this.speaking.has(playerId),
-        volume: this.volumes.get(playerId) ?? 1,
+        volume: this.volumes.get(playerId) ?? DEFAULT_PEER_VOLUME,
         connected: peer?.pc.connectionState === "connected",
       });
     }

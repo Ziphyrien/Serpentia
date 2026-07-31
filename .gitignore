@@ -24,3 +24,6 @@ vite.config.ts.timestamp-*
 # Scratch
 _tmp/
 tmp/
+
+# Local music source
+music-source.js

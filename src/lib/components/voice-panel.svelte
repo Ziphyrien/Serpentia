@@ -8,7 +8,6 @@
   import type { GameController } from "$lib/client/game.svelte";
   import type { VoicePeerView } from "$lib/client/voice/voice-manager";
   import Button from "./ui/button.svelte";
-  import Switch from "./ui/switch.svelte";
   import Slider from "./ui/slider.svelte";
 
   let { controller }: { controller: GameController } = $props();
@@ -16,15 +15,13 @@
   let open = $state(false);
 
   const talkingCount = $derived(controller.voicePeers.filter((peer) => peer.microphoneEnabled).length);
-  const micLive = $derived(controller.voiceJoined && !controller.voiceMuted);
+  const micLive = $derived(controller.voiceJoined);
   const selfStatus = $derived.by(() => {
-    if (!controller.voiceJoined) return "收听中";
-    return controller.voiceMuted ? "已静音" : "通话中";
+    return controller.voiceJoined ? "通话中" : "收听中";
   });
 
   function peerStatus(peer: VoicePeerView): string {
     if (!peer.microphoneEnabled) return "收听中";
-    if (peer.muted) return "已静音";
     return peer.connected ? "已连接" : "连接中…";
   }
 </script>
@@ -89,12 +86,6 @@
             <p class="text-xs text-white/50">{selfStatus}</p>
           </div>
         </div>
-        {#if controller.voiceJoined}
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-white/50">静音</span>
-            <Switch checked={controller.voiceMuted} onCheckedChange={(v) => controller.setVoiceMuted(v)} />
-          </div>
-        {/if}
       </div>
 
       <Button
@@ -123,8 +114,6 @@
                 >
                   {#if !peer.microphoneEnabled}
                     <Headphones size={15} />
-                  {:else if peer.muted}
-                    <MicOff size={15} />
                   {:else}
                     <Mic size={15} />
                   {/if}

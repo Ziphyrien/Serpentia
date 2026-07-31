@@ -3,7 +3,7 @@ import { Howl, Howler } from "howler";
 type SfxName = "eat-wreck" | "eat-tool" | "end" | "kill" | "button-click";
 
 /**
- * 音效管理（howler 封装）：负责加载、音量与静音。
+ * 音效管理（howler 封装）：负责加载与独立音量。
  * 不知道游戏逻辑，只暴露语义化播放接口。
  */
 export class Sfx {
@@ -39,11 +39,9 @@ export class Sfx {
   }
 
   setVolume(volume: number): void {
-    Howler.volume(volume);
-  }
-
-  setMuted(muted: boolean): void {
-    Howler.mute(muted);
+    if (!Number.isFinite(volume)) return;
+    const clamped = Math.min(1, Math.max(0, volume));
+    for (const sound of Object.values(this.sounds)) sound.volume(clamped);
   }
 
   /** 原版 `playEatWreckAudio`：星星和死亡残骸共用 100 ms 节流。 */

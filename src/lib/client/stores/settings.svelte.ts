@@ -1,26 +1,27 @@
 import { Schema } from "effect";
 
 const STORAGE_KEY = "serpentia.settings.v1";
+const Volume = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 }));
 
-const SettingsData = Schema.Struct({
-  sfxVolume: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
-  sfxMuted: Schema.Boolean,
+const PersistedSettingsData = Schema.Struct({
+  sfxVolume: Volume,
+  musicVolume: Schema.optionalKey(Volume),
   showNicknames: Schema.Boolean,
 });
-type SettingsData = typeof SettingsData.Type;
+type PersistedSettingsData = typeof PersistedSettingsData.Type;
 
-const decodeSettings = Schema.decodeUnknownSync(SettingsData);
+const decodeSettings = Schema.decodeUnknownSync(PersistedSettingsData);
 
-const DEFAULTS: SettingsData = {
-  sfxVolume: 1,
-  sfxMuted: false,
+const DEFAULTS = {
+  sfxVolume: 0.7,
+  musicVolume: 0.4,
   showNicknames: true,
 };
 
 /** Local settings with validated persistence and an explicit change boundary. */
 export class SettingsStore {
   sfxVolume = $state(DEFAULTS.sfxVolume);
-  sfxMuted = $state(DEFAULTS.sfxMuted);
+  musicVolume = $state(DEFAULTS.musicVolume);
   showNicknames = $state(DEFAULTS.showNicknames);
 
   constructor() {
@@ -33,16 +34,16 @@ export class SettingsStore {
   }
 
   setSfxVolume(volume: number): void {
-    if (!Number.isFinite(volume)) return;
-    const clamped = Math.min(1, Math.max(0, volume));
-    if (Object.is(this.sfxVolume, clamped)) return;
+    const clamped = clampVolume(volume);
+    if (clamped === undefined || Object.is(this.sfxVolume, clamped)) return;
     this.sfxVolume = clamped;
     this.commit();
   }
 
-  setSfxMuted(muted: boolean): void {
-    if (this.sfxMuted === muted) return;
-    this.sfxMuted = muted;
+  setMusicVolume(volume: number): void {
+    const clamped = clampVolume(volume);
+    if (clamped === undefined || Object.is(this.musicVolume, clamped)) return;
+    this.musicVolume = clamped;
     this.commit();
   }
 
@@ -52,22 +53,28 @@ export class SettingsStore {
     this.commit();
   }
 
-  private assign(settings: SettingsData): void {
+  private assign(settings: PersistedSettingsData): void {
     this.sfxVolume = settings.sfxVolume;
-    this.sfxMuted = settings.sfxMuted;
+    this.musicVolume = settings.musicVolume ?? DEFAULTS.musicVolume;
     this.showNicknames = settings.showNicknames;
   }
 
   private commit(): void {
-    const settings: SettingsData = {
-      sfxVolume: this.sfxVolume,
-      sfxMuted: this.sfxMuted,
-      showNicknames: this.showNicknames,
-    };
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          sfxVolume: this.sfxVolume,
+          musicVolume: this.musicVolume,
+          showNicknames: this.showNicknames,
+        }),
+      );
     } catch {
       // Runtime settings still apply when persistence is unavailable.
     }
   }
+}
+
+function clampVolume(volume: number): number | undefined {
+  return Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : undefined;
 }

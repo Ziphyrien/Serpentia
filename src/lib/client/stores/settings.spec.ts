@@ -40,12 +40,12 @@ describe("settings store", () => {
   it("persists updates made through the explicit setting methods", () => {
     const settings = new SettingsStore();
     settings.setSfxVolume(0.35);
-    settings.setSfxMuted(true);
+    settings.setMusicVolume(0.25);
     settings.setShowNicknames(false);
 
     const restored = new SettingsStore();
     expect(restored.sfxVolume).toBe(0.35);
-    expect(restored.sfxMuted).toBe(true);
+    expect(restored.musicVolume).toBe(0.25);
     expect(restored.showNicknames).toBe(false);
   });
 
@@ -54,14 +54,14 @@ describe("settings store", () => {
       "serpentia.settings.v1",
       JSON.stringify({
         sfxVolume: 4,
-        sfxMuted: "yes",
+        musicVolume: "loud",
         showNicknames: false,
       }),
     );
 
     const settings = new SettingsStore();
-    expect(settings.sfxVolume).toBe(1);
-    expect(settings.sfxMuted).toBe(false);
+    expect(settings.sfxVolume).toBe(0.7);
+    expect(settings.musicVolume).toBe(0.4);
     expect(settings.showNicknames).toBe(true);
   });
 });

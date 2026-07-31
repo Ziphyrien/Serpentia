@@ -162,6 +162,5 @@ export const VoiceParticipant = Schema.Struct({
   playerId: PlayerId,
   nickname: Nickname,
   microphoneEnabled: Schema.Boolean,
-  muted: Schema.Boolean,
 });
 export type VoiceParticipant = typeof VoiceParticipant.Type;

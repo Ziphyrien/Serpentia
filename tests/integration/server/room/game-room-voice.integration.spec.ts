@@ -120,7 +120,6 @@ describe("game room voice membership", () => {
           _tag: "voice-state",
           listening: true,
           microphoneEnabled: false,
-          muted: false,
         }),
       );
       expect(latestRoster(beta.sent)).toEqual([
@@ -128,7 +127,6 @@ describe("game room voice membership", () => {
           playerId: "friend-a",
           nickname: "Alpha",
           microphoneEnabled: false,
-          muted: true,
         },
       ]);
 
@@ -139,7 +137,6 @@ describe("game room voice membership", () => {
           _tag: "voice-state",
           listening: true,
           microphoneEnabled: true,
-          muted: false,
         }),
       );
       expect(latestRoster(beta.sent)).toEqual([
@@ -147,7 +144,6 @@ describe("game room voice membership", () => {
           playerId: "friend-a",
           nickname: "Alpha",
           microphoneEnabled: true,
-          muted: false,
         },
       ]);
 
@@ -158,7 +154,6 @@ describe("game room voice membership", () => {
           _tag: "voice-state",
           listening: false,
           microphoneEnabled: false,
-          muted: true,
         }),
       );
       expect(latestRoster(beta.sent)).toEqual([]);

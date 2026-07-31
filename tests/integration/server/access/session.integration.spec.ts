@@ -64,7 +64,7 @@ describe("sessions", () => {
         "session cookie was not set",
       );
     } finally {
-      services.dispose();
+      await services.dispose();
     }
   });
   it("returns the token bucket retry delay on excess session requests", async () => {
@@ -95,7 +95,7 @@ describe("sessions", () => {
         "session retry delay did not match token refill time",
       );
     } finally {
-      services.dispose();
+      await services.dispose();
     }
   });
   it("session attempts are bounded per-source by a token bucket", () => {

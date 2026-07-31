@@ -21,7 +21,7 @@ interface WebSocketData {
 const config = loadRuntimeConfig();
 const roomMetadata = createRoomMetadata(config.publicIceServers);
 const descriptor = createBackendDescriptor(roomMetadata);
-const services = new RuntimeServices(roomMetadata);
+const services = await RuntimeServices.create(roomMetadata, config);
 const api = new ApiRouter(config, services, descriptor);
 const staticFiles = new StaticFileServer(resolve(import.meta.dir, "../build"));
 await staticFiles.assertReady();
@@ -128,7 +128,7 @@ async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(JSON.stringify({ level: "info", event: "server_stopping", signal }));
-  services.dispose();
+  await services.dispose();
   await server.stop(true);
 }
 

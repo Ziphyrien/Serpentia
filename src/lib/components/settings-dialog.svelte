@@ -2,9 +2,11 @@
   import { Dialog, mergeProps } from "bits-ui";
   import Settings from "lucide-svelte/icons/settings";
   import House from "lucide-svelte/icons/house";
+  import ListMusic from "lucide-svelte/icons/list-music";
   import X from "lucide-svelte/icons/x";
   import { pseudoLandscape } from "$lib/client/pseudo-landscape.svelte";
   import type { SettingsStore } from "$lib/client/stores/settings.svelte";
+  import type { MusicPlayback } from "$lib/client/audio/music";
   import type { Sfx } from "$lib/client/audio/sfx";
   import Button from "./ui/button.svelte";
   import Switch from "./ui/switch.svelte";
@@ -13,17 +15,21 @@
   let {
     settings,
     sfx,
+    music,
+    onManageMusic,
     onReturnHome,
   }: {
     settings: SettingsStore;
     sfx: Sfx;
+    music: MusicPlayback;
+    onManageMusic: () => void;
     onReturnHome: () => void;
   } = $props();
 
   let open = $state(false);
 
   $effect(() => sfx.setVolume(settings.sfxVolume));
-  $effect(() => sfx.setMuted(settings.sfxMuted));
+  $effect(() => music.setVolume(settings.musicVolume));
 </script>
 
 <Dialog.Root bind:open>
@@ -53,7 +59,7 @@
 
       <div class="flex flex-col gap-5">
         <div class="flex items-center justify-between gap-4">
-          <span class="text-sm font-bold text-white/85">音效音量</span>
+          <span class="text-sm font-bold text-white/85">音效</span>
           <div class="w-32">
             <Slider
               value={settings.sfxVolume}
@@ -64,10 +70,26 @@
             />
           </div>
         </div>
-        <div class="flex items-center justify-between">
-          <span class="text-sm font-bold text-white/85">静音</span>
-          <Switch checked={settings.sfxMuted} onCheckedChange={(value) => settings.setSfxMuted(value)} />
+        <div class="flex items-center justify-between gap-4">
+          <span class="text-sm font-bold text-white/85">音乐</span>
+          <div class="w-32">
+            <Slider
+              value={settings.musicVolume}
+              onValueChange={(value) => settings.setMusicVolume(value)}
+            />
+          </div>
         </div>
+        <Button
+          class="w-full"
+          onclick={() => {
+            sfx.click();
+            open = false;
+            onManageMusic();
+          }}
+        >
+          <ListMusic size={15} />
+          管理音乐
+        </Button>
         <div class="flex items-center justify-between">
           <span class="text-sm font-bold text-white/85">显示昵称</span>
           <Switch

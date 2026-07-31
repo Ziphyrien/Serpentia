@@ -5,6 +5,7 @@ import {
   type SnapshotStreamDecoder,
 } from "./snapshot-codec";
 import { GameSnapshot, PlayerId, TickEventBatch, VoiceParticipant } from "./state";
+import { MusicControl, MusicPlaybackState } from "./music";
 import { GAME_PROTOCOL_VERSION } from "./version";
 
 export { SnapshotStreamDecoder, SnapshotStreamEncoder } from "./snapshot-codec";
@@ -12,6 +13,7 @@ export { GAME_PROTOCOL_VERSION } from "./version";
 export const MAX_CLIENT_MESSAGE_BYTES = 65_536;
 export const MAX_INPUT_MESSAGES_PER_SECOND = 40;
 export const MAX_VOICE_SIGNALS_PER_SECOND = 64;
+export const MAX_MUSIC_CONTROL_MESSAGES_PER_SECOND = 4;
 export const MAX_TOTAL_MESSAGES_PER_SECOND = 96;
 
 const ProtocolVersion = Schema.Literal(GAME_PROTOCOL_VERSION);
@@ -55,8 +57,15 @@ export class VoiceStateMessage extends Schema.TaggedClass<VoiceStateMessage>()("
   listening: Schema.Boolean,
   /** Whether this participant currently publishes a microphone track. */
   microphoneEnabled: Schema.Boolean,
-  muted: Schema.Boolean,
 }) {}
+
+export class MusicControlMessage extends Schema.TaggedClass<MusicControlMessage>()(
+  "music-control",
+  {
+    v: ProtocolVersion,
+    command: MusicControl,
+  },
+) {}
 
 export class VoiceOfferSignal extends Schema.TaggedClass<VoiceOfferSignal>()("offer", {
   sdp: SessionDescription,
@@ -87,6 +96,7 @@ export const ClientMessage = Schema.Union([
   PingMessage,
   VoiceStateMessage,
   VoiceSignalMessage,
+  MusicControlMessage,
 ]);
 export type ClientMessage = typeof ClientMessage.Type;
 
@@ -163,6 +173,8 @@ export const BackendDescriptor = Schema.Struct({
   ...RoomMetadata.fields,
   sessionPath: Schema.Literal("/api/session"),
   turnCredentialsPath: Schema.Literal("/api/turn-credentials"),
+  musicPath: Schema.Literal("/api/music"),
+  musicResolvePath: Schema.Literal("/api/music/resolve"),
   websocketPath: Schema.Literal("/api/parties/game-room/friends"),
 });
 export type BackendDescriptor = typeof BackendDescriptor.Type;
@@ -177,6 +189,7 @@ export const ServerErrorCode = Schema.Union([
   Schema.Literal("VOICE_NOT_AUTHORIZED"),
   Schema.Literal("VOICE_SELF_TARGET"),
   Schema.Literal("VOICE_TARGET_UNAVAILABLE"),
+  Schema.Literal("MUSIC_CONTROL_FAILED"),
 ]);
 export type ServerErrorCode = typeof ServerErrorCode.Type;
 
@@ -192,6 +205,7 @@ export const WelcomeMessage = Schema.Struct({
   room: RoomMetadata,
   snapshot: GameSnapshot,
   voice: Schema.Array(VoiceParticipant),
+  music: MusicPlaybackState,
 });
 export type WelcomeMessage = typeof WelcomeMessage.Type;
 
@@ -219,6 +233,13 @@ export const VoiceSignalForwardMessage = Schema.Struct({
 });
 export type VoiceSignalForwardMessage = typeof VoiceSignalForwardMessage.Type;
 
+export const MusicStateMessage = Schema.Struct({
+  v: ProtocolVersion,
+  _tag: Schema.Literal("music-state"),
+  music: MusicPlaybackState,
+});
+export type MusicStateMessage = typeof MusicStateMessage.Type;
+
 export const PongMessage = Schema.Struct({
   v: ProtocolVersion,
   _tag: Schema.Literal("pong"),
@@ -241,6 +262,7 @@ export const ServerMessage = Schema.Union([
   InputAckMessage,
   VoiceRosterMessage,
   VoiceSignalForwardMessage,
+  MusicStateMessage,
   PongMessage,
   ServerErrorMessage,
 ]);

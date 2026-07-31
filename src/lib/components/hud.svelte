@@ -66,7 +66,13 @@
     <div class="hud-right flex shrink-0 flex-col items-end">
       <div class="hud-actions pointer-events-auto flex">
         <VoicePanel {controller} />
-        <SettingsDialog {settings} sfx={controller.sfx} {onReturnHome} />
+        <SettingsDialog
+          {settings}
+          sfx={controller.sfx}
+          music={controller.music}
+          onManageMusic={() => controller.requestMusicManager()}
+          {onReturnHome}
+        />
       </div>
       <GameMap
         markers={controller.gameMapMarkers}

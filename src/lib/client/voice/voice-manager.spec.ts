@@ -5,7 +5,6 @@ import { VoiceManager } from "./voice-manager";
 interface VoiceStateCall {
   readonly listening: boolean;
   readonly microphoneEnabled: boolean;
-  readonly muted: boolean;
 }
 
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
@@ -44,8 +43,9 @@ function eventRecorder(): {
       onLocalLevel: () => {},
       onError: () => {},
       sendVoiceSignal: () => {},
-      sendVoiceState: (listening, microphoneEnabled, muted) =>
-        states.push({ listening, microphoneEnabled, muted }),
+      sendVoiceState: (listening, microphoneEnabled) => {
+        states.push({ listening, microphoneEnabled });
+      },
     },
   };
 }
@@ -188,7 +188,7 @@ describe("voice manager lifecycle", () => {
     await expect(manager.startListening()).resolves.toBe(true);
 
     expect(mediaRequests).toBe(0);
-    expect(recorder.states).toEqual([{ listening: true, microphoneEnabled: false, muted: true }]);
+    expect(recorder.states).toEqual([{ listening: true, microphoneEnabled: false }]);
     manager.dispose();
   });
 
@@ -217,7 +217,7 @@ describe("voice manager lifecycle", () => {
     await expect(manager.startListening()).resolves.toBe(true);
 
     expect(credentialRequests).toBe(4);
-    expect(recorder.states).toEqual([{ listening: true, microphoneEnabled: false, muted: true }]);
+    expect(recorder.states).toEqual([{ listening: true, microphoneEnabled: false }]);
     manager.dispose();
   });
 
@@ -231,17 +231,17 @@ describe("voice manager lifecycle", () => {
     await manager.join();
     expect(manager.isJoined).toBe(true);
     expect(recorder.states).toEqual([
-      { listening: true, microphoneEnabled: false, muted: true },
-      { listening: true, microphoneEnabled: true, muted: false },
+      { listening: true, microphoneEnabled: false },
+      { listening: true, microphoneEnabled: true },
     ]);
 
     manager.leave();
     expect(media.track.stopped).toBe(true);
     expect(manager.isJoined).toBe(false);
     expect(recorder.states).toEqual([
-      { listening: true, microphoneEnabled: false, muted: true },
-      { listening: true, microphoneEnabled: true, muted: false },
-      { listening: true, microphoneEnabled: false, muted: true },
+      { listening: true, microphoneEnabled: false },
+      { listening: true, microphoneEnabled: true },
+      { listening: true, microphoneEnabled: false },
     ]);
   });
 });

@@ -14,7 +14,7 @@ GET /api/game
 
 - 协议版本、房间 ID、tick 与快照频率
 - 地图尺寸、移动/加速/转向、长度和重生等前端预测规则
-- 会话、TURN 凭据和 WebSocket 路径
+- 会话、TURN 凭据、音乐解析和 WebSocket 路径
 - 断线续局窗口
 - 消息大小及频率限制
 - P2P 语音模式和公共 STUN 配置
@@ -114,6 +114,59 @@ POST /api/turn-credentials
 - `RUNTIME_UNAVAILABLE`：Bun 房间协调暂不可用
 - `SERVER_MISCONFIGURED`：coturn 或会话 Secret 缺失
 - `TURN_UNAVAILABLE`：coturn 临时凭据生成失败
+
+## LX 音源
+
+服务启动时读取 `MUSIC_SOURCE_FILE`；未配置时默认为项目根目录 `music-source.js`。脚本按 LX Music 的 `globalThis.lx` 契约在独立子进程中运行，支持明文及控制流混淆文件，并在文件变化后热替换。音源脚本内容、签名材料和异常堆栈不会通过 HTTP 返回。
+
+### 状态
+
+```http
+GET /api/music
+```
+
+无需会话，返回 metadata、经服务端白名单过滤后的 `sources/actions/qualitys` 以及可选更新信息；文件不存在或没有可用运行时则返回 `{ "active": null, "update": null }`。
+
+### 解析
+
+```http
+POST /api/music/resolve
+Content-Type: application/json
+Cookie: serpentia_session=...
+
+{
+  "source": "kw",
+  "action": "musicUrl",
+  "info": {
+    "type": "320k",
+    "musicInfo": { "source": "kw", "songmid": "...", "hash": "..." }
+  }
+}
+```
+
+该端点要求有效游戏会话。请求必须属于当前脚本声明且由 LX 白名单允许的能力；`kw/kg/tx/wy/mg` 支持 `musicUrl` 与 `128k/320k/flac/flac24bit`，`local` 可声明 `musicUrl/pic/lyric`。单个 `info` 编码后最多 16 KiB，处理器期限为 20 秒。
+
+`musicUrl` 成功响应：
+
+```json
+{
+  "source": "kw",
+  "action": "musicUrl",
+  "data": { "type": "320k", "url": "https://cdn.example/song.flac" }
+}
+```
+
+服务端只允许音源通过受控 `lx.request` 访问公网 HTTP/HTTPS 80/443，拒绝私网/回环 DNS、敏感 headers、超限请求/响应和未重新校验的重定向。稳定错误码包括：
+
+- `INVALID_REQUEST`
+- `UNAUTHORIZED`
+- `RATE_LIMITED`
+- `SOURCE_UNAVAILABLE`
+- `INITIALIZATION_FAILED`
+- `RUNTIME_UNAVAILABLE`
+- `UPSTREAM_FAILED`
+- `TIMEOUT`
+- `POLICY_DENIED`
 
 ## WebSocket
 
@@ -320,6 +373,7 @@ SESSION_SIGNING_SECRET=...
 STUN_URLS=stun:voice.example.com:3478
 TURN_URLS=turn:voice.example.com:3478?transport=udp,turns:voice.example.com:5349?transport=tcp
 TURN_SHARED_SECRET=...
+MUSIC_SOURCE_FILE=./music-source.js
 ```
 
 生产前执行：

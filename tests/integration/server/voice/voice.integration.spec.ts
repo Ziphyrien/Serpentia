@@ -22,19 +22,19 @@ describe("friend room voice state", () => {
   it("voice roster separates listeners from microphone publishers", () => {
     const roster = new VoiceRoster();
     requireCondition(roster.snapshot().length === 0, "ordinary room members entered voice");
-    requireCondition(roster.upsert("friend-b", "Beta", false, false), "listener was not added");
+    requireCondition(roster.upsert("friend-b", "Beta", false), "listener was not added");
     requireCondition(
-      !roster.upsert("friend-b", "Beta", false, true),
+      !roster.upsert("friend-b", "Beta", false),
       "equivalent listener state was not idempotent",
     );
-    roster.upsert("friend-a", "Alpha", true, false);
+    roster.upsert("friend-a", "Alpha", true);
     const snapshot = roster.snapshot();
     requireCondition(
-      snapshot[0].playerId === "friend-a" && snapshot[0].microphoneEnabled && !snapshot[0].muted,
+      snapshot[0].playerId === "friend-a" && snapshot[0].microphoneEnabled,
       "microphone publisher state was inconsistent",
     );
     requireCondition(
-      snapshot[1].playerId === "friend-b" && !snapshot[1].microphoneEnabled && snapshot[1].muted,
+      snapshot[1].playerId === "friend-b" && !snapshot[1].microphoneEnabled,
       "listen-only participant was exposed as publishing",
     );
     requireCondition(roster.leave("friend-a"), "leaving member remained in voice roster");
@@ -48,13 +48,12 @@ describe("friend room voice state", () => {
           _tag: "voice-state",
           listening: true,
           microphoneEnabled: false,
-          muted: true,
         }),
       ),
     );
     requireCondition(state._tag === "voice-state", "voice state was not decoded");
     requireCondition(
-      state.listening === true && state.microphoneEnabled === false && state.muted,
+      state.listening === true && state.microphoneEnabled === false,
       "listening and microphone state were not independent",
     );
     const offer = Effect.runSync(

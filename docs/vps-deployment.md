@@ -30,7 +30,7 @@ sudo -u serpentia cp .env.example .env
 sudo -u serpentia chmod 600 .env
 ```
 
-把命令输出的 `SESSION_SIGNING_SECRET` 写入 `.env`。
+把命令输出的 `SESSION_SIGNING_SECRET` 写入 `.env`。将 LX 格式音源原样保存为 `/opt/serpentia/music-source.js`（明文、压缩或控制流混淆均可），并执行 `sudo -u serpentia chmod 600 /opt/serpentia/music-source.js`。
 
 ## 3. HTTPS 证书
 
@@ -52,6 +52,7 @@ TRUST_PROXY=false
 COOKIE_SECURE=true
 TLS_CERT_FILE=/etc/letsencrypt/live/snake.example.com/fullchain.pem
 TLS_KEY_FILE=/etc/letsencrypt/live/snake.example.com/privkey.pem
+MUSIC_SOURCE_FILE=/opt/serpentia/music-source.js
 ```
 
 证书续期后重启 Bun 以重新加载证书：

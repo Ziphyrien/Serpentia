@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { Schema } from "effect";
 import type { IceServer } from "../../protocol";
 import { isSessionSigningSecretConfigured } from "../access/session";
@@ -15,6 +16,7 @@ export interface RuntimeConfig {
   readonly cookieSecure: boolean;
   readonly tlsCertFile: string | undefined;
   readonly tlsKeyFile: string | undefined;
+  readonly musicSourceFile: string;
 }
 
 export class RuntimeConfigError extends Schema.TaggedErrorClass<RuntimeConfigError>()(
@@ -65,6 +67,7 @@ export function loadRuntimeConfig(
     cookieSecure: parseBoolean(environment.COOKIE_SECURE, environment.NODE_ENV === "production"),
     tlsCertFile,
     tlsKeyFile,
+    musicSourceFile: resolve(optionalValue(environment.MUSIC_SOURCE_FILE) ?? "music-source.js"),
   };
 }
 
