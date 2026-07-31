@@ -1,6 +1,10 @@
 import nipplejs from "nipplejs";
 import type { InputState } from "./input-state";
 import { directionAngleFromJoystickVector } from "./joystick-vector";
+import {
+  compensatePseudoLandscapeAngle,
+  pseudoLandscape,
+} from "../pseudo-landscape.svelte";
 
 /**
  * 移动端虚拟摇杆（nipplejs 封装）。
@@ -30,7 +34,11 @@ export class JoystickInput {
     this.manager.on("move", (event) => {
       const angle = directionAngleFromJoystickVector(event.data.vector);
       if (angle === undefined) return;
-      this.state.setDirection("joystick", angle);
+      // 伪横屏下摇杆向量来自未旋转的屏幕坐标系，需换算回游戏方向
+      this.state.setDirection(
+        "joystick",
+        compensatePseudoLandscapeAngle(angle, pseudoLandscape.active),
+      );
     });
   }
 

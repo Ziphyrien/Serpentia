@@ -1,5 +1,6 @@
 <script lang="ts">
   import { internalSkinOrDefault } from "$lib/game/internal-skins";
+  import { pseudoLandscape } from "$lib/client/pseudo-landscape.svelte";
   import type { SessionStore } from "$lib/client/stores/session.svelte";
   import SkinPicker from "./skin-picker.svelte";
   import SnakeSkinPreview from "./snake-skin-preview.svelte";
@@ -58,7 +59,7 @@
 
 <div
   data-login-page
-  class="game-map-background relative h-dvh overflow-y-auto px-5 py-8 text-map-ink md:overflow-hidden md:px-8"
+  class="game-map-background relative {pseudoLandscape.active ? 'h-full' : 'h-dvh'} overflow-y-auto px-5 py-8 text-map-ink @md:overflow-hidden @md:px-8"
 >
   <div class="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
     {#each TOP_DOTS as dot (dot.path)}
@@ -78,14 +79,14 @@
       src="/assets/art/wrecks/candy-12.png"
       alt=""
       draggable="false"
-      class="absolute right-[2%] bottom-[4%] size-16 -rotate-12 select-none sm:right-[5%] sm:size-20 md:top-1/2 md:right-[8%] md:bottom-auto md:size-28 md:-translate-y-1/2"
+      class="absolute right-[2%] bottom-[4%] size-16 -rotate-12 select-none @sm:right-[5%] @sm:size-20 @md:top-1/2 @md:right-[8%] @md:bottom-auto @md:size-28 @md:-translate-y-1/2"
     />
   </div>
 
   <div
-    class="relative z-10 mx-auto grid min-h-full w-full max-w-6xl grid-cols-1 items-center gap-6 md:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)_minmax(0,1fr)] md:gap-8"
+    class="relative z-10 mx-auto grid min-h-full w-full max-w-6xl grid-cols-1 items-center gap-6 @md:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)_minmax(0,1fr)] @md:gap-8"
   >
-    <section class="order-2 flex min-w-0 flex-col items-center justify-center md:order-1 md:items-end">
+    <section class="order-2 flex min-w-0 flex-col items-center justify-center @md:order-1 @md:items-end">
       <div class="flex w-80 max-w-full flex-col items-center">
         <div class="relative aspect-video w-80 max-w-full" data-ui>
           <SnakeSkinPreview skin={selectedSkin} width={320} height={180} animated />
@@ -100,8 +101,8 @@
       </div>
     </section>
 
-    <main class="order-1 flex w-full flex-col items-center md:order-2">
-      <h1 class="mb-8 text-6xl font-black tracking-[0.18em] text-map-border drop-shadow-[0_4px_0_rgba(255,255,255,0.9)] sm:text-7xl">
+    <main class="order-1 flex w-full flex-col items-center @md:order-2">
+      <h1 class="mb-8 text-6xl font-black tracking-[0.18em] text-map-border drop-shadow-[0_4px_0_rgba(255,255,255,0.9)] @sm:text-7xl">
         蛇域
       </h1>
 
@@ -130,6 +131,6 @@
       {/if}
     </main>
 
-    <div class="order-3 hidden md:block" aria-hidden="true"></div>
+    <div class="order-3 hidden @md:block" aria-hidden="true"></div>
   </div>
 </div>

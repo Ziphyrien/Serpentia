@@ -58,8 +58,8 @@
 
 <style>
   .map-field {
-    width: clamp(7rem, 27.733dvh, 13rem);
-    border-radius: clamp(0.75rem, 2.133dvh, 1rem);
+    width: clamp(7rem, calc(27.733 * var(--game-vh, 1dvh)), 13rem);
+    border-radius: clamp(0.75rem, calc(2.133 * var(--game-vh, 1dvh)), 1rem);
     background-image:
       linear-gradient(rgb(255 255 255 / 7%) 1px, transparent 1px),
       linear-gradient(90deg, rgb(255 255 255 / 7%) 1px, transparent 1px);

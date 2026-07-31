@@ -4,6 +4,7 @@
   import Mic from "lucide-svelte/icons/mic";
   import MicOff from "lucide-svelte/icons/mic-off";
   import X from "lucide-svelte/icons/x";
+  import { pseudoLandscape } from "$lib/client/pseudo-landscape.svelte";
   import type { GameController } from "$lib/client/game.svelte";
   import type { VoicePeerView } from "$lib/client/voice/voice-manager";
   import Button from "./ui/button.svelte";
@@ -55,7 +56,7 @@
   <Dialog.Portal>
     <Dialog.Overlay class="fixed inset-0 z-40 bg-night-950/70 backdrop-blur-sm" />
     <Dialog.Content
-      class="fixed top-1/2 left-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(92vw,22rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-panel-border bg-night-900 p-6 text-white shadow-2xl"
+      class="fixed top-1/2 left-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(92vw,22rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-panel-border bg-night-900 p-6 text-white shadow-2xl {pseudoLandscape.active ? 'dialog-pseudo' : ''}"
     >
       <div class="mb-5 flex items-center justify-between">
         <Dialog.Title class="text-lg font-black tracking-wide">队伍语音</Dialog.Title>
@@ -151,6 +152,17 @@
 </Dialog.Root>
 
 <style>
+  /*
+   * 伪横屏：弹框 Portal 到 body，不在旋转容器内，需自行顺时针旋转 90°，
+   * 宽高约束换成旋转后的画面尺寸（画面宽 = 100dvh，画面高 = 100dvw）。
+   */
+  /* class 应用在 bits-ui 组件上，Svelte 无法静态识别，需 :global 防止裁剪 */
+  :global(.dialog-pseudo) {
+    width: min(92dvh, 22rem);
+    max-height: calc(100dvw - 2rem);
+    rotate: 90deg;
+  }
+
   .speaking-ring {
     animation: pulse-ring 1.2s ease-out infinite;
   }

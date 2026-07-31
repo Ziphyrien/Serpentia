@@ -16,12 +16,12 @@
 
 <style>
   .hud-state {
-    gap: clamp(0.25rem, 0.8dvh, 0.375rem);
-    padding-block: clamp(0.25rem, 0.8dvh, 0.375rem);
-    padding-inline: clamp(0.75rem, 2.133dvh, 1rem);
+    gap: clamp(0.25rem, calc(0.8 * var(--game-vh, 1dvh)), 0.375rem);
+    padding-block: clamp(0.25rem, calc(0.8 * var(--game-vh, 1dvh)), 0.375rem);
+    padding-inline: clamp(0.75rem, calc(2.133 * var(--game-vh, 1dvh)), 1rem);
   }
 
   .hud-kills {
-    font-size: clamp(0.875rem, 2.133dvh, 1rem);
+    font-size: clamp(0.875rem, calc(2.133 * var(--game-vh, 1dvh)), 1rem);
   }
 </style>

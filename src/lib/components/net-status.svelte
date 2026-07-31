@@ -18,8 +18,8 @@
 
 <style>
   .hud-network {
-    gap: clamp(0.25rem, 0.8dvh, 0.375rem);
-    padding-block: clamp(0.25rem, 0.8dvh, 0.375rem);
-    padding-inline: clamp(0.625rem, 2dvh, 0.75rem);
+    gap: clamp(0.25rem, calc(0.8 * var(--game-vh, 1dvh)), 0.375rem);
+    padding-block: clamp(0.25rem, calc(0.8 * var(--game-vh, 1dvh)), 0.375rem);
+    padding-inline: clamp(0.625rem, calc(2 * var(--game-vh, 1dvh)), 0.75rem);
   }
 </style>

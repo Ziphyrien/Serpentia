@@ -59,12 +59,12 @@
       <main
         bind:this={scrollViewport}
         aria-label="可滚动皮肤列表"
-        class="h-full touch-pan-y overflow-y-auto overscroll-contain px-4 py-5 sm:px-7"
+        class="h-full touch-pan-y overflow-y-auto overscroll-contain px-4 py-5 @sm:px-7"
         onscroll={updateScrollHint}
       >
         <div
           bind:this={skinGrid}
-          class="mx-auto grid max-w-6xl grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"
+          class="mx-auto grid max-w-6xl grid-cols-2 gap-3 @sm:grid-cols-3 @lg:grid-cols-4"
         >
           {#each INTERNAL_SKINS as skin (skin.id)}
             <button

@@ -47,9 +47,9 @@
 
 <style>
   .magnet-status {
-    bottom: 2.8dvh;
-    width: 8dvh;
-    height: 8dvh;
+    bottom: calc(2.8 * var(--game-vh, 1dvh));
+    width: calc(8 * var(--game-vh, 1dvh));
+    height: calc(8 * var(--game-vh, 1dvh));
   }
 
   .status-background,

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { GameController } from "$lib/client/game.svelte";
+  import PseudoLandscapeShell from "./pseudo-landscape-shell.svelte";
   import { gamePresentationPhase } from "$lib/client/game-readiness";
   import type { SessionState } from "$lib/client/stores/session.svelte";
   import type { SettingsStore } from "$lib/client/stores/settings.svelte";
@@ -42,7 +43,7 @@
   });
 </script>
 
-<div class="game-map-background fixed inset-0 overflow-hidden">
+<PseudoLandscapeShell class="game-map-background fixed inset-0 overflow-hidden">
   <div bind:this={canvasHost} class="absolute inset-0" data-game-canvas></div>
 
   {#if controller !== undefined && presentationPhase === "closed"}
@@ -68,16 +69,11 @@
   {#if controller !== undefined && (presentationPhase === "ready" || presentationPhase === "reconnecting")}
     <Hud {controller} {settings} onReturnHome={() => void onReturnHome()} />
   {/if}
-</div>
+</PseudoLandscapeShell>
 
 <style>
   .game-loading-notice {
-    padding-top: 5rem;
-  }
-
-  @media (orientation: landscape) and (max-height: 30rem) {
-    .game-loading-notice {
-      padding-top: 3rem;
-    }
+    /* 以画面高度为基准缩放，短横屏（含伪横屏）下自动收紧 */
+    padding-top: clamp(3rem, calc(10 * var(--game-vh, 1dvh)), 5rem);
   }
 </style>

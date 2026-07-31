@@ -16,6 +16,11 @@
   } = $props();
 </script>
 
+<!--
+  伪横屏下的坐标轴换算由 bits-ui 补丁（patches/bits-ui@*.patch）处理：
+  画面旋转 90° 后水平滑块沿屏幕纵轴取值，补丁在 <html> 带
+  pseudo-landscape 标记类时自动切换 clientX/clientY 的取值轴。
+-->
 <Slider.Root
   type="single"
   bind:value

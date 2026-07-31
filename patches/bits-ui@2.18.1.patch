@@ -1,0 +1,181 @@
+diff --git a/node_modules/bits-ui/.bun-tag-3e33cb592574fb29 b/.bun-tag-3e33cb592574fb29
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/bits/slider/slider.svelte.js b/dist/bits/slider/slider.svelte.js
+index eb30e0b45a03d014d58d9d30f63aed4630c26dd1..5e889b4f804757f6efa0c3e4c8ab83e56a2d0b9c 100644
+--- a/dist/bits/slider/slider.svelte.js
++++ b/dist/bits/slider/slider.svelte.js
+@@ -13,6 +13,7 @@ import { isElementOrSVGElement } from "../../internal/is.js";
+ import { isValidIndex } from "../../internal/arrays.js";
+ import { SvelteResizeObserver } from "../../internal/svelte-resize-observer.svelte.js";
+ import { linearScale } from "../../internal/math.js";
++import { isPseudoLandscapeActive } from "../utilities/floating-layer/use-floating-layer.svelte.js";
+ const sliderAttrs = createBitsAttrs({
+     component: "slider",
+     parts: ["root", "thumb", "range", "tick", "tick-label", "thumb-label"],
+@@ -168,11 +169,23 @@ class SliderSingleRootState extends SliderBaseRootState {
+         activeThumb.focus();
+         const { left, right, top, bottom } = sliderNode.getBoundingClientRect();
+         if (this.direction === "lr") {
+-            this.applyPosition({
+-                clientXY: e.clientX,
+-                start: left,
+-                end: right,
+-            });
++            // pseudo-landscape: the slider is rotated 90° clockwise with its
++            // dialog, so the user-perceived horizontal axis runs along the
++            // screen's vertical axis (screen top = user left = min).
++            if (isPseudoLandscapeActive()) {
++                this.applyPosition({
++                    clientXY: e.clientY,
++                    start: top,
++                    end: bottom,
++                });
++            }
++            else {
++                this.applyPosition({
++                    clientXY: e.clientX,
++                    start: left,
++                    end: right,
++                });
++            }
+         }
+         else if (this.direction === "rl") {
+             this.applyPosition({
+@@ -350,6 +363,10 @@ class SliderMultiRootState extends SliderBaseRootState {
+         }
+         const distances = thumbs.map((thumb) => {
+             if (this.opts.orientation.current === "horizontal") {
++                if (isPseudoLandscapeActive()) {
++                    const { top, bottom } = thumb.getBoundingClientRect();
++                    return Math.abs(e.clientY - (top + bottom) / 2);
++                }
+                 const { left, right } = thumb.getBoundingClientRect();
+                 return Math.abs(e.clientX - (left + right) / 2);
+             }
+@@ -378,12 +395,23 @@ class SliderMultiRootState extends SliderBaseRootState {
+         const { left, right, top, bottom } = sliderNode.getBoundingClientRect();
+         const direction = this.direction;
+         if (direction === "lr") {
+-            this.applyPosition({
+-                clientXY: e.clientX,
+-                activeThumbIdx: activeThumb.idx,
+-                start: left,
+-                end: right,
+-            });
++            // pseudo-landscape: see the single-value handlePointerMove above
++            if (isPseudoLandscapeActive()) {
++                this.applyPosition({
++                    clientXY: e.clientY,
++                    activeThumbIdx: activeThumb.idx,
++                    start: top,
++                    end: bottom,
++                });
++            }
++            else {
++                this.applyPosition({
++                    clientXY: e.clientX,
++                    activeThumbIdx: activeThumb.idx,
++                    start: left,
++                    end: right,
++                });
++            }
+         }
+         else if (direction === "rl") {
+             this.applyPosition({
+diff --git a/dist/bits/utilities/floating-layer/use-floating-layer.svelte.js b/dist/bits/utilities/floating-layer/use-floating-layer.svelte.js
+index 2bf4c4a6d600ad53a9cc0d3b668c3f06667a8f95..a830fdd276096fac356b806a3ab3d9d5eaf6d5db 100644
+--- a/dist/bits/utilities/floating-layer/use-floating-layer.svelte.js
++++ b/dist/bits/utilities/floating-layer/use-floating-layer.svelte.js
+@@ -12,6 +12,34 @@ const OPPOSITE_SIDE = {
+     bottom: "top",
+     left: "right",
+ };
++// Pseudo-landscape: the app rotates the whole UI 90° clockwise via CSS while
++// portals live on <body> outside the rotated container. Anchored floating
++// content must therefore be placed on the side that corresponds to the
++// user-perceived side after rotation (user-bottom = screen-left, etc.),
++// shifted so the center-rotated box lands on the anchor, and rotated back
++// 90° so its text reads upright. Detected through a marker class the app
++// toggles on <html>; inactive by default, so behavior is unchanged.
++const PSEUDO_LANDSCAPE_SIDE = {
++    top: "right",
++    right: "bottom",
++    bottom: "left",
++    left: "top",
++};
++export function isPseudoLandscapeActive() {
++    return (typeof document !== "undefined" &&
++        document.documentElement.classList.contains("pseudo-landscape"));
++}
++function pseudoLandscapeRotate() {
++    return {
++        name: "pseudoLandscapeRotate",
++        fn(data) {
++            if (!isPseudoLandscapeActive())
++                return {};
++            const delta = (data.rects.floating.width - data.rects.floating.height) / 2;
++            return { x: data.x + delta, y: data.y + delta };
++        },
++    };
++}
+ const FloatingRootContext = new Context("Floating.Root");
+ const FloatingContentContext = new Context("Floating.Content");
+ const FloatingTooltipRootContext = new Context("Floating.Root");
+@@ -67,10 +95,16 @@ export class FloatingContentState {
+     #arrowSize = new ElementSize(() => this.arrowRef.current ?? undefined);
+     #arrowWidth = $derived(this.#arrowSize?.width ?? 0);
+     #arrowHeight = $derived(this.#arrowSize?.height ?? 0);
+-    #desiredPlacement = $derived.by(() => (this.opts.side?.current +
+-        (this.opts.align.current !== "center"
+-            ? `-${this.opts.align.current}`
+-            : "")));
++    #desiredPlacement = $derived.by(() => {
++        const side = isPseudoLandscapeActive()
++            ? (PSEUDO_LANDSCAPE_SIDE[this.opts.side?.current ?? "bottom"] ??
++                this.opts.side?.current)
++            : this.opts.side?.current;
++        return (side +
++            (this.opts.align.current !== "center"
++                ? `-${this.opts.align.current}`
++                : ""));
++    });
+     #boundary = $derived.by(() => Array.isArray(this.opts.collisionBoundary.current)
+         ? this.opts.collisionBoundary.current
+         : [this.opts.collisionBoundary.current]);
+@@ -101,10 +135,13 @@ export class FloatingContentState {
+             ...this.detectOverflowOptions,
+             apply: ({ rects, availableWidth, availableHeight }) => {
+                 const { width: anchorWidth, height: anchorHeight } = rects.reference;
+-                this.#availableWidth = availableWidth;
+-                this.#availableHeight = availableHeight;
+-                this.#anchorWidth = anchorWidth;
+-                this.#anchorHeight = anchorHeight;
++                // pseudo-landscape: expose user-perceived dimensions (the anchor
++                // rect is the rotated visual box, so the axes are swapped)
++                const pseudo = isPseudoLandscapeActive();
++                this.#availableWidth = pseudo ? availableHeight : availableWidth;
++                this.#availableHeight = pseudo ? availableWidth : availableHeight;
++                this.#anchorWidth = pseudo ? anchorHeight : anchorWidth;
++                this.#anchorHeight = pseudo ? anchorWidth : anchorHeight;
+             },
+         }),
+         this.arrowRef.current &&
+@@ -115,6 +152,7 @@ export class FloatingContentState {
+         transformOrigin({ arrowWidth: this.#arrowWidth, arrowHeight: this.#arrowHeight }),
+         this.opts.hideWhenDetached.current &&
+             hide({ strategy: "referenceHidden", ...this.detectOverflowOptions }),
++        pseudoLandscapeRotate(),
+     ].filter(Boolean));
+     floating;
+     placedSide = $derived.by(() => getSideFromPlacement(this.floating.placement));
+@@ -131,7 +169,8 @@ export class FloatingContentState {
+             ...this.floating.floatingStyles,
+             // keep off page when measuring
+             transform: this.floating.isPositioned
+-                ? this.floating.floatingStyles.transform
++                ? this.floating.floatingStyles.transform +
++                    (isPseudoLandscapeActive() ? " rotate(90deg)" : "")
+                 : "translate(0, -200%)",
+             minWidth: "max-content",
+             zIndex: this.contentZIndex,

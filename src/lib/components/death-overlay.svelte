@@ -11,7 +11,7 @@
 
 <div class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-night-950/45">
   <div
-    class="flex max-h-[calc(100dvh-2rem)] w-72 flex-col items-center overflow-y-auto rounded-3xl border border-panel-border bg-night-900 p-6"
+    class="death-panel flex w-72 flex-col items-center overflow-y-auto rounded-3xl border border-panel-border bg-night-900 p-6"
   >
     <span class="mb-2 flex size-14 items-center justify-center rounded-full bg-red-500/20 text-red-400">
       <Skull size={30} />
@@ -42,3 +42,9 @@
     </p>
   </div>
 </div>
+
+<style>
+  .death-panel {
+    max-height: calc(100 * var(--game-vh, 1dvh) - 2rem);
+  }
+</style>

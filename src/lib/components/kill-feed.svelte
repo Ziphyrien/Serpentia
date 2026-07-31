@@ -18,13 +18,13 @@
 
 <style>
   .kill-feed {
-    gap: clamp(0.25rem, 0.8dvh, 0.375rem);
+    gap: clamp(0.25rem, calc(0.8 * var(--game-vh, 1dvh)), 0.375rem);
   }
 
   .kill-feed-item {
-    gap: clamp(0.25rem, 0.8dvh, 0.375rem);
-    padding-block: clamp(0.125rem, 0.533dvh, 0.25rem);
-    padding-inline: clamp(0.75rem, 2.133dvh, 1rem);
+    gap: clamp(0.25rem, calc(0.8 * var(--game-vh, 1dvh)), 0.375rem);
+    padding-block: clamp(0.125rem, calc(0.533 * var(--game-vh, 1dvh)), 0.25rem);
+    padding-inline: clamp(0.75rem, calc(2.133 * var(--game-vh, 1dvh)), 1rem);
   }
 
   .feed-in {

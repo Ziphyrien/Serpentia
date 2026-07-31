@@ -98,8 +98,8 @@
 
 <style>
   .game-hud {
-    --hud-gap: clamp(0.5rem, 1.6dvh, 0.75rem);
-    --hud-small-gap: clamp(0.375rem, 1.067dvh, 0.5rem);
+    --hud-gap: clamp(0.5rem, calc(1.6 * var(--game-vh, 1dvh)), 0.75rem);
+    --hud-small-gap: clamp(0.375rem, calc(1.067 * var(--game-vh, 1dvh)), 0.5rem);
 
     padding: var(--hud-gap);
   }
@@ -117,12 +117,12 @@
 
   .hud-center,
   .hud-meta {
-    padding-top: clamp(0.125rem, 0.533dvh, 0.25rem);
+    padding-top: clamp(0.125rem, calc(0.533 * var(--game-vh, 1dvh)), 0.25rem);
   }
 
   .hud-gamepad {
-    gap: clamp(0.25rem, 0.8dvh, 0.375rem);
-    padding-block: clamp(0.25rem, 0.8dvh, 0.375rem);
-    padding-inline: clamp(0.625rem, 2dvh, 0.75rem);
+    gap: clamp(0.25rem, calc(0.8 * var(--game-vh, 1dvh)), 0.375rem);
+    padding-block: clamp(0.25rem, calc(0.8 * var(--game-vh, 1dvh)), 0.375rem);
+    padding-inline: clamp(0.625rem, calc(2 * var(--game-vh, 1dvh)), 0.75rem);
   }
 </style>

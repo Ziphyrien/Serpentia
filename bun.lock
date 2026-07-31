@@ -28,6 +28,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "bits-ui@2.18.1": "patches/bits-ui@2.18.1.patch",
+  },
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.6",
   },

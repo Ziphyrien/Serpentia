@@ -88,13 +88,13 @@
 
 <div
   bind:this={field}
-  class="absolute top-[15%] right-[2%] size-32 overflow-hidden sm:right-[4%] sm:size-40 md:top-[19%] md:right-[6%] md:h-[25%] md:w-[21%]"
+  class="absolute top-[15%] right-[2%] size-32 overflow-hidden @sm:right-[4%] @sm:size-40 @md:top-[19%] @md:right-[6%] @md:h-[25%] @md:w-[21%]"
 >
   <img
     bind:this={star}
     src="/assets/art/food/star.png"
     alt=""
     draggable="false"
-    class="absolute top-0 left-0 size-9 opacity-0 will-change-transform select-none sm:size-10 md:size-12"
+    class="absolute top-0 left-0 size-9 opacity-0 will-change-transform select-none @sm:size-10 @md:size-12"
   />
 </div>

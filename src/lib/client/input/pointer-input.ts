@@ -1,4 +1,8 @@
 import type { InputState } from "./input-state";
+import {
+  compensatePseudoLandscapeAngle,
+  pseudoLandscape,
+} from "../pseudo-landscape.svelte";
 
 /**
  * 桌面端输入：鼠标相对屏幕中心的方向 + 左键/空格加速。
@@ -22,7 +26,10 @@ export class PointerInput {
     const dx = event.clientX - window.innerWidth / 2;
     const dy = event.clientY - window.innerHeight / 2;
     if (dx * dx + dy * dy < 4) return; // 中心死区，避免抖动
-    this.state.setDirection("pointer", Math.atan2(dy, dx));
+    this.state.setDirection(
+      "pointer",
+      compensatePseudoLandscapeAngle(Math.atan2(dy, dx), pseudoLandscape.active),
+    );
   };
 
   private onPointerDown = (event: PointerEvent): void => {

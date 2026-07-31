@@ -2,8 +2,10 @@
   import { goto } from "$app/navigation";
   import { onMount } from "svelte";
   import { installTouchFullscreen } from "$lib/client/fullscreen";
+  import { pseudoLandscape } from "$lib/client/pseudo-landscape.svelte";
   import { SessionStore } from "$lib/client/stores/session.svelte";
   import LoginForm from "$lib/components/login-form.svelte";
+  import PseudoLandscapeShell from "$lib/components/pseudo-landscape-shell.svelte";
 
   const session = new SessionStore({ status: "anonymous", descriptor: undefined });
 
@@ -21,10 +23,11 @@
   });
 </script>
 
+<PseudoLandscapeShell>
 {#if session.state.status === "unavailable"}
   <div
     data-login-page
-    class="game-map-background relative flex min-h-dvh flex-col items-center justify-center gap-4 px-6 text-map-ink"
+    class="game-map-background relative flex {pseudoLandscape.active ? 'h-full' : 'min-h-dvh'} flex-col items-center justify-center gap-4 px-6 text-map-ink"
   >
     <p class="text-center text-base font-bold">{session.state.message}</p>
     <button
@@ -37,3 +40,4 @@
 {:else}
   <LoginForm {session} onAuthenticated={() => goto("/game")} />
 {/if}
+</PseudoLandscapeShell>

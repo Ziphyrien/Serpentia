@@ -1,3 +1,5 @@
+import { lockLandscapeOrientation } from "./pseudo-landscape.svelte";
+
 type LegacyFullscreenElement = HTMLElement & {
   readonly webkitRequestFullscreen?: () => Promise<void> | void;
 };
@@ -46,7 +48,7 @@ export function installTouchFullscreen(): () => void {
       return;
     }
     void requested
-      .then(() => screen.orientation.lock("landscape"))
+      .then(() => lockLandscapeOrientation())
       .catch(() => undefined)
       .finally(() => {
         requestPending = false;

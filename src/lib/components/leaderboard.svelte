@@ -49,26 +49,26 @@
 
 <style>
   .leaderboard-card {
-    width: clamp(9rem, 27.733dvh, 13rem);
-    max-height: 36dvh;
+    width: clamp(9rem, calc(27.733 * var(--game-vh, 1dvh)), 13rem);
+    max-height: calc(36 * var(--game-vh, 1dvh));
     overflow-y: auto;
-    border-radius: clamp(0.75rem, 2.133dvh, 1rem);
-    padding: clamp(0.5rem, 1.6dvh, 0.75rem);
+    border-radius: clamp(0.75rem, calc(2.133 * var(--game-vh, 1dvh)), 1rem);
+    padding: clamp(0.5rem, calc(1.6 * var(--game-vh, 1dvh)), 0.75rem);
   }
 
   .leaderboard-header {
-    gap: clamp(0.25rem, 0.8dvh, 0.375rem);
-    margin-bottom: clamp(0.25rem, 1.067dvh, 0.5rem);
-    font-size: clamp(0.75rem, 1.867dvh, 0.875rem);
+    gap: clamp(0.25rem, calc(0.8 * var(--game-vh, 1dvh)), 0.375rem);
+    margin-bottom: clamp(0.25rem, calc(1.067 * var(--game-vh, 1dvh)), 0.5rem);
+    font-size: clamp(0.75rem, calc(1.867 * var(--game-vh, 1dvh)), 0.875rem);
   }
 
   .leaderboard-list {
-    gap: clamp(0.125rem, 0.533dvh, 0.25rem);
+    gap: clamp(0.125rem, calc(0.533 * var(--game-vh, 1dvh)), 0.25rem);
   }
 
   .leaderboard-row {
-    gap: clamp(0.25rem, 0.8dvh, 0.375rem);
-    padding-block: clamp(0rem, 0.267dvh, 0.125rem);
-    padding-inline: clamp(0.25rem, 0.8dvh, 0.375rem);
+    gap: clamp(0.25rem, calc(0.8 * var(--game-vh, 1dvh)), 0.375rem);
+    padding-block: clamp(0rem, calc(0.267 * var(--game-vh, 1dvh)), 0.125rem);
+    padding-inline: clamp(0.25rem, calc(0.8 * var(--game-vh, 1dvh)), 0.375rem);
   }
 </style>
