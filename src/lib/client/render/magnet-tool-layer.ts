@@ -1,11 +1,20 @@
 import { Container, Sprite, type Texture } from "pixi.js";
 import type { MagnetConsumedEvent, MagnetToolState } from "$lib/protocol";
-import { MAGNET } from "$lib/game/magnet";
 import {
-  createFoodAbsorbState,
-  sampleFoodAbsorbState,
-  type FoodAbsorbState,
-} from "./food-absorb-effect";
+  MAGNET,
+  MAGNET_PICKUP_SOURCE_FRAME_COUNT,
+  MAGNET_PREDICTION_CONTACT_GUARD,
+  predictMagnetCollisionPosition,
+} from "$lib/game/magnet";
+import {
+  advanceCollectibleAbsorbTrackingState,
+  createCollectibleAbsorbState,
+  createCollectibleAbsorbTrackingState,
+  sampleCollectibleAbsorbState,
+  type CollectibleAbsorbSample,
+  type CollectibleAbsorbState,
+  type CollectibleAbsorbTrackingState,
+} from "./collectible-absorb-effect";
 
 interface ViewBounds {
   readonly left: number;
@@ -14,21 +23,50 @@ interface ViewBounds {
   readonly bottom: number;
 }
 
+interface AuthoritativeMagnetAbsorb {
+  readonly kind: "authoritative";
+  readonly event: MagnetConsumedEvent;
+  state: CollectibleAbsorbState | undefined;
+}
+
+interface PredictedMagnetAbsorb {
+  readonly kind: "predicted";
+  readonly playerId: string;
+  state: CollectibleAbsorbTrackingState;
+  readonly predictedAtSourceFrame: number;
+  event: MagnetConsumedEvent | undefined;
+  complete: boolean;
+}
+
+type ActiveMagnetAbsorb = AuthoritativeMagnetAbsorb | PredictedMagnetAbsorb;
+
 interface MagnetRecord {
   readonly node: Sprite;
   magnet: MagnetToolState;
-  event: MagnetConsumedEvent | undefined;
-  absorb: FoodAbsorbState | undefined;
+  absorb: ActiveMagnetAbsorb | undefined;
+  speculationBlocked: boolean;
 }
 
-/** 权威 `10001` 地图层；贴图与 70 世界单位缩放均取自原版 ToolUnit。 */
+/** 权威 `10001` 地图层；贴图与 70 世界单位缩放均取自 ToolUnit。 */
 export class MagnetToolLayer {
   readonly container = new Container();
   private readonly records = new Map<number, MagnetRecord>();
+  private authoritativeMagnets = new Map<number, MagnetToolState>();
+  private authoritativeSourceFrame = 0;
 
-  constructor(private readonly texture: Texture) {}
+  constructor(
+    private readonly texture: Texture,
+    private readonly arenaHalfSize = Number.POSITIVE_INFINITY,
+  ) {}
 
-  sync(magnets: ReadonlyArray<MagnetToolState>, view: ViewBounds): void {
+  sync(
+    magnets: ReadonlyArray<MagnetToolState>,
+    view: ViewBounds,
+    authoritativeSourceFrame = 0,
+    authoritativeMagnets: ReadonlyArray<MagnetToolState> = magnets,
+  ): void {
+    this.authoritativeSourceFrame = authoritativeSourceFrame;
+    this.authoritativeMagnets = new Map(authoritativeMagnets.map((magnet) => [magnet.id, magnet]));
     const seen = new Set<number>();
     for (const magnet of magnets) {
       seen.add(magnet.id);
@@ -38,12 +76,33 @@ export class MagnetToolLayer {
         this.records.set(magnet.id, record);
       }
       record.magnet = magnet;
-      if (record.event === undefined)
-        record.node.position.set(magnet.position.x, magnet.position.y);
+
+      const absorb = record.absorb;
+      if (
+        absorb?.kind === "predicted" &&
+        absorb.event === undefined &&
+        authoritativeSourceFrame >= Math.ceil(absorb.predictedAtSourceFrame) &&
+        this.authoritativeMagnets.has(magnet.id)
+      ) {
+        record.absorb = undefined;
+        record.speculationBlocked = true;
+      }
+      if (record.absorb !== undefined) {
+        this.updateVisibility(record, view);
+        continue;
+      }
+      record.node.position.set(magnet.position.x, magnet.position.y);
       this.updateVisibility(record, view);
     }
+
     for (const [id, record] of this.records) {
-      if (!seen.has(id) && record.event === undefined) {
+      if (seen.has(id)) continue;
+      const absorb = record.absorb;
+      const rejectedPrediction =
+        absorb?.kind === "predicted" &&
+        absorb.event === undefined &&
+        authoritativeSourceFrame >= Math.ceil(absorb.predictedAtSourceFrame);
+      if (absorb === undefined || rejectedPrediction) {
         record.node.destroy();
         this.records.delete(id);
       }
@@ -56,36 +115,156 @@ export class MagnetToolLayer {
       record = this.createRecord(event.magnet);
       this.records.set(event.magnet.id, record);
     }
-    if (record.event !== undefined) return false;
-    record.event = event;
-    record.absorb = undefined;
-    record.node.position.set(event.magnet.position.x, event.magnet.position.y);
+
+    const active = record.absorb;
+    if (active?.kind === "predicted") {
+      if (active.event !== undefined) return false;
+      if (active.playerId === event.playerId) {
+        active.event = event;
+        record.magnet = event.magnet;
+        return true;
+      }
+      record.absorb = undefined;
+      record.speculationBlocked = false;
+    } else if (active !== undefined) {
+      return false;
+    }
+
+    record.magnet = event.magnet;
+    record.absorb = { kind: "authoritative", event, state: undefined };
     record.node.visible = true;
     return true;
+  }
+
+  predictSelfContacts(
+    playerId: string,
+    visibleHead: { readonly x: number; readonly y: number },
+    collisionHead: { readonly x: number; readonly y: number },
+    snakeRadius: number,
+    eatDistanceFactor: number,
+    presentationSourceFrame: number,
+    collisionSourceFrame: number,
+  ): Array<MagnetToolState> {
+    const predicted: Array<MagnetToolState> = [];
+    const contact = (snakeRadius + MAGNET.toolSize / 2) * eatDistanceFactor;
+    const guardedContact = Math.max(0, contact - MAGNET_PREDICTION_CONTACT_GUARD);
+    for (const record of this.records.values()) {
+      if (record.absorb !== undefined) continue;
+      const authoritativeMagnet = this.authoritativeMagnets.get(record.magnet.id);
+      if (
+        authoritativeMagnet === undefined ||
+        collisionSourceFrame >= authoritativeMagnet.expiresAtSourceFrame
+      ) {
+        continue;
+      }
+
+      const visibleDeltaX = visibleHead.x - record.node.position.x;
+      const visibleDeltaY = visibleHead.y - record.node.position.y;
+      const visibleTouching =
+        visibleDeltaX * visibleDeltaX + visibleDeltaY * visibleDeltaY < contact * contact;
+      if (record.speculationBlocked) {
+        if (!visibleTouching) record.speculationBlocked = false;
+        continue;
+      }
+      const collisionPosition = predictMagnetCollisionPosition(
+        authoritativeMagnet,
+        this.authoritativeSourceFrame,
+        collisionSourceFrame,
+        this.arenaHalfSize,
+      );
+      if (collisionPosition === undefined || !visibleTouching) continue;
+      const collisionDeltaX = collisionHead.x - collisionPosition.x;
+      const collisionDeltaY = collisionHead.y - collisionPosition.y;
+      if (
+        collisionDeltaX * collisionDeltaX + collisionDeltaY * collisionDeltaY >=
+        guardedContact * guardedContact
+      ) {
+        continue;
+      }
+
+      record.absorb = {
+        kind: "predicted",
+        playerId,
+        state: createCollectibleAbsorbTrackingState(
+          { x: record.node.position.x, y: record.node.position.y },
+          visibleHead,
+          presentationSourceFrame,
+          MAGNET_PICKUP_SOURCE_FRAME_COUNT,
+        ),
+        predictedAtSourceFrame: collisionSourceFrame,
+        event: undefined,
+        complete: false,
+      };
+      record.node.visible = true;
+      predicted.push(authoritativeMagnet);
+    }
+    return predicted;
+  }
+
+  hasPredictedPickup(playerId: string): boolean {
+    for (const record of this.records.values()) {
+      if (record.absorb?.kind === "predicted" && record.absorb.playerId === playerId) return true;
+    }
+    return false;
   }
 
   update(
     view: ViewBounds,
     presentationSourceFrame: (playerId: string) => number | undefined,
+    presentationHead: (playerId: string) => { readonly x: number; readonly y: number } | undefined,
   ): Array<MagnetConsumedEvent> {
     const started: Array<MagnetConsumedEvent> = [];
     for (const [id, record] of this.records) {
-      const event = record.event;
-      if (event === undefined) continue;
-      const sourceFrame = presentationSourceFrame(event.playerId);
-      if (sourceFrame === undefined || sourceFrame < event.sourceFrame) continue;
-      if (record.absorb === undefined) {
-        record.absorb = createFoodAbsorbState(event.magnet.position, event.target, sourceFrame);
-        started.push(event);
+      const absorb = record.absorb;
+      if (absorb === undefined) continue;
+      const playerId = absorb.kind === "authoritative" ? absorb.event.playerId : absorb.playerId;
+      const sourceFrame = presentationSourceFrame(playerId);
+      if (sourceFrame === undefined) {
+        this.updateVisibility(record, view);
+        continue;
       }
-      const sample = sampleFoodAbsorbState(record.absorb, sourceFrame);
+
+      let sample: CollectibleAbsorbSample;
+      if (absorb.kind === "authoritative") {
+        if (sourceFrame < absorb.event.sourceFrame) {
+          this.updateVisibility(record, view);
+          continue;
+        }
+        if (absorb.state === undefined) {
+          absorb.state = createCollectibleAbsorbState(
+            { x: record.node.position.x, y: record.node.position.y },
+            absorb.event.target,
+            sourceFrame,
+            MAGNET_PICKUP_SOURCE_FRAME_COUNT,
+          );
+          started.push(absorb.event);
+        }
+        sample = sampleCollectibleAbsorbState(absorb.state, sourceFrame);
+      } else {
+        const currentHead = presentationHead(playerId) ?? absorb.state.target;
+        const tracking = advanceCollectibleAbsorbTrackingState(
+          absorb.state,
+          sourceFrame,
+          currentHead,
+        );
+        absorb.state = tracking.state;
+        sample = tracking;
+      }
       record.node.position.set(sample.position.x, sample.position.y);
       if (sample.complete) {
+        if (absorb.kind === "predicted") {
+          absorb.complete = true;
+          if (absorb.event === undefined) {
+            record.node.visible = false;
+            continue;
+          }
+        }
         record.node.destroy();
         this.records.delete(id);
-      } else {
-        this.updateVisibility(record, view);
+        continue;
       }
+      if (absorb.kind === "predicted") absorb.complete = false;
+      this.updateVisibility(record, view);
     }
     return started;
   }
@@ -93,6 +272,7 @@ export class MagnetToolLayer {
   destroy(): void {
     for (const record of this.records.values()) record.node.destroy();
     this.records.clear();
+    this.authoritativeMagnets.clear();
   }
 
   private createRecord(magnet: MagnetToolState): MagnetRecord {
@@ -101,10 +281,18 @@ export class MagnetToolLayer {
     node.scale.set(scale);
     node.position.set(magnet.position.x, magnet.position.y);
     this.container.addChild(node);
-    return { node, magnet, event: undefined, absorb: undefined };
+    return { node, magnet, absorb: undefined, speculationBlocked: false };
   }
 
   private updateVisibility(record: MagnetRecord, view: ViewBounds): void {
+    if (
+      record.absorb?.kind === "predicted" &&
+      record.absorb.complete &&
+      record.absorb.event === undefined
+    ) {
+      record.node.visible = false;
+      return;
+    }
     const margin = MAGNET.toolSize;
     record.node.visible =
       record.node.x > view.left - margin &&

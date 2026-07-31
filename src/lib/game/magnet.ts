@@ -31,6 +31,13 @@ export interface MovingMagnetShape {
   readonly directionDegrees: number;
 }
 
+export interface PredictableMagnetShape extends MovingMagnetShape {
+  readonly linearFramesRemaining: number;
+}
+
+export const MAGNET_PICKUP_SOURCE_FRAME_COUNT = Math.round(MAGNET.pickupFlySeconds * 60);
+export const MAGNET_PREDICTION_CONTACT_GUARD = 0.5;
+
 export function magnetBorderDirection(
   magnet: MovingMagnetShape,
   arenaHalfSize: number,
@@ -92,6 +99,20 @@ export function magnetPositionAfterSourceFrames(
   }
 
   return { x, y };
+}
+
+export function predictMagnetCollisionPosition(
+  magnet: PredictableMagnetShape,
+  authoritativeSourceFrame: number,
+  collisionSourceFrame: number,
+  arenaHalfSize: number,
+): { x: number; y: number } | undefined {
+  if (!Number.isInteger(authoritativeSourceFrame) || !Number.isInteger(collisionSourceFrame)) {
+    return undefined;
+  }
+  const sourceFrames = collisionSourceFrame - authoritativeSourceFrame;
+  if (sourceFrames < 0 || sourceFrames >= magnet.linearFramesRemaining) return undefined;
+  return magnetPositionAfterSourceFrames(magnet, sourceFrames, arenaHalfSize);
 }
 
 function fixedMagnetNumber(value: number): number {

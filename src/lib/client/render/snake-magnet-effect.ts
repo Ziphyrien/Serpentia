@@ -248,9 +248,7 @@ export function sampleSnakeMagnetRing(
   };
 }
 
-export function sampleSnakeMagnetParticle(
-  elapsedSourceFrames: number,
-): SnakeMagnetParticleSample {
+export function sampleSnakeMagnetParticle(elapsedSourceFrames: number): SnakeMagnetParticleSample {
   const emissionPeriodFrames = 12;
   const lifeFrames = 6;
   const elapsedSinceFirstEmission = elapsedSourceFrames - emissionPeriodFrames;
@@ -258,16 +256,12 @@ export function sampleSnakeMagnetParticle(
   const age = animationFrameInCycle(Math.max(0, elapsedSinceFirstEmission), emissionPeriodFrames);
   const visible = elapsedSinceFirstEmission >= 0 && age < lifeFrames;
   const ratio = Math.min(1, age / lifeFrames);
-  const startAlpha = clampColorChannel(
-    255 + 255 * signedParticleRandom(emissionIndex, 0x2a),
-  );
-  const endAlpha = clampColorChannel(
-    254 + 255 * signedParticleRandom(emissionIndex, 0x71),
-  );
+  const startAlpha = clampColorChannel(255 + 255 * signedParticleRandom(emissionIndex, 0x2a));
+  const endAlpha = clampColorChannel(254 + 255 * signedParticleRandom(emissionIndex, 0x71));
   const startSize = 120 + 20 * signedParticleRandom(emissionIndex, 0xb4);
   return {
     visible,
-    x: -32 + signedParticleRandom(emissionIndex, 0x19),
+    x: signedParticleRandom(emissionIndex, 0x19),
     y: signedParticleRandom(emissionIndex, 0x53),
     alpha: visible ? (startAlpha + (endAlpha - startAlpha) * ratio) / 255 : 0,
     size: startSize + (120 - startSize) * ratio,

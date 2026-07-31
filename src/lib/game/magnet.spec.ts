@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   MAGNET,
   magnetPositionAfterSourceFrames,
+  predictMagnetCollisionPosition,
   shouldGenerateMagnetWave,
 } from "./magnet";
 
@@ -36,5 +37,17 @@ describe("normal game magnet movement", () => {
         2_448,
       ),
     ).toEqual({ x: -2_427, y: 0 });
+  });
+
+  it("predicts collisions only before the next random direction frame", () => {
+    const magnet = {
+      position: { x: 0, y: 0 },
+      directionDegrees: 0,
+      linearFramesRemaining: 6,
+    };
+
+    expect(predictMagnetCollisionPosition(magnet, 100, 105, 2_448)).toEqual({ x: 15, y: 0 });
+    expect(predictMagnetCollisionPosition(magnet, 100, 106, 2_448)).toBeUndefined();
+    expect(predictMagnetCollisionPosition(magnet, 100, 105.5, 2_448)).toBeUndefined();
   });
 });

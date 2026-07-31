@@ -92,7 +92,7 @@ export class GameRenderer {
       },
       rules.arenaHalfSize - MAP_BORDER,
     );
-    this.magnetTools = new MagnetToolLayer(textures.magnetTool);
+    this.magnetTools = new MagnetToolLayer(textures.magnetTool, rules.arenaHalfSize);
     this.snakes = new SnakeLayer(
       textures.skinFrames,
       textures.speedUp,
@@ -246,8 +246,9 @@ export class GameRenderer {
     }
 
     let selfHead: { x: number; y: number } | undefined;
+    let selfView: SnakeRenderView | undefined;
     if (selfState && selfSnapshot?.alive) {
-      views.push({
+      selfView = {
         id: selfSnapshot.id,
         nickname: selfSnapshot.nickname,
         skinId: selfSnapshot.skinId,
@@ -261,7 +262,8 @@ export class GameRenderer {
           selfSnapshot.magnetUntilSourceFrame != null &&
           selfState.presentationSourceFrame < selfSnapshot.magnetUntilSourceFrame,
         isSelf: true,
-      });
+      };
+      views.push(selfView);
       selfHead = selfState.body[0];
     }
 
@@ -318,9 +320,28 @@ export class GameRenderer {
               };
             })
           : controller.snapshotBuffer.sampleMagnets(renderTime);
-      this.magnetTools.sync(presentedMagnets, viewBounds);
+      this.magnetTools.sync(
+        presentedMagnets,
+        viewBounds,
+        authoritativeSourceFrame,
+        latestSnapshot.magnets ?? [],
+      );
     }
     if (selfHead && selfState && selfSnapshot?.alive) {
+      const predictedMagnets = this.magnetTools.predictSelfContacts(
+        selfSnapshot.id,
+        selfHead,
+        selfState.collisionHead,
+        snakeBodyRadius(selfState.bodyScale),
+        rules.eatDistanceFactor,
+        selfState.presentationSourceFrame,
+        selfState.collisionSourceFrame,
+      );
+      if (predictedMagnets.length > 0) controller.sfx.eatTool();
+      if (selfView && this.magnetTools.hasPredictedPickup(selfSnapshot.id)) {
+        selfView.magnetActive = true;
+      }
+
       const predictedFoods = this.food.predictSelfContacts(
         selfSnapshot.id,
         selfHead,
@@ -341,21 +362,21 @@ export class GameRenderer {
       const head = view.body[0];
       if (head !== undefined) presentationHeads.set(view.id, head);
     }
-    const presentedFoods = this.food.update(
-      viewBounds,
-      (playerId) =>
-        playerId === controller.selfId
-          ? (selfState?.presentationSourceFrame ?? remotePresentationSourceFrame)
-          : remotePresentationSourceFrame,
-      (playerId) => presentationHeads.get(playerId),
-    );
+    const presentationSourceFrame = (playerId: string): number | undefined =>
+      playerId === controller.selfId
+        ? (selfState?.presentationSourceFrame ?? remotePresentationSourceFrame)
+        : remotePresentationSourceFrame;
+    const presentationHead = (
+      playerId: string,
+    ): { readonly x: number; readonly y: number } | undefined => presentationHeads.get(playerId);
+    const presentedFoods = this.food.update(viewBounds, presentationSourceFrame, presentationHead);
     for (const event of presentedFoods) {
       if (event.playerId === controller.selfId) this.playFoodAudio(event.food);
     }
-    const presentedMagnets = this.magnetTools.update(viewBounds, (playerId) =>
-      playerId === controller.selfId
-        ? (selfState?.presentationSourceFrame ?? remotePresentationSourceFrame)
-        : remotePresentationSourceFrame,
+    const presentedMagnets = this.magnetTools.update(
+      viewBounds,
+      presentationSourceFrame,
+      presentationHead,
     );
     for (const event of presentedMagnets) {
       if (event.playerId === controller.selfId) controller.sfx.eatTool();

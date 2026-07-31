@@ -31,9 +31,10 @@ describe("snake magnet prefab animation", () => {
     expect(sampleSnakeMagnetRing(0, 1)).toMatchObject({ alpha: 0, scale: 5 });
     expect(sampleSnakeMagnetRing(1, 11)).toMatchObject({ alpha: 0, scale: 5 });
     expect(sampleSnakeMagnetParticle(0).visible).toBe(false);
-    expect(sampleSnakeMagnetParticle(12)).toMatchObject({ visible: true });
-    expect(sampleSnakeMagnetParticle(12).x).toBeGreaterThanOrEqual(-33);
-    expect(sampleSnakeMagnetParticle(12).x).toBeLessThanOrEqual(-31);
+    const particle = sampleSnakeMagnetParticle(12);
+    expect(particle).toMatchObject({ visible: true });
+    expect(Math.abs(particle.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(particle.y)).toBeLessThanOrEqual(1);
     expect(sampleSnakeMagnetParticle(18).visible).toBe(false);
     expect(sampleSnakeMagnetParticle(24).visible).toBe(true);
   });
