@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { onMount, untrack } from "svelte";
   import Gamepad2 from "lucide-svelte/icons/gamepad-2";
   import type { GameController } from "$lib/client/game.svelte";
+  import { MusicLibrary } from "$lib/client/net/music-library.svelte";
   import type { SettingsStore } from "$lib/client/stores/settings.svelte";
   import Leaderboard from "./leaderboard.svelte";
   import GameMap from "./game-map.svelte";
@@ -26,6 +28,10 @@
 
   const isTouch = typeof matchMedia !== "undefined" && matchMedia("(pointer: coarse)").matches;
   const showTouch = $derived(isTouch && controller.self.alive && !controller.gamepadConnected);
+
+  // 音乐管理弹窗的数据层：打开设置菜单即预热后端状态，点开时大概率零加载态
+  const musicLibrary = MusicLibrary.fromDescriptor(untrack(() => controller).descriptor);
+  onMount(() => () => musicLibrary.dispose());
 
   let hintVisible = $state(true);
 
@@ -72,10 +78,12 @@
           sfx={controller.sfx}
           music={controller.music}
           onManageMusic={() => controller.requestMusicManager()}
-          onMenuOpenChange={(open) => controller.setMenuOpen("settings", open)}
+          onMenuOpenChange={(open) => {
+            controller.setMenuOpen("settings", open);
+            if (open) musicLibrary.warm();
+          }}
           {onReturnHome}
         />
-        <MusicDialog {controller} />
       </div>
       <GameMap
         markers={controller.gameMapMarkers}
@@ -104,6 +112,8 @@
 {#if showTouch}
   <TouchControls {controller} />
 {/if}
+
+<MusicDialog {controller} library={musicLibrary} />
 
 <style>
   .game-hud {

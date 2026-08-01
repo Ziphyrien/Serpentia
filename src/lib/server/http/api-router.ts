@@ -1,10 +1,9 @@
 import { Schema } from "effect";
 import {
   MusicSearchRequest,
-  MusicSourceResolveRequest,
   SessionRequest,
   type BackendDescriptor,
-  type MusicSourceErrorCode,
+  type MusicBackendErrorCode,
   type SessionErrorCode,
   type SessionStatus,
   type TurnCredentialsErrorCode,
@@ -17,7 +16,8 @@ import {
   signSession,
   verifySession,
 } from "../access/session";
-import { isMusicSourceError } from "../music/errors";
+import { BILIBILI_STREAM_PATH_PREFIX } from "../music/bilibili/stream";
+import { isMusicBackendError } from "../music/errors";
 import { normalizeNickname, normalizeSkinId } from "../room/connection-identity";
 import type { RuntimeConfig } from "../runtime/config";
 import type { RuntimeServices } from "../runtime/services";
@@ -27,7 +27,6 @@ import { expiredSessionCookie, readCookie, sessionCookie } from "./cookies";
 
 const MAX_SESSION_BODY_BYTES = 2_048;
 const MAX_MUSIC_SEARCH_BODY_BYTES = 512;
-const MAX_MUSIC_BODY_BYTES = 16_384;
 
 export class ApiRouter {
   constructor(
@@ -55,7 +54,9 @@ export class ApiRouter {
     }
     if (pathname === this.descriptor.musicPath) return this.handleMusicStatus(request);
     if (pathname === this.descriptor.musicSearchPath) return this.handleMusicSearch(request);
-    if (pathname === this.descriptor.musicResolvePath) return this.handleMusicResolve(request);
+    if (pathname.startsWith(BILIBILI_STREAM_PATH_PREFIX)) {
+      return this.handleMusicStream(request, pathname.slice(BILIBILI_STREAM_PATH_PREFIX.length));
+    }
     if (pathname === this.descriptor.websocketPath) {
       return new Response("WebSocket upgrade required", {
         status: 426,
@@ -167,11 +168,22 @@ export class ApiRouter {
     }
   }
 
-  private handleMusicStatus(request: Request): Response {
+  private async handleMusicStatus(request: Request): Promise<Response> {
     if (request.method !== "GET") return methodNotAllowed("GET");
-    return Response.json(this.services.music.status(), {
-      headers: { "cache-control": "public, max-age=5" },
-    });
+    const token = readCookie(request, SESSION_COOKIE_NAME);
+    const session =
+      token === undefined
+        ? undefined
+        : await verifySession(token, this.config.sessionSigningSecret);
+    if (session === undefined) return musicError("UNAUTHORIZED", 401);
+    try {
+      return Response.json(await this.services.music.status(request.signal), {
+        headers: { "cache-control": "private, max-age=5" },
+      });
+    } catch (cause) {
+      if (!isMusicBackendError(cause)) return musicError("BACKEND_UNAVAILABLE", 503);
+      return musicError(cause.code, musicStatus(cause.code));
+    }
   }
 
   private async handleMusicSearch(request: Request): Promise<Response> {
@@ -202,40 +214,24 @@ export class ApiRouter {
         headers: { "cache-control": "private, no-store" },
       });
     } catch (cause) {
-      if (!isMusicSourceError(cause)) return musicError("RUNTIME_UNAVAILABLE", 503);
+      if (!isMusicBackendError(cause)) return musicError("BACKEND_UNAVAILABLE", 503);
       return musicError(cause.code, musicStatus(cause.code));
     }
   }
 
-  private async handleMusicResolve(request: Request): Promise<Response> {
-    if (request.method !== "POST") return methodNotAllowed("POST");
+  private async handleMusicStream(request: Request, ticket: string): Promise<Response> {
+    if (!ticket || ticket.includes("/")) return musicError("INVALID_REQUEST", 400);
     const token = readCookie(request, SESSION_COOKIE_NAME);
     const session =
       token === undefined
         ? undefined
         : await verifySession(token, this.config.sessionSigningSecret);
     if (session === undefined) return musicError("UNAUTHORIZED", 401);
-    const attempt = this.services.musicResolveAttempts.take(session.playerId);
-    if (!attempt.allowed) {
-      return musicError("RATE_LIMITED", 429, retryAfterHeaders(attempt));
-    }
-    if (!isJsonRequest(request)) return musicError("INVALID_REQUEST", 400);
-
-    let input: MusicSourceResolveRequest;
-    try {
-      const raw = await readBoundedJson(request, MAX_MUSIC_BODY_BYTES);
-      input = await Schema.decodeUnknownPromise(MusicSourceResolveRequest)(raw);
-    } catch {
-      return musicError("INVALID_REQUEST", 400);
-    }
 
     try {
-      const result = await this.services.music.resolve(input, request.signal);
-      return Response.json(result, {
-        headers: { "cache-control": "private, no-store" },
-      });
+      return await this.services.music.stream(request, ticket);
     } catch (cause) {
-      if (!isMusicSourceError(cause)) return musicError("RUNTIME_UNAVAILABLE", 503);
+      if (!isMusicBackendError(cause)) return musicError("BACKEND_UNAVAILABLE", 503);
       return musicError(cause.code, musicStatus(cause.code));
     }
   }
@@ -281,28 +277,32 @@ function retryAfterHeaders(decision: { readonly retryAfterMilliseconds: number }
   };
 }
 
-function musicStatus(error: MusicSourceErrorCode): number {
+function musicStatus(error: MusicBackendErrorCode): number {
   switch (error) {
     case "INVALID_REQUEST":
       return 400;
     case "UNAUTHORIZED":
       return 401;
     case "RATE_LIMITED":
+    case "RISK_CONTROLLED":
       return 429;
+    case "VIDEO_UNAVAILABLE":
+      return 404;
+    case "AUDIO_UNAVAILABLE":
+      return 422;
     case "UPSTREAM_FAILED":
     case "POLICY_DENIED":
       return 502;
     case "TIMEOUT":
       return 504;
-    case "SOURCE_UNAVAILABLE":
-    case "INITIALIZATION_FAILED":
-    case "RUNTIME_UNAVAILABLE":
+    case "AUTH_REQUIRED":
+    case "BACKEND_UNAVAILABLE":
       return 503;
   }
 }
 
 function musicError(
-  error: MusicSourceErrorCode,
+  error: MusicBackendErrorCode,
   status: number,
   headers: HeadersInit = {},
 ): Response {

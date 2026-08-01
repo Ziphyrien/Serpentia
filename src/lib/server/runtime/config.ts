@@ -2,6 +2,10 @@ import { resolve } from "node:path";
 import { Schema } from "effect";
 import type { IceServer } from "../../protocol";
 import { isSessionSigningSecretConfigured } from "../access/session";
+import {
+  BilibiliCredentials,
+  validateBilibiliRefreshToken,
+} from "../music/bilibili/credentials";
 import { isCoturnConfigured, type CoturnConfig } from "../voice/coturn";
 
 const DEFAULT_STUN_URLS = ["stun:stun.l.google.com:19302"];
@@ -16,7 +20,9 @@ export interface RuntimeConfig {
   readonly cookieSecure: boolean;
   readonly tlsCertFile: string | undefined;
   readonly tlsKeyFile: string | undefined;
-  readonly musicSourceFile: string;
+  readonly bilibiliCookie: string;
+  readonly bilibiliRefreshToken: string;
+  readonly bilibiliEnvironmentFile: string;
 }
 
 export class RuntimeConfigError extends Schema.TaggedErrorClass<RuntimeConfigError>()(
@@ -29,6 +35,18 @@ export function loadRuntimeConfig(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): RuntimeConfig {
   const sessionSigningSecret = requireValue(environment, "SESSION_SIGNING_SECRET");
+  const bilibiliCookie = requireValue(environment, "BILIBILI_COOKIE");
+  const bilibiliRefreshToken = requireValue(environment, "BILIBILI_REFRESH_TOKEN");
+  try {
+    const credentials = BilibiliCredentials.fromEnvironment(bilibiliCookie);
+    if (!credentials.cookieValue("bili_jct")) throw new Error("missing bili_jct");
+    validateBilibiliRefreshToken(bilibiliRefreshToken);
+  } catch {
+    throw RuntimeConfigError.make({
+      message:
+        "BILIBILI_COOKIE must contain valid SESSDATA and bili_jct cookies, and BILIBILI_REFRESH_TOKEN must be valid",
+    });
+  }
   if (!isSessionSigningSecretConfigured(sessionSigningSecret)) {
     throw RuntimeConfigError.make({
       message: "SESSION_SIGNING_SECRET must contain at least 32 characters",
@@ -67,7 +85,9 @@ export function loadRuntimeConfig(
     cookieSecure: parseBoolean(environment.COOKIE_SECURE, environment.NODE_ENV === "production"),
     tlsCertFile,
     tlsKeyFile,
-    musicSourceFile: resolve(optionalValue(environment.MUSIC_SOURCE_FILE) ?? "music-source.js"),
+    bilibiliCookie,
+    bilibiliRefreshToken,
+    bilibiliEnvironmentFile: resolve(optionalValue(environment.BILIBILI_ENV_FILE) ?? ".env"),
   };
 }
 

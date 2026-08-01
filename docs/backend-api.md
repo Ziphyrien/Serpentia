@@ -115,17 +115,34 @@ POST /api/turn-credentials
 - `SERVER_MISCONFIGURED`：coturn 或会话 Secret 缺失
 - `TURN_UNAVAILABLE`：coturn 临时凭据生成失败
 
-## LX 音源
+## 哔哩哔哩音乐
 
-服务启动时读取 `MUSIC_SOURCE_FILE`；未配置时默认为项目根目录 `music-source.js`。脚本按 LX Music 的 `globalThis.lx` 契约在独立子进程中运行，支持明文及控制流混淆文件，并在文件变化后热替换。音源脚本内容、签名材料和异常堆栈不会通过 HTTP 返回。
+服务启动时必须读取成对的 `BILIBILI_COOKIE` 与 `BILIBILI_REFRESH_TOKEN`。Cookie 至少包含非空 `SESSDATA` 和 `bili_jct`；`BILIBILI_ENV_FILE` 指向服务可写、权限为 `0600` 的凭据环境文件，默认是工作目录下的 `.env`。使用网页二维码登录脚本生成匹配凭据，脚本和服务都不会输出秘密：
+
+```bash
+bun run bilibili:login -- --env .env
+```
+
+受限客户端只会把 Cookie 注入固定的 Bilibili API，以及官方 Cookie 检查、Correspond、刷新和确认端点；Cookie 不会进入浏览器、WebSocket、签名引用、流票据或日志。服务启动后会非阻塞检查一次，此后每 24 小时检查；临时失败每小时重试，前台请求会与后台任务共享同一个单飞检查。需要刷新时按 `cookie/info → correspond → cookie/refresh → confirm/refresh` 顺序轮换。新 Cookie 与新 refresh token 会先原子写回 `BILIBILI_ENV_FILE` 并更新进程内凭据，再使用新 Cookie 和旧 refresh token 确认轮换。持久化或刷新失败不会用半成品覆盖旧凭据。
+
+音乐协议只支持 `64k`、`132k`、`192k`，分别对应 DASH audio id `30216`、`30232`、`30280`。目标档位不存在时按 `192k → 132k → 64k` 向下降级；旧视频的 `durl` 作为最终 `64k` 兼容路径。
 
 ### 状态
 
 ```http
 GET /api/music
+Cookie: serpentia_session=...
 ```
 
-无需会话，返回 metadata、经服务端白名单过滤后的 `sources/actions/qualitys` 以及可选更新信息；文件不存在或没有可用运行时则返回 `{ "active": null, "update": null }`。
+要求有效游戏会话。响应会验证服务器 Bilibili 登录与 WBI keys，不返回 UID、昵称或任何凭据：
+
+```json
+{
+  "source": "bilibili",
+  "available": true,
+  "qualities": ["64k", "132k", "192k"]
+}
+```
 
 ### 搜索
 
@@ -134,86 +151,68 @@ POST /api/music/search
 Content-Type: application/json
 Cookie: serpentia_session=...
 
-{
-  "source": "kw",
-  "query": "周杰伦"
-}
+{ "query": "周杰伦", "page": 1 }
 ```
 
-该端点要求有效游戏会话，并按玩家独立限流。服务端使用与 LX Music Desktop 兼容的平台搜索适配器请求 `kw/kg/tx/wy/mg`，每次最多返回 20 首歌曲；`local` 不支持搜索。响应中的 `musicInfo` 是经边界校验、用于后续音源 URL 解析的 LX 新版歌曲信息，前端不要求用户手工填写。
+该端点要求有效游戏会话并按玩家限流。`page` 可省略且默认为 1；服务端缓存 WBI keys，并对 `/x/web-interface/wbi/search/type` 的单页请求签名。响应中的 `nextPage` 为下一页页码或 `null`。客户端收到第一页后立即渲染，并在后台补齐首批 100 条；浏览到第 60 条后继续静默预取下一批 100 条，之后按相同间隔递进。标题会去除高亮标签并解码 HTML entities。每首结果的 `qualities` 表示共享代理稳定支持的音质上限，不保证该视频具有对应音轨。目标档位不存在时，服务端按 `192k → 132k → 64k` 自动降级，并在 `MusicResolvedTrack.quality` 中广播实际音质。`reference` 是短期 HMAC 签名引用，客户端只能原样提交给房间点播，不能提交裸 BVID、CID、标题或 URL。
 
 ```json
 {
-  "source": "kw",
   "total": 1,
   "tracks": [
     {
-      "id": "kw_123",
-      "source": "kw",
+      "bvid": "BV1xx411c7mD",
       "title": "示例歌曲",
-      "artist": "示例歌手",
-      "album": "示例专辑",
+      "artist": "示例 UP 主",
       "durationSeconds": 180,
-      "pictureUrl": "https://img.example.test/cover.jpg",
-      "qualitys": ["128k", "320k"],
-      "musicInfo": {
-        "id": "kw_123",
-        "name": "示例歌曲",
-        "singer": "示例歌手",
-        "source": "kw",
-        "songmid": "123",
-        "interval": "03:00",
-        "albumName": "示例专辑",
-        "types": [{ "type": "128k", "size": "3.0M" }],
-        "_types": { "128k": { "size": "3.0M" } },
-        "meta": { "songId": "123" }
-      }
+      "pictureUrl": "https://i0.hdslb.com/example.jpg",
+      "qualities": ["64k", "132k", "192k"],
+      "reference": "<signed-track-reference>"
     }
-  ]
+  ],
+  "nextPage": null
 }
 ```
 
-### 解析
+不存在公开 `/api/music/resolve`。点播通过 WebSocket 提交：
 
-```http
-POST /api/music/resolve
-Content-Type: application/json
-Cookie: serpentia_session=...
-
+```json
 {
-  "source": "kw",
-  "action": "musicUrl",
-  "info": {
-    "type": "320k",
-    "musicInfo": { "source": "kw", "songmid": "...", "hash": "..." }
+  "v": 16,
+  "_tag": "music-control",
+  "command": {
+    "_tag": "play",
+    "reference": "<signed-track-reference>",
+    "quality": "192k"
   }
 }
 ```
 
-该端点要求有效游戏会话。`kw/kg/tx/wy/mg` 的 `musicUrl` 及 `128k/320k/flac/flac24bit` 由当前 LX 音源脚本声明；`kw/kg/tx/mg` 的 `pic` 由服务端内置洛雪同款解析器提供，网易封面优先使用搜索结果中的 `picUrl`；`local` 可由脚本声明 `musicUrl/pic/lyric`。单个 `info` 编码后最多 16 KiB，处理器期限为 20 秒。
+服务端验证引用，缺 CID 时从 `/x/player/pagelist` 选择第一分 P，再调用 WBI `/x/player/wbi/playurl`。标题、作者、封面和 BVID 均取自签名引用，而不是客户端字段。房间最终只广播同源 `/api/music/stream/<signed-stream-ticket>`，短期 CDN URL 仅缓存在服务端内存中。点播失败时仅向发起者发送 `{ "v": 16, "_tag": "music-error", "code": "..." }`，不会压扁为通用房间错误。
 
-`musicUrl` 成功响应：
+### 音频流
 
-```json
-{
-  "source": "kw",
-  "action": "musicUrl",
-  "data": { "type": "320k", "url": "https://cdn.example/song.flac" }
-}
+```http
+GET /api/music/stream/<signed-stream-ticket>
+HEAD /api/music/stream/<signed-stream-ticket>
+Cookie: serpentia_session=...
+Range: bytes=0-
 ```
 
-封面解析沿用洛雪的图片动作：搜索结果中的 `pictureUrl` 非空时直接使用；为空时服务端会把同一份 `musicInfo` 发送到 `action: "pic"`。音频 URL 与封面 URL 并行解析，封面成功后写入共享播放状态；图片解析失败或较慢都不会阻塞音频播放。
+流端点要求有效游戏会话，只接受短期签名票据，支持 GET、HEAD 和单一 bytes Range。代理仅访问受控 Bilibili 媒体域名，注入 `Referer` 与 `User-Agent`，不向 CDN 发送账号 Cookie；只透传音频必需 headers，过滤 `Set-Cookie` 等敏感头。临时 URL 失效或候选失败时最多强制刷新一次，全程流式转发，不缓冲整首音频。
 
-服务端只允许音源通过受控 `lx.request` 访问公网 HTTP/HTTPS 80/443，拒绝私网/回环 DNS、敏感 headers、超限请求/响应和未重新校验的重定向。稳定错误码包括：
+音乐错误码：
 
 - `INVALID_REQUEST`
 - `UNAUTHORIZED`
 - `RATE_LIMITED`
-- `SOURCE_UNAVAILABLE`
-- `INITIALIZATION_FAILED`
-- `RUNTIME_UNAVAILABLE`
+- `AUTH_REQUIRED`
+- `RISK_CONTROLLED`
+- `VIDEO_UNAVAILABLE`
+- `AUDIO_UNAVAILABLE`
 - `UPSTREAM_FAILED`
 - `TIMEOUT`
+- `BACKEND_UNAVAILABLE`
 - `POLICY_DENIED`
 
 ## WebSocket
@@ -229,7 +228,7 @@ wss://<host>/api/parties/game-room/friends
 所有客户端 JSON 消息必须包含：
 
 ```json
-{ "v": 3, "_tag": "..." }
+{ "v": 16, "_tag": "..." }
 ```
 
 当前单条客户端消息上限为 65,536 bytes，客户端只发送文本帧。服务端控制消息使用 JSON 文本，10 Hz `snapshot` 使用快照格式 v3 的有状态二进制 keyframe/delta。
@@ -240,7 +239,7 @@ wss://<host>/api/parties/game-room/friends
 
 ```json
 {
-  "v": 3,
+  "v": 16,
   "_tag": "input",
   "sequence": 42,
   "targetTick": 1203,
@@ -262,7 +261,7 @@ wss://<host>/api/parties/game-room/friends
 
 ```json
 {
-  "v": 3,
+  "v": 16,
   "_tag": "input-ack",
   "sequence": 42,
   "targetTick": 1203,
@@ -273,14 +272,14 @@ wss://<host>/api/parties/game-room/friends
 心跳：
 
 ```json
-{ "v": 3, "_tag": "ping", "nonce": "client-value" }
+{ "v": 16, "_tag": "ping", "nonce": "client-value" }
 ```
 
 语音收听与麦克风状态：
 
 ```json
 {
-  "v": 3,
+  "v": 16,
   "_tag": "voice-state",
   "listening": true,
   "microphoneEnabled": false,
@@ -294,7 +293,7 @@ P2P 信令：
 
 ```json
 {
-  "v": 3,
+  "v": 16,
   "_tag": "voice-signal",
   "targetPlayerId": "friend-b",
   "signal": { "_tag": "offer", "sdp": "..." }
@@ -303,7 +302,7 @@ P2P 信令：
 
 ```json
 {
-  "v": 3,
+  "v": 16,
   "_tag": "voice-signal",
   "targetPlayerId": "friend-a",
   "signal": { "_tag": "answer", "sdp": "..." }
@@ -312,7 +311,7 @@ P2P 信令：
 
 ```json
 {
-  "v": 3,
+  "v": 16,
   "_tag": "voice-signal",
   "targetPlayerId": "friend-b",
   "signal": {
@@ -333,7 +332,7 @@ ICE 收集结束时允许 `candidate: null`。后端只向已认证且在线的�
 
 ```json
 {
-  "v": 3,
+  "v": 16,
   "_tag": "welcome",
   "selfPlayerId": "friend-a",
   "resumed": false,
@@ -349,7 +348,7 @@ ICE 收集结束时允许 `candidate: null`。后端只向已认证且在线的�
 
 ```json
 {
-  "v": 3,
+  "v": 16,
   "_tag": "snapshot",
   "serverTime": 1784740000100,
   "snapshot": {},
@@ -421,7 +420,9 @@ SESSION_SIGNING_SECRET=...
 STUN_URLS=stun:voice.example.com:3478
 TURN_URLS=turn:voice.example.com:3478?transport=udp,turns:voice.example.com:5349?transport=tcp
 TURN_SHARED_SECRET=...
-MUSIC_SOURCE_FILE=./music-source.js
+BILIBILI_COOKIE='SESSDATA=...; bili_jct=...; DedeUserID=...'
+BILIBILI_REFRESH_TOKEN='与上述 Cookie 匹配的 refresh token'
+BILIBILI_ENV_FILE=.env
 ```
 
 生产前执行：

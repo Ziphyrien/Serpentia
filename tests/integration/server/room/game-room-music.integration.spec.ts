@@ -3,17 +3,15 @@ import { expect, it } from "vite-plus/test";
 import { DEFAULT_SKIN_ID } from "$lib/game/internal-skins";
 import {
   GAME_PROTOCOL_VERSION,
-  MusicUrlResolveResult,
+  MusicResolvedTrack,
   decodeServerMessage,
-  type MusicSourceResolveRequest,
-  type MusicSourceResolveResponse,
 } from "$lib/protocol";
 import type { MusicResolver } from "$lib/server/music/coordinator";
 import { GameRoom, type GameRoomConnection } from "$lib/server/room/game-room";
 
 interface PendingResolution {
   readonly signal: AbortSignal | undefined;
-  readonly resolve: (result: MusicSourceResolveResponse) => void;
+  readonly resolve: (result: MusicResolvedTrack) => void;
 }
 
 function connection(id: string, playerId: string, nickname: string) {
@@ -43,10 +41,22 @@ function latestMusic(sent: ReadonlyArray<string | Uint8Array | ArrayBuffer>) {
     .at(-1)?.music;
 }
 
-it("lets every player compete while the last server-received play command wins", async () => {
+function resolvedTrack(title: string): MusicResolvedTrack {
+  return MusicResolvedTrack.make({
+    bvid: "BV1xx411c7mD",
+    title,
+    artist: "Fixture UP",
+    pictureUrl: `https://img.example.test/${title}.jpg`,
+    durationSeconds: 180,
+    quality: "192k",
+    url: `https://audio.example.test/${title}.mp3`,
+  });
+}
+
+it("lets every player compete while the last signed Bilibili reference wins", async () => {
   const pending: Array<PendingResolution> = [];
   const resolver: MusicResolver = {
-    resolve(_request: MusicSourceResolveRequest, signal?: AbortSignal) {
+    resolve(_reference, _quality, signal) {
       return new Promise((resolve) => pending.push({ signal, resolve }));
     },
   };
@@ -64,11 +74,8 @@ it("lets every player compete while the last server-received play command wins",
         _tag: "music-control",
         command: {
           _tag: "play",
-          source: "kw",
-          info: { type: "320k", musicInfo: { hash: "first" } },
-          title: "First",
-          artist: "Alpha",
-          pictureUrl: "https://img.example.test/first.jpg",
+          reference: "first-reference".repeat(3),
+          quality: "192k",
         },
       }),
     );
@@ -79,30 +86,15 @@ it("lets every player compete while the last server-received play command wins",
         _tag: "music-control",
         command: {
           _tag: "play",
-          source: "kw",
-          info: { type: "320k", musicInfo: { hash: "second" } },
-          title: "Second",
-          artist: "Beta",
-          pictureUrl: "https://img.example.test/second.jpg",
+          reference: "second-reference".repeat(3),
+          quality: "192k",
         },
       }),
     );
 
     expect(pending[0]?.signal?.aborted).toBe(true);
-    pending[0]?.resolve(
-      MusicUrlResolveResult.make({
-        source: "kw",
-        action: "musicUrl",
-        data: { type: "320k", url: "https://audio.example.test/first.mp3" },
-      }),
-    );
-    pending[1]?.resolve(
-      MusicUrlResolveResult.make({
-        source: "kw",
-        action: "musicUrl",
-        data: { type: "320k", url: "https://audio.example.test/second.mp3" },
-      }),
-    );
+    pending[0]?.resolve(resolvedTrack("First"));
+    pending[1]?.resolve(resolvedTrack("Second"));
     await Promise.resolve();
 
     expect(latestMusic(alpha.sent)).toMatchObject({
@@ -111,8 +103,9 @@ it("lets every player compete while the last server-received play command wins",
       changedBy: { playerId: "friend-b", nickname: "Beta" },
       track: {
         title: "Second",
-        pictureUrl: "https://img.example.test/second.jpg",
-        url: "https://audio.example.test/second.mp3",
+        quality: "192k",
+        pictureUrl: "https://img.example.test/Second.jpg",
+        url: "https://audio.example.test/Second.mp3",
       },
     });
     expect(latestMusic(beta.sent)).toEqual(latestMusic(alpha.sent));

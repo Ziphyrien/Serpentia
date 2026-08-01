@@ -1,24 +1,24 @@
 import { Schema } from "effect";
 import {
-  MusicSourceErrorCode,
-  type MusicSourceErrorCode as MusicSourceErrorCodeType,
+  MusicBackendErrorCode,
+  type MusicBackendErrorCode as MusicBackendErrorCodeType,
 } from "../../protocol";
 
-export class MusicSourceError extends Schema.TaggedErrorClass<MusicSourceError>()(
-  "MusicSourceError",
+export class MusicBackendError extends Schema.TaggedErrorClass<MusicBackendError>()(
+  "MusicBackendError",
   {
-    code: MusicSourceErrorCode,
+    code: MusicBackendErrorCode,
     message: Schema.String,
   },
 ) {}
 
-export function musicSourceError(
-  code: MusicSourceErrorCodeType,
+export function musicBackendError(
+  code: MusicBackendErrorCodeType,
   message: string,
-): MusicSourceError {
-  return MusicSourceError.make({ code, message });
+): MusicBackendError {
+  return MusicBackendError.make({ code, message });
 }
 
-export function isMusicSourceError(value: unknown): value is MusicSourceError {
-  return value instanceof MusicSourceError;
+export function isMusicBackendError(value: unknown): value is MusicBackendError {
+  return value instanceof MusicBackendError;
 }

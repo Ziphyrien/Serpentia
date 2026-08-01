@@ -1,456 +1,232 @@
-import { watch, type FSWatcher } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { basename, dirname } from "node:path";
 import {
-  MusicLyricResolveResult,
-  MusicPictureResolveResult,
+  MusicBackendStatusResponse,
+  MusicResolvedTrack,
   MusicSearchResponse,
   MusicSearchTrack,
-  MusicSourceCapability,
-  MusicSourceEntry,
-  MusicSourceUpdateInfo,
-  MusicUrlResolveResult,
+  type BilibiliAudioQuality,
+  type MusicBackendErrorCode,
   type MusicSearchRequest,
-  type MusicSourceAction,
-  type MusicSourcePlatform,
-  type MusicSourceResolveRequest,
-  type MusicSourceResolveResponse,
-  type MusicSourceStatusResponse,
 } from "../../protocol";
-import { isMusicSourceError, musicSourceError } from "./errors";
-import { parseMusicSourceScript } from "./metadata";
-import { MusicOutboundHttp } from "./outbound-http";
-import { hasBuiltinPictureResolver, MusicPictureResolver } from "./picture";
-import { MusicRuntime } from "./runtime";
-import { MusicSearchService } from "./search";
+import { BilibiliCatalog } from "./bilibili/catalog";
+import { BilibiliApiClient, type BilibiliFetch } from "./bilibili/client";
+import { BILIBILI_REGULAR_QUALITIES } from "./bilibili/contracts";
+import { BilibiliCredentials } from "./bilibili/credentials";
+import { type BilibiliError, isBilibiliError } from "./bilibili/errors";
+import { BilibiliPlayback } from "./bilibili/playback";
+import { BilibiliSessionRefresher } from "./bilibili/refresh";
+import { BILIBILI_STREAM_PATH_PREFIX, BilibiliStreamProxy } from "./bilibili/stream";
+import { BilibiliTicketService } from "./bilibili/ticket";
+import { WbiSigner } from "./bilibili/wbi";
+import { isMusicBackendError, musicBackendError } from "./errors";
 
-const MAX_INFO_BYTES = 16_384;
-const platforms: ReadonlyArray<MusicSourcePlatform> = ["kw", "kg", "tx", "wy", "mg", "local"];
-const actionsBySource: Readonly<Record<MusicSourcePlatform, ReadonlyArray<MusicSourceAction>>> = {
-  kw: ["musicUrl", "pic"],
-  kg: ["musicUrl", "pic"],
-  tx: ["musicUrl", "pic"],
-  wy: ["musicUrl"],
-  mg: ["musicUrl", "pic"],
-  local: ["musicUrl", "lyric", "pic"],
-};
-const qualitysBySource: Readonly<Record<MusicSourcePlatform, ReadonlyArray<string>>> = {
-  kw: ["128k", "320k", "flac", "flac24bit"],
-  kg: ["128k", "320k", "flac", "flac24bit"],
-  tx: ["128k", "320k", "flac", "flac24bit"],
-  wy: ["128k", "320k", "flac", "flac24bit"],
-  mg: ["128k", "320k", "flac", "flac24bit"],
-  local: [],
-};
-
-export interface MusicSourceServiceOptions {
-  readonly sourceFile: string;
-  readonly http?: MusicOutboundHttp;
-  readonly watch?: boolean;
+interface MusicBackendDependencies {
+  readonly catalog: BilibiliCatalog;
+  readonly playback: BilibiliPlayback;
+  readonly tickets: BilibiliTicketService;
+  readonly streams: BilibiliStreamProxy;
+  readonly signer: WbiSigner;
+  readonly refresher: BilibiliSessionRefresher | undefined;
 }
 
-export class MusicSourceService {
-  private readonly http: MusicOutboundHttp;
-  private readonly searcher: MusicSearchService;
-  private readonly pictures: MusicPictureResolver;
-  private readonly watchFile: boolean;
-  private runtime: MusicRuntime | undefined;
-  private entry: MusicSourceEntry | undefined;
-  private update: MusicSourceUpdateInfo | null = null;
-  private watcher: FSWatcher | undefined;
-  private reloading: Promise<void> = Promise.resolve();
-  private reloadTimer: ReturnType<typeof setTimeout> | undefined;
+export interface MusicBackendServiceOptions {
+  readonly bilibiliCookie: string;
+  readonly signingSecret: string;
+  readonly fetch?: BilibiliFetch;
+  readonly now?: () => number;
+  readonly mediaHeaderTimeoutMilliseconds?: number;
+  readonly refreshToken?: string;
+  readonly environmentFile?: string;
+}
 
-  private constructor(
-    private readonly sourceFile: string,
-    options: MusicSourceServiceOptions,
-  ) {
-    this.http = options.http ?? new MusicOutboundHttp();
-    this.searcher = new MusicSearchService(this.http);
-    this.pictures = new MusicPictureResolver(this.http);
-    this.watchFile = options.watch ?? true;
+export class MusicBackendService {
+  private constructor(private readonly dependencies: MusicBackendDependencies | undefined) {}
+
+  static disabled(): MusicBackendService {
+    return new MusicBackendService(undefined);
   }
 
-  static disabled(): MusicSourceService {
-    return new MusicSourceService("__disabled_music_source__", {
-      sourceFile: "__disabled_music_source__",
-      watch: false,
-    });
-  }
-
-  static async create(options: MusicSourceServiceOptions): Promise<MusicSourceService> {
-    const service = new MusicSourceService(options.sourceFile, options);
-    await service.reload(true);
-    if (service.watchFile) service.startWatching();
-    return service;
-  }
-
-  status(): MusicSourceStatusResponse {
-    return { active: this.entry ?? null, update: this.update };
-  }
-
-  async search(
-    request: MusicSearchRequest,
-    signal?: AbortSignal,
-  ): Promise<MusicSearchResponse> {
-    if (this.runtime === undefined || this.entry === undefined || !this.runtime.alive) {
-      await this.reload(true);
-    }
-    const activeEntry = this.entry;
-    if (activeEntry === undefined) {
-      throw musicSourceError("SOURCE_UNAVAILABLE", "No valid music-source.js is active");
-    }
-    const capability = activeEntry.sources.find((item) => item.source === request.source);
+  static create(options: MusicBackendServiceOptions): MusicBackendService {
+    const now = options.now ?? Date.now;
+    const credentials = BilibiliCredentials.fromEnvironment(options.bilibiliCookie);
+    const refreshConfigured =
+      options.refreshToken !== undefined || options.environmentFile !== undefined;
     if (
-      request.source === "local" ||
-      capability === undefined ||
-      !capability.actions.includes("musicUrl")
+      refreshConfigured &&
+      (options.refreshToken === undefined || options.environmentFile === undefined)
     ) {
-      throw musicSourceError("INVALID_REQUEST", "Music source does not support search");
+      throw musicBackendError(
+        "BACKEND_UNAVAILABLE",
+        "Bilibili refresh token and environment file must be configured together",
+      );
     }
+    const refresher =
+      options.refreshToken === undefined || options.environmentFile === undefined
+        ? undefined
+        : new BilibiliSessionRefresher(credentials, {
+            refreshToken: options.refreshToken,
+            environmentFile: options.environmentFile,
+            fetch: options.fetch,
+            now,
+          });
+    const client = new BilibiliApiClient(
+      credentials,
+      options.fetch,
+      now,
+      refresher === undefined ? undefined : (signal) => refresher.ensureFresh(signal),
+    );
+    const signer = new WbiSigner(client, now);
+    const catalog = new BilibiliCatalog(client, signer, now);
+    const playback = new BilibiliPlayback(client, signer, now);
+    const tickets = new BilibiliTicketService(options.signingSecret, now);
+    const streams = new BilibiliStreamProxy(
+      tickets,
+      playback,
+      options.fetch,
+      options.mediaHeaderTimeoutMilliseconds,
+    );
+    refresher?.start();
+    return new MusicBackendService({ catalog, playback, tickets, streams, signer, refresher });
+  }
 
-    const result = await this.searcher.search(request, signal);
-    const allowedQualitys = new Set(capability.qualitys);
-    const tracks = result.tracks.flatMap((track) => {
-      const qualitys = track.qualitys.filter((quality) => allowedQualitys.has(quality));
-      return qualitys.length === 0
-        ? []
-        : [MusicSearchTrack.make({
-            id: track.id,
-            source: track.source,
+  async status(signal?: AbortSignal): Promise<MusicBackendStatusResponse> {
+    if (this.dependencies === undefined) {
+      return MusicBackendStatusResponse.make({
+        source: "bilibili",
+        available: false,
+        qualities: [],
+      });
+    }
+    try {
+      await this.dependencies.signer.ready(signal);
+      return MusicBackendStatusResponse.make({
+        source: "bilibili",
+        available: true,
+        qualities: [...BILIBILI_REGULAR_QUALITIES],
+      });
+    } catch (cause) {
+      throw normalizeError(cause);
+    }
+  }
+
+  async search(request: MusicSearchRequest, signal?: AbortSignal): Promise<MusicSearchResponse> {
+    const dependencies = this.requireDependencies();
+    try {
+      const result = await dependencies.catalog.search(request.query, request.page ?? 1, signal);
+      return MusicSearchResponse.make({
+        total: result.total,
+        tracks: result.tracks.map((track) =>
+          MusicSearchTrack.make({
+            bvid: track.bvid,
             title: track.title,
             artist: track.artist,
-            album: track.album,
             durationSeconds: track.durationSeconds,
             pictureUrl: track.pictureUrl,
-            qualitys,
-            musicInfo: track.musicInfo,
-          })];
-    });
-    return MusicSearchResponse.make({ source: result.source, total: result.total, tracks });
+            qualities: [...BILIBILI_REGULAR_QUALITIES],
+            reference: dependencies.tickets.issueTrack(track),
+          }),
+        ),
+        nextPage: result.nextPage,
+      });
+    } catch (cause) {
+      throw normalizeError(cause);
+    }
   }
 
   async resolve(
-    request: MusicSourceResolveRequest,
+    reference: string,
+    quality: BilibiliAudioQuality,
     signal?: AbortSignal,
-  ): Promise<MusicSourceResolveResponse> {
-    validateInfo(request.info);
-    const runtime = this.runtime;
-    const entry = this.entry;
-    if (runtime === undefined || entry === undefined || !runtime.alive) {
-      await this.reload(true);
-    }
-    const activeRuntime = this.runtime;
-    const activeEntry = this.entry;
-    if (activeRuntime === undefined || activeEntry === undefined) {
-      throw musicSourceError("SOURCE_UNAVAILABLE", "No valid music-source.js is active");
-    }
-    const capability = activeEntry.sources.find((item) => item.source === request.source);
-    if (capability === undefined || !capability.actions.includes(request.action)) {
-      throw musicSourceError("INVALID_REQUEST", "Music source does not advertise this action");
-    }
-    if (request.action === "musicUrl" && request.source !== "local") {
-      const type = requiredQualityFromInfo(request.info);
-      if (!capability.qualitys.includes(type)) {
-        throw musicSourceError("INVALID_REQUEST", "Music source does not advertise this quality");
-      }
-    }
-    if (request.action === "pic" && hasBuiltinPictureResolver(request.source)) {
-      const value = await this.pictures.resolve(request.source, request.info, signal);
-      return this.normalizeResult(request, value);
-    }
-
+  ): Promise<MusicResolvedTrack> {
+    const dependencies = this.requireDependencies();
     try {
-      const value = await activeRuntime.resolve(request, signal);
-      return await this.normalizeResult(request, value);
+      const track = await dependencies.tickets.verifyTrack(reference);
+      const cid = track.cid ?? (await dependencies.catalog.firstPageCid(track.bvid, signal));
+      const audio = await dependencies.playback.resolve(track.bvid, cid, quality, signal);
+      const streamTicket = dependencies.tickets.issueStream(track.bvid, cid, quality);
+      return MusicResolvedTrack.make({
+        bvid: track.bvid,
+        title: track.title,
+        artist: track.artist,
+        pictureUrl: track.pictureUrl,
+        durationSeconds: track.durationSeconds,
+        quality: audio.quality,
+        url: `${BILIBILI_STREAM_PATH_PREFIX}${streamTicket}`,
+      });
     } catch (cause) {
-      if (isMusicSourceError(cause) && cause.code === "RUNTIME_UNAVAILABLE") {
-        await this.reload(true);
-      }
-      throw cause;
+      throw normalizeError(cause);
     }
   }
 
-  async reload(force = false): Promise<void> {
-    const operation = this.reloading.then(
-      () => this.load(force),
-      () => this.load(force),
-    );
-    this.reloading = operation.then(
-      () => undefined,
-      () => undefined,
-    );
-    return operation;
-  }
-
-  async dispose(): Promise<void> {
-    this.watcher?.close();
-    this.watcher = undefined;
-    if (this.reloadTimer !== undefined) clearTimeout(this.reloadTimer);
-    this.reloadTimer = undefined;
-    const runtime = this.runtime;
-    this.runtime = undefined;
-    this.entry = undefined;
-    this.update = null;
-    await runtime?.dispose();
-  }
-
-  private async load(force: boolean): Promise<void> {
-    let script: string;
+  async stream(request: Request, token: string): Promise<Response> {
+    const dependencies = this.requireDependencies();
     try {
-      script = await readFile(this.sourceFile, "utf8");
+      return await dependencies.streams.serve(request, token);
     } catch (cause) {
-      if (isMissingFile(cause)) {
-        const runtime = this.runtime;
-        this.runtime = undefined;
-        this.entry = undefined;
-        this.update = null;
-        await runtime?.dispose();
-        return;
-      }
-      throw musicSourceError("SOURCE_UNAVAILABLE", messageOf(cause));
+      throw normalizeError(cause);
     }
+  }
 
-    const parsed = parseMusicSourceScript(script);
-    if (!force && this.entry?.metadata.digest === parsed.metadata.digest && this.runtime?.alive)
-      return;
+  dispose(): Promise<void> {
+    this.dependencies?.refresher?.dispose();
+    return Promise.resolve();
+  }
 
-    let candidate: MusicRuntime | undefined;
-    let candidateEntry: MusicSourceEntry | undefined;
-    let candidateUpdate: MusicSourceUpdateInfo | null = null;
-    try {
-      const started = await MusicRuntime.start(parsed.script, parsed.metadata, {
-        http: this.http,
-        onUpdate: (value) => {
-          const update = normalizeUpdate(value);
-          if (candidate !== undefined && candidate === this.runtime) this.update = update;
-          else candidateUpdate = update;
-        },
-      });
-      candidate = started.runtime;
-      candidateEntry = MusicSourceEntry.make({
-        metadata: parsed.metadata,
-        sources: normalizeCapabilities(started.sources),
-      });
-      if (candidateEntry.sources.length === 0) {
-        throw musicSourceError(
-          "INITIALIZATION_FAILED",
-          "Music source did not advertise usable capabilities",
-        );
-      }
-    } catch (cause) {
-      await candidate?.dispose();
-      if (this.runtime === undefined) {
-        this.entry = undefined;
-        this.update = null;
-      }
-      throw isMusicSourceError(cause)
-        ? cause
-        : musicSourceError("INITIALIZATION_FAILED", messageOf(cause));
+  private requireDependencies(): MusicBackendDependencies {
+    if (this.dependencies === undefined) {
+      throw musicBackendError("BACKEND_UNAVAILABLE", "Bilibili music backend is disabled");
     }
-
-    const previous = this.runtime;
-    this.runtime = candidate;
-    this.entry = candidateEntry;
-    this.update = candidateUpdate;
-    await previous?.dispose();
-  }
-
-  private startWatching(): void {
-    const directory = dirname(this.sourceFile);
-    const fileName = basename(this.sourceFile);
-    this.watcher = watch(directory, { persistent: false }, (_event, changed) => {
-      if (changed !== fileName) return;
-      if (this.reloadTimer !== undefined) clearTimeout(this.reloadTimer);
-      this.reloadTimer = setTimeout(() => {
-        this.reloadTimer = undefined;
-        void this.reload().catch((cause) => {
-          console.warn(
-            JSON.stringify({
-              level: "warn",
-              event: "music_source_reload_failed",
-              message: messageOf(cause),
-            }),
-          );
-        });
-      }, 150);
-    });
-    this.watcher.on("error", (cause) => {
-      console.warn(
-        JSON.stringify({
-          level: "warn",
-          event: "music_source_watch_failed",
-          message: messageOf(cause),
-        }),
-      );
-    });
-  }
-
-  private async normalizeResult(
-    request: MusicSourceResolveRequest,
-    value: unknown,
-  ): Promise<MusicSourceResolveResponse> {
-    if (request.action === "musicUrl") {
-      if (typeof value !== "string" || value.length === 0 || value.length > 2_048) {
-        throw musicSourceError("UPSTREAM_FAILED", "Music source returned an invalid URL");
-      }
-      const url = await this.http.assertPublicUrl(value);
-      const type = optionalQualityFromInfo(request.info);
-      return MusicUrlResolveResult.make({
-        source: request.source,
-        action: "musicUrl",
-        data: { ...(type === undefined ? {} : { type }), url: url.toString() },
-      });
-    }
-    if (request.action === "pic") {
-      if (typeof value !== "string" || value.length === 0 || value.length > 2_048) {
-        throw musicSourceError("UPSTREAM_FAILED", "Music source returned an invalid image URL");
-      }
-      const url = await this.http.assertPublicUrl(value);
-      return MusicPictureResolveResult.make({
-        source: request.source,
-        action: "pic",
-        data: url.toString(),
-      });
-    }
-    if (!isRecord(value) || typeof value.lyric !== "string" || value.lyric.length > 51_200) {
-      throw musicSourceError("UPSTREAM_FAILED", "Music source returned invalid lyrics");
-    }
-    return MusicLyricResolveResult.make({
-      source: request.source,
-      action: "lyric",
-      data: {
-        lyric: value.lyric,
-        tlyric: boundedOptionalString(value.tlyric, 5_120),
-        rlyric: boundedOptionalString(value.rlyric, 5_120),
-        lxlyric: boundedOptionalString(value.lxlyric, 8_192),
-      },
-    });
+    return this.dependencies;
   }
 }
 
-function normalizeCapabilities(value: unknown): Array<MusicSourceCapability> {
-  if (!isRecord(value)) return [];
-  const capabilities: Array<MusicSourceCapability> = [];
-  for (const source of platforms) {
-    const candidate = value[source];
-    if (!isRecord(candidate) || candidate.type !== "music") continue;
-    const allowedActions = actionsBySource[source];
-    const allowedQualitys = qualitysBySource[source];
-    const declaredActions = uniqueStrings(candidate.actions)
-      .filter(isAction)
-      .filter((action) => allowedActions.includes(action));
-    const actions =
-      hasBuiltinPictureResolver(source) && declaredActions.includes("musicUrl")
-        ? [...new Set<MusicSourceAction>([...declaredActions, "pic"])]
-        : declaredActions;
-    const qualitys = uniqueStrings(candidate.qualitys)
-      .filter(isQuality)
-      .filter((quality) => allowedQualitys.includes(quality));
-    if (actions.length === 0) continue;
-    capabilities.push(
-      MusicSourceCapability.make({
-        source,
-        name:
-          typeof candidate.name === "string" && candidate.name.length > 0
-            ? candidate.name.slice(0, 64)
-            : source,
-        type: "music",
-        actions,
-        qualitys,
-      }),
-    );
+function normalizeError(cause: unknown): ReturnType<typeof musicBackendError> {
+  if (!isBilibiliError(cause)) {
+    if (isMusicBackendError(cause)) return cause;
+    return musicBackendError("BACKEND_UNAVAILABLE", "Bilibili music operation failed");
   }
-  return capabilities;
+  return musicBackendError(publicCode(cause), safeMessage(cause));
 }
 
-function validateInfo(value: unknown): void {
-  const encoded = JSON.stringify(value);
-  if (encoded === undefined || new TextEncoder().encode(encoded).byteLength > MAX_INFO_BYTES) {
-    throw musicSourceError("INVALID_REQUEST", "Music request information is too large");
+function publicCode(error: BilibiliError): MusicBackendErrorCode {
+  switch (error.reason) {
+    case "INVALID_CONFIG":
+      return "BACKEND_UNAVAILABLE";
+    case "INVALID_REQUEST":
+      return "INVALID_REQUEST";
+    case "AUTH_REQUIRED":
+      return "AUTH_REQUIRED";
+    case "RATE_LIMITED":
+      return "RATE_LIMITED";
+    case "RISK_CONTROLLED":
+      return "RISK_CONTROLLED";
+    case "NOT_FOUND":
+      return "VIDEO_UNAVAILABLE";
+    case "NO_AUDIO":
+      return "AUDIO_UNAVAILABLE";
+    case "TIMEOUT":
+      return "TIMEOUT";
+    case "POLICY_DENIED":
+      return "POLICY_DENIED";
+    case "UPSTREAM_FAILED":
+    case "PROTOCOL_ERROR":
+      return "UPSTREAM_FAILED";
   }
-  validateJsonValue(value, 0);
 }
 
-function validateJsonValue(value: unknown, depth: number): void {
-  if (depth > 8)
-    throw musicSourceError("INVALID_REQUEST", "Music request information is too deeply nested");
-  if (value === null || typeof value === "boolean") return;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value))
-      throw musicSourceError("INVALID_REQUEST", "Music request contains a non-finite number");
-    return;
+function safeMessage(error: BilibiliError): string {
+  switch (error.reason) {
+    case "AUTH_REQUIRED":
+      return "Bilibili Cookie is expired or invalid";
+    case "RATE_LIMITED":
+    case "RISK_CONTROLLED":
+      return "Bilibili temporarily rejected the request";
+    case "NOT_FOUND":
+      return "Bilibili video is unavailable";
+    case "NO_AUDIO":
+      return "Requested Bilibili audio quality is unavailable";
+    case "TIMEOUT":
+      return "Bilibili request timed out";
+    default:
+      return error.message;
   }
-  if (typeof value === "string") {
-    if (value.length > 2_048)
-      throw musicSourceError("INVALID_REQUEST", "Music request contains an oversized string");
-    return;
-  }
-  if (Array.isArray(value)) {
-    if (value.length > 64)
-      throw musicSourceError("INVALID_REQUEST", "Music request contains an oversized array");
-    for (const item of value) validateJsonValue(item, depth + 1);
-    return;
-  }
-  if (!isRecord(value))
-    throw musicSourceError("INVALID_REQUEST", "Music request must contain JSON data");
-  const entries = Object.entries(value);
-  if (entries.length > 64 || entries.some(([key]) => key.length > 128)) {
-    throw musicSourceError("INVALID_REQUEST", "Music request contains too many fields");
-  }
-  for (const [, item] of entries) validateJsonValue(item, depth + 1);
-}
-
-function requiredQualityFromInfo(value: unknown): "128k" | "320k" | "flac" | "flac24bit" {
-  const quality = optionalQualityFromInfo(value);
-  if (quality === undefined) {
-    throw musicSourceError("INVALID_REQUEST", "musicUrl requests require a supported quality");
-  }
-  return quality;
-}
-
-function optionalQualityFromInfo(
-  value: unknown,
-): "128k" | "320k" | "flac" | "flac24bit" | undefined {
-  return isRecord(value) && isQuality(value.type) ? value.type : undefined;
-}
-
-function isAction(value: unknown): value is MusicSourceAction {
-  return value === "musicUrl" || value === "lyric" || value === "pic";
-}
-
-function isQuality(value: unknown): value is "128k" | "320k" | "flac" | "flac24bit" {
-  return value === "128k" || value === "320k" || value === "flac" || value === "flac24bit";
-}
-
-function normalizeUpdate(value: unknown): MusicSourceUpdateInfo | null {
-  if (!isRecord(value) || typeof value.log !== "string" || value.log.length === 0) return null;
-  const updateUrl =
-    typeof value.updateUrl === "string" ? value.updateUrl.slice(0, 1_024) : undefined;
-  return MusicSourceUpdateInfo.make({
-    log: value.log.slice(0, 1_024),
-    ...(updateUrl === undefined ? {} : { updateUrl }),
-  });
-}
-
-function boundedOptionalString(value: unknown, maximum: number): string | null {
-  return typeof value === "string" && value.length <= maximum ? value : null;
-}
-
-function uniqueStrings(value: unknown): Array<string> {
-  return Array.isArray(value)
-    ? [...new Set(value.filter((item): item is string => typeof item === "string"))]
-    : [];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function isMissingFile(cause: unknown): boolean {
-  return cause instanceof Error && "code" in cause && cause.code === "ENOENT";
-}
-
-function messageOf(cause: unknown): string {
-  return cause instanceof Error ? cause.message : "Music source operation failed";
 }

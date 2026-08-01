@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { MusicSearchRequest, MusicSourceResolveRequest } from "$lib/protocol";
+import { MusicSearchRequest } from "$lib/protocol";
 import { MusicClient, MusicClientError, isMusicServerError } from "./music-client";
 
 function requestUrl(input: RequestInfo | URL): string {
@@ -8,92 +8,67 @@ function requestUrl(input: RequestInfo | URL): string {
 }
 
 const status = {
-  active: {
-    metadata: {
-      name: "Fixture",
-      description: "",
-      author: "",
-      homepage: "",
-      version: "1",
-      digest: "a".repeat(64),
-    },
-    sources: [
-      {
-        source: "kw",
-        name: "kw",
-        type: "music",
-        actions: ["musicUrl"],
-        qualitys: ["320k"],
-      },
-    ],
-  },
-  update: null,
+  source: "bilibili",
+  available: true,
+  qualities: ["64k", "132k", "192k"],
 };
 
 describe("music HTTP client", () => {
-  it("validates status and resolve responses", async () => {
+  it("validates status and search responses", async () => {
     const requests: Array<Request> = [];
-    const client = new MusicClient("/status", "/search", "/resolve", async (input, init) => {
+    const client = new MusicClient("/status", "/search", async (input, init) => {
       const request = new Request(new URL(requestUrl(input), "https://snake.example"), init);
       requests.push(request);
       if (request.url.endsWith("/status")) return Response.json(status);
-      if (request.url.endsWith("/search")) {
-        return Response.json({
-          source: "kw",
-          total: 1,
-          tracks: [
-            {
-              id: "kw_song",
-              source: "kw",
-              title: "Song",
-              artist: "Artist",
-              album: "Album",
-              durationSeconds: 180,
-              qualitys: ["320k"],
-              musicInfo: { id: "kw_song", source: "kw" },
-            },
-          ],
-        });
-      }
       return Response.json({
-        source: "kw",
-        action: "musicUrl",
-        data: { type: "320k", url: "https://audio.example/song.mp3" },
+        total: 1,
+        tracks: [
+          {
+            bvid: "BV1xx411c7mD",
+            title: "Song",
+            artist: "UP 主",
+            durationSeconds: 180,
+            pictureUrl: null,
+            qualities: ["64k", "132k", "192k"],
+            reference: "signed-reference-token-0123456789abcdef",
+          },
+        ],
       });
     });
 
     await expect(client.readStatus()).resolves.toEqual(status);
     await expect(
-      client.search(MusicSearchRequest.make({ source: "kw", query: "Song" })),
-    ).resolves.toMatchObject({ source: "kw", total: 1 });
-    await expect(
-      client.resolve(
-        MusicSourceResolveRequest.make({
-          source: "kw",
-          action: "musicUrl",
-          info: { type: "320k", musicInfo: { hash: "song" } },
-        }),
-      ),
-    ).resolves.toMatchObject({ action: "musicUrl" });
+      client.search(MusicSearchRequest.make({ query: "Song" })),
+    ).resolves.toMatchObject({ total: 1 });
+    expect(requests[0]?.credentials).toBe("same-origin");
     expect(requests[1]?.method).toBe("POST");
     expect(requests[1]?.credentials).toBe("same-origin");
-    expect(requests[2]?.method).toBe("POST");
-    expect(requests[2]?.credentials).toBe("same-origin");
   });
 
-  it("surfaces stable server error codes", async () => {
-    const client = new MusicClient("/status", "/search", "/resolve", async () =>
-      Response.json({ error: "SOURCE_UNAVAILABLE" }, { status: 503 }),
+  it("rejects removed premium quality values", async () => {
+    const client = new MusicClient("/status", "/search", async () =>
+      Response.json({ ...status, qualities: [...status.qualities, "hires"] }),
     );
 
     const error = await client.readStatus().catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(MusicClientError);
     if (!(error instanceof MusicClientError)) throw new Error("Expected MusicClientError");
-    expect(isMusicServerError(error, "SOURCE_UNAVAILABLE")).toBe(true);
+    expect(error.stage).toBe("protocol");
+  });
+
+  it("surfaces stable server error codes", async () => {
+    const client = new MusicClient("/status", "/search", async () =>
+      Response.json({ error: "BACKEND_UNAVAILABLE" }, { status: 503 }),
+    );
+
+    const error = await client.readStatus().catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(MusicClientError);
+    if (!(error instanceof MusicClientError)) throw new Error("Expected MusicClientError");
+    expect(isMusicServerError(error, "BACKEND_UNAVAILABLE")).toBe(true);
   });
 
   it("rejects malformed successful responses as protocol errors", async () => {
-    const client = new MusicClient("/status", "/search", "/resolve", async () => Response.json({ active: 1 }));
+    const client = new MusicClient("/status", "/search", async () => Response.json({ available: 1 }));
 
     const error = await client.readStatus().catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(MusicClientError);

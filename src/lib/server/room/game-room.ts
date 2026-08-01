@@ -16,7 +16,7 @@ import {
 } from "../../protocol";
 import { defaultGameConfig } from "../game/config";
 import { MusicCoordinator, type MusicResolver } from "../music/coordinator";
-import { MusicSourceService } from "../music/service";
+import { MusicBackendService } from "../music/service";
 import { GameEngine } from "../game/engine";
 import { VoiceRoster } from "../voice/voice-roster";
 import type { ConnectionIdentity } from "./connection-identity";
@@ -57,17 +57,19 @@ export class GameRoom {
 
   constructor(
     private readonly metadata: RoomMetadata = ROOM_METADATA,
-    musicResolver: MusicResolver = MusicSourceService.disabled(),
+    musicResolver: MusicResolver = MusicBackendService.disabled(),
   ) {
     this.musicCoordinator = new MusicCoordinator(musicResolver, {
       stateChanged: (music) => {
         this.broadcast({ v: GAME_PROTOCOL_VERSION, _tag: "music-state", music });
       },
-      commandFailed: (playerId) => {
+      commandFailed: (playerId, code) => {
         const connectionId = this.controller.connectionIdForPlayer(playerId);
         const connection =
           connectionId === undefined ? undefined : this.connections.get(connectionId);
-        if (connection !== undefined) this.sendError(connection, "MUSIC_CONTROL_FAILED", true);
+        if (connection !== undefined) {
+          this.send(connection, { v: GAME_PROTOCOL_VERSION, _tag: "music-error", code });
+        }
       },
     });
   }
@@ -281,7 +283,7 @@ export class GameRoom {
   ): void {
     const identity = connection.identity;
     if (!this.controller.isCurrentConnection(connection.id, identity.playerId)) {
-      this.sendError(connection, "MUSIC_CONTROL_FAILED", false);
+      this.sendError(connection, "SESSION_EXPIRED", false);
       return;
     }
     this.musicCoordinator.control(

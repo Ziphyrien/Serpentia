@@ -5,7 +5,7 @@ import {
   type SnapshotStreamDecoder,
 } from "./snapshot-codec";
 import { GameSnapshot, PlayerId, TickEventBatch, VoiceParticipant } from "./state";
-import { MusicControl, MusicPlaybackState } from "./music";
+import { MusicBackendErrorCode, MusicControl, MusicPlaybackState } from "./music";
 import { GAME_PROTOCOL_VERSION } from "./version";
 
 export { SnapshotStreamDecoder, SnapshotStreamEncoder } from "./snapshot-codec";
@@ -175,7 +175,6 @@ export const BackendDescriptor = Schema.Struct({
   turnCredentialsPath: Schema.Literal("/api/turn-credentials"),
   musicPath: Schema.Literal("/api/music"),
   musicSearchPath: Schema.Literal("/api/music/search"),
-  musicResolvePath: Schema.Literal("/api/music/resolve"),
   websocketPath: Schema.Literal("/api/parties/game-room/friends"),
 });
 export type BackendDescriptor = typeof BackendDescriptor.Type;
@@ -190,7 +189,6 @@ export const ServerErrorCode = Schema.Union([
   Schema.Literal("VOICE_NOT_AUTHORIZED"),
   Schema.Literal("VOICE_SELF_TARGET"),
   Schema.Literal("VOICE_TARGET_UNAVAILABLE"),
-  Schema.Literal("MUSIC_CONTROL_FAILED"),
 ]);
 export type ServerErrorCode = typeof ServerErrorCode.Type;
 
@@ -241,6 +239,13 @@ export const MusicStateMessage = Schema.Struct({
 });
 export type MusicStateMessage = typeof MusicStateMessage.Type;
 
+export const MusicErrorMessage = Schema.Struct({
+  v: ProtocolVersion,
+  _tag: Schema.Literal("music-error"),
+  code: MusicBackendErrorCode,
+});
+export type MusicErrorMessage = typeof MusicErrorMessage.Type;
+
 export const PongMessage = Schema.Struct({
   v: ProtocolVersion,
   _tag: Schema.Literal("pong"),
@@ -264,6 +269,7 @@ export const ServerMessage = Schema.Union([
   VoiceRosterMessage,
   VoiceSignalForwardMessage,
   MusicStateMessage,
+  MusicErrorMessage,
   PongMessage,
   ServerErrorMessage,
 ]);

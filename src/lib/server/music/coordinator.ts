@@ -3,27 +3,26 @@ import {
   MusicLoadingState,
   MusicPausedState,
   MusicPlayingState,
-  MusicResolvedTrack,
-  MusicSourceResolveRequest,
   MusicStoppedState,
-  MusicTrackSummary,
+  type BilibiliAudioQuality,
+  type MusicBackendErrorCode,
   type MusicControl,
   type MusicPlaybackState,
-  type MusicSourceErrorCode,
-  type MusicSourceResolveResponse,
+  type MusicResolvedTrack,
 } from "../../protocol";
-import { isMusicSourceError } from "./errors";
+import { isMusicBackendError } from "./errors";
 
 export interface MusicResolver {
   resolve(
-    request: MusicSourceResolveRequest,
+    reference: string,
+    quality: BilibiliAudioQuality,
     signal?: AbortSignal,
-  ): Promise<MusicSourceResolveResponse>;
+  ): Promise<MusicResolvedTrack>;
 }
 
 export interface MusicCoordinatorEvents {
   stateChanged(state: MusicPlaybackState): void;
-  commandFailed(playerId: string, code: MusicSourceErrorCode): void;
+  commandFailed(playerId: string, code: MusicBackendErrorCode): void;
 }
 
 export interface MusicCommandActor {
@@ -90,62 +89,26 @@ export class MusicCoordinator {
     actor: MusicControllerInfo,
     command: Extract<MusicControl, { _tag: "play" }>,
   ): void {
-    const changedAt = this.now();
     this.publish(
       MusicLoadingState.make({
         revision,
-        changedAt,
+        changedAt: this.now(),
         changedBy: actor,
-        track: MusicTrackSummary.make({
-          source: command.source,
-          title: command.title,
-          artist: command.artist,
-          pictureUrl: command.pictureUrl,
-        }),
       }),
     );
     const controller = new AbortController();
     this.pending = controller;
-    let pictureUrl = command.pictureUrl;
-    if (pictureUrl === null) {
-      const pictureRequest = MusicSourceResolveRequest.make({
-        source: command.source,
-        action: "pic",
-        info: command.info,
-      });
-      void this.resolver.resolve(pictureRequest, controller.signal).then(
-        (result) => {
-          if (result.action !== "pic" || !this.isRevisionCurrent(revision)) return;
-          pictureUrl = result.data;
-          this.publishPicture(revision, pictureUrl);
-        },
-        () => undefined,
-      );
-    }
-    const request = MusicSourceResolveRequest.make({
-      source: command.source,
-      action: "musicUrl",
-      info: command.info,
-    });
-    void this.resolver.resolve(request, controller.signal).then(
-      (result) => {
-        if (!this.isCurrent(revision, controller) || result.action !== "musicUrl") return;
+    void this.resolver.resolve(command.reference, command.quality, controller.signal).then(
+      (track) => {
+        if (!this.isCurrent(revision, controller)) return;
         this.pending = undefined;
         const anchorServerTime = this.now();
-        const type = result.data.type;
         this.publish(
           MusicPlayingState.make({
             revision,
             changedAt: anchorServerTime,
             changedBy: actor,
-            track: MusicResolvedTrack.make({
-              source: command.source,
-              title: command.title,
-              artist: command.artist,
-              pictureUrl,
-              ...(type === undefined ? {} : { type }),
-              url: result.data.url,
-            }),
+            track,
             positionSeconds: 0,
             anchorServerTime,
           }),
@@ -157,7 +120,7 @@ export class MusicCoordinator {
         this.publish(MusicStoppedState.make({ revision, changedAt: this.now(), changedBy: actor }));
         this.events.commandFailed(
           actor.playerId,
-          isMusicSourceError(cause) ? cause.code : "RUNTIME_UNAVAILABLE",
+          isMusicBackendError(cause) ? cause.code : "BACKEND_UNAVAILABLE",
         );
       },
     );
@@ -271,34 +234,6 @@ export class MusicCoordinator {
 
   private isRevisionCurrent(revision: number): boolean {
     return !this.disposed && this.revision === revision;
-  }
-
-  private publishPicture(revision: number, pictureUrl: string): void {
-    const state = this.stateValue;
-    if (state.revision !== revision) return;
-    if (state._tag === "loading") {
-      this.publish(
-        MusicLoadingState.make({
-          revision: state.revision,
-          changedAt: state.changedAt,
-          changedBy: state.changedBy,
-          track: MusicTrackSummary.make({ ...state.track, pictureUrl }),
-        }),
-      );
-      return;
-    }
-    if (state._tag === "playing") {
-      this.publish(
-        MusicPlayingState.make({
-          revision: state.revision,
-          changedAt: state.changedAt,
-          changedBy: state.changedBy,
-          track: MusicResolvedTrack.make({ ...state.track, pictureUrl }),
-          positionSeconds: state.positionSeconds,
-          anchorServerTime: state.anchorServerTime,
-        }),
-      );
-    }
   }
 
   private publish(state: MusicPlaybackState): void {

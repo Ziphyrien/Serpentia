@@ -1,17 +1,14 @@
 import { Schema } from "effect";
 import {
+  MusicBackendErrorCode,
+  MusicBackendErrorResponse,
+  MusicBackendStatusResponse,
   MusicSearchResponse,
-  MusicSourceErrorCode,
-  MusicSourceErrorResponse,
-  MusicSourceResolveResponse,
-  MusicSourceStatusResponse,
   type BackendDescriptor,
+  type MusicBackendErrorCode as MusicBackendErrorCodeType,
+  type MusicBackendStatusResponse as MusicBackendStatusResponseType,
   type MusicSearchRequest,
   type MusicSearchResponse as MusicSearchResponseType,
-  type MusicSourceErrorCode as MusicSourceErrorCodeType,
-  type MusicSourceResolveRequest,
-  type MusicSourceResolveResponse as MusicSourceResolveResponseType,
-  type MusicSourceStatusResponse as MusicSourceStatusResponseType,
 } from "$lib/protocol";
 
 type MusicFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -20,7 +17,7 @@ export class MusicClientError extends Schema.TaggedErrorClass<MusicClientError>(
   "MusicClientError",
   {
     stage: Schema.Literals(["aborted", "transport", "protocol", "server"]),
-    code: Schema.optionalKey(MusicSourceErrorCode),
+    code: Schema.optionalKey(MusicBackendErrorCode),
     cause: Schema.Defect(),
   },
 ) {}
@@ -29,7 +26,6 @@ export class MusicClient {
   constructor(
     private readonly statusPath = "/api/music",
     private readonly searchPath = "/api/music/search",
-    private readonly resolvePath = "/api/music/resolve",
     private readonly fetcher: MusicFetch = globalThis.fetch,
   ) {}
 
@@ -37,21 +33,21 @@ export class MusicClient {
     descriptor: BackendDescriptor,
     fetcher: MusicFetch = globalThis.fetch,
   ): MusicClient {
-    return new MusicClient(
-      descriptor.musicPath,
-      descriptor.musicSearchPath,
-      descriptor.musicResolvePath,
-      fetcher,
-    );
+    return new MusicClient(descriptor.musicPath, descriptor.musicSearchPath, fetcher);
   }
 
-  async readStatus(signal?: AbortSignal): Promise<MusicSourceStatusResponseType> {
+  async readStatus(signal?: AbortSignal): Promise<MusicBackendStatusResponseType> {
     const response = await this.request(this.statusPath, {
       headers: { accept: "application/json" },
+      credentials: "same-origin",
       signal,
     });
     if (!response.ok) throw await this.serverError(response);
-    return this.decode(Schema.decodeUnknownPromise(MusicSourceStatusResponse), response, "status");
+    return this.decode(
+      Schema.decodeUnknownPromise(MusicBackendStatusResponse),
+      response,
+      "status",
+    );
   }
 
   async search(
@@ -69,25 +65,6 @@ export class MusicClient {
     return this.decode(Schema.decodeUnknownPromise(MusicSearchResponse), response, "search");
   }
 
-  async resolve(
-    request: MusicSourceResolveRequest,
-    signal?: AbortSignal,
-  ): Promise<MusicSourceResolveResponseType> {
-    const response = await this.request(this.resolvePath, {
-      method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify(request),
-      signal,
-    });
-    if (!response.ok) throw await this.serverError(response);
-    return this.decode(
-      Schema.decodeUnknownPromise(MusicSourceResolveResponse),
-      response,
-      "resolve",
-    );
-  }
-
   private async request(input: RequestInfo | URL, init: RequestInit): Promise<Response> {
     try {
       return await this.fetcher(input, init);
@@ -101,7 +78,7 @@ export class MusicClient {
 
   private async serverError(response: Response): Promise<MusicClientError> {
     try {
-      const body = await Schema.decodeUnknownPromise(MusicSourceErrorResponse)(
+      const body = await Schema.decodeUnknownPromise(MusicBackendErrorResponse)(
         await response.json(),
       );
       return MusicClientError.make({ stage: "server", code: body.error, cause: body.error });
@@ -129,7 +106,7 @@ export class MusicClient {
 
 export function isMusicServerError(
   error: MusicClientError,
-  code: MusicSourceErrorCodeType,
+  code: MusicBackendErrorCodeType,
 ): boolean {
   return error.stage === "server" && error.code === code;
 }

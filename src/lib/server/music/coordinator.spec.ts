@@ -2,20 +2,20 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   MusicPauseControl,
   MusicPlayControl,
+  MusicResolvedTrack,
   MusicResumeControl,
   MusicSeekControl,
   MusicStopControl,
-  MusicUrlResolveResult,
+  type BilibiliAudioQuality,
   type MusicPlaybackState,
-  type MusicSourceResolveRequest,
-  type MusicSourceResolveResponse,
 } from "../../protocol";
 import { MusicCoordinator, type MusicResolver } from "./coordinator";
 
 interface PendingResolution {
-  readonly request: MusicSourceResolveRequest;
+  readonly reference: string;
+  readonly quality: BilibiliAudioQuality;
   readonly signal: AbortSignal | undefined;
-  readonly resolve: (result: MusicSourceResolveResponse) => void;
+  readonly resolve: (result: MusicResolvedTrack) => void;
 }
 
 function harness() {
@@ -24,8 +24,8 @@ function harness() {
   const failures: Array<string> = [];
   let now = 1_000;
   const resolver: MusicResolver = {
-    resolve(request, signal) {
-      return new Promise((resolve) => pending.push({ request, signal, resolve }));
+    resolve(reference, quality, signal) {
+      return new Promise((resolve) => pending.push({ reference, quality, signal, resolve }));
     },
   };
   const coordinator = new MusicCoordinator(
@@ -50,37 +50,31 @@ function harness() {
 const alpha = { playerId: "alpha", nickname: "Alpha" };
 const beta = { playerId: "beta", nickname: "Beta" };
 
-function play(title: string): MusicPlayControl {
-  return MusicPlayControl.make({
-    source: "kw",
-    info: { type: "320k", musicInfo: { hash: title } },
+function play(reference: string): MusicPlayControl {
+  return MusicPlayControl.make({ reference, quality: "192k" });
+}
+
+function track(title: string): MusicResolvedTrack {
+  return MusicResolvedTrack.make({
+    bvid: "BV1xx411c7mD",
     title,
     artist: "Artist",
-    pictureUrl: "https://img.example.test/" + title + ".jpg",
+    pictureUrl: `https://img.example.test/${title}.jpg`,
+    durationSeconds: 180,
+    quality: "192k",
+    url: `https://example.test/${title}.mp3`,
   });
 }
 
 describe("competitive music coordinator", () => {
-  it("lets the last play command win even when an older resolution finishes later", async () => {
+  it("lets the last signed reference win even when an older resolution finishes later", async () => {
     const test = harness();
-    test.coordinator.control(alpha, play("First"));
-    test.coordinator.control(beta, play("Second"));
+    test.coordinator.control(alpha, play("first-reference".repeat(3)));
+    test.coordinator.control(beta, play("second-reference".repeat(3)));
 
     expect(test.pending[0]?.signal?.aborted).toBe(true);
-    test.pending[0]?.resolve(
-      MusicUrlResolveResult.make({
-        source: "kw",
-        action: "musicUrl",
-        data: { type: "320k", url: "https://example.test/first.mp3" },
-      }),
-    );
-    test.pending[1]?.resolve(
-      MusicUrlResolveResult.make({
-        source: "kw",
-        action: "musicUrl",
-        data: { type: "320k", url: "https://example.test/second.mp3" },
-      }),
-    );
+    test.pending[0]?.resolve(track("First"));
+    test.pending[1]?.resolve(track("Second"));
     await Promise.resolve();
 
     expect(test.coordinator.state._tag).toBe("playing");
@@ -92,14 +86,8 @@ describe("competitive music coordinator", () => {
 
   it("anchors pause, seek, and resume to server time", async () => {
     const test = harness();
-    test.coordinator.control(alpha, play("Track"));
-    test.pending[0]?.resolve(
-      MusicUrlResolveResult.make({
-        source: "kw",
-        action: "musicUrl",
-        data: { type: "320k", url: "https://example.test/track.mp3" },
-      }),
-    );
+    test.coordinator.control(alpha, play("track-reference".repeat(3)));
+    test.pending[0]?.resolve(track("Track"));
     await Promise.resolve();
 
     test.setNow(3_500);

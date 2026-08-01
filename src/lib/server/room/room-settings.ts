@@ -58,7 +58,6 @@ export function createBackendDescriptor(room: RoomMetadata): BackendDescriptor {
     turnCredentialsPath: "/api/turn-credentials",
     musicPath: "/api/music",
     musicSearchPath: "/api/music/search",
-    musicResolvePath: "/api/music/resolve",
     websocketPath: "/api/parties/game-room/friends",
   };
 }

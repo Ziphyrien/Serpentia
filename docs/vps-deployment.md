@@ -30,7 +30,13 @@ sudo -u serpentia cp .env.example .env
 sudo -u serpentia chmod 600 .env
 ```
 
-把命令输出的 `SESSION_SIGNING_SECRET` 写入 `.env`。将 LX 格式音源原样保存为 `/opt/serpentia/music-source.js`（明文、压缩或控制流混淆均可），并执行 `sudo -u serpentia chmod 600 /opt/serpentia/music-source.js`。
+把命令输出的 `SESSION_SIGNING_SECRET` 写入 `.env`，然后在交互式终端执行网页扫码登录：
+
+```bash
+sudo -u serpentia -H bash -lc 'cd /opt/serpentia && bun run bilibili:login -- --env .env'
+```
+
+扫码确认后，脚本会原子写入匹配的 `BILIBILI_COOKIE` 与 `BILIBILI_REFRESH_TOKEN`，并保持 `.env` 权限为 `0600`。不要把二维码登录结果、Cookie 或 refresh token 提交到 Git、放进命令参数或粘贴到日志。服务启动后会非阻塞检查一次，此后每 24 小时检查；临时失败每小时重试，并把轮换后的两项凭据原子写回同一文件。
 
 ## 3. HTTPS 证书
 
@@ -52,7 +58,9 @@ TRUST_PROXY=false
 COOKIE_SECURE=true
 TLS_CERT_FILE=/etc/letsencrypt/live/snake.example.com/fullchain.pem
 TLS_KEY_FILE=/etc/letsencrypt/live/snake.example.com/privkey.pem
-MUSIC_SOURCE_FILE=/opt/serpentia/music-source.js
+BILIBILI_COOKIE='由 bilibili:login 写入，至少包含 SESSDATA 与 bili_jct'
+BILIBILI_REFRESH_TOKEN='由 bilibili:login 写入'
+BILIBILI_ENV_FILE=.env
 ```
 
 证书续期后重启 Bun 以重新加载证书：

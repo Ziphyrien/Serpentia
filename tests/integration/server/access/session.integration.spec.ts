@@ -45,6 +45,9 @@ describe("sessions", () => {
       const config = loadRuntimeConfig({
         NODE_ENV: "development",
         SESSION_SIGNING_SECRET: "test-session-signing-secret-at-least-32-characters",
+        BILIBILI_COOKIE:
+          "SESSDATA=fake-session; bili_jct=0123456789abcdef0123456789abcdef",
+        BILIBILI_REFRESH_TOKEN: "0123456789abcdef0123456789abcdef",
       });
       const router = new ApiRouter(config, services, createBackendDescriptor(room));
       const response = await router.handle(
@@ -74,6 +77,9 @@ describe("sessions", () => {
       const config = loadRuntimeConfig({
         NODE_ENV: "development",
         SESSION_SIGNING_SECRET: "test-session-signing-secret-at-least-32-characters",
+        BILIBILI_COOKIE:
+          "SESSDATA=fake-session; bili_jct=0123456789abcdef0123456789abcdef",
+        BILIBILI_REFRESH_TOKEN: "0123456789abcdef0123456789abcdef",
       });
       const router = new ApiRouter(config, services, createBackendDescriptor(room));
       let response: Response | undefined;

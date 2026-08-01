@@ -1,58 +1,16 @@
 import { Schema } from "effect";
 import { PlayerId } from "./state";
 
-export const MusicSourcePlatform = Schema.Literals(["kw", "kg", "tx", "wy", "mg", "local"]);
-export type MusicSourcePlatform = typeof MusicSourcePlatform.Type;
+export const BilibiliAudioQuality = Schema.Literals(["64k", "132k", "192k"]);
+export type BilibiliAudioQuality = typeof BilibiliAudioQuality.Type;
 
-export const MusicSourceAction = Schema.Literals(["musicUrl", "lyric", "pic"]);
-export type MusicSourceAction = typeof MusicSourceAction.Type;
-
-export const MusicSourceQuality = Schema.Literals(["128k", "320k", "flac", "flac24bit"]);
-export type MusicSourceQuality = typeof MusicSourceQuality.Type;
-
-export class MusicSourceCapability extends Schema.Class<MusicSourceCapability>(
-  "MusicSourceCapability",
-)({
-  source: MusicSourcePlatform,
-  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
-  type: Schema.Literal("music"),
-  actions: Schema.Array(MusicSourceAction),
-  qualitys: Schema.Array(MusicSourceQuality),
-}) {}
-
-export class MusicSourceMetadata extends Schema.Class<MusicSourceMetadata>("MusicSourceMetadata")({
-  name: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),
-  description: Schema.String.check(Schema.isMaxLength(64)),
-  author: Schema.String.check(Schema.isMaxLength(80)),
-  homepage: Schema.String.check(Schema.isMaxLength(1_100)),
-  version: Schema.String.check(Schema.isMaxLength(64)),
-  digest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/u)),
-}) {}
-
-export class MusicSourceEntry extends Schema.Class<MusicSourceEntry>("MusicSourceEntry")({
-  metadata: MusicSourceMetadata,
-  sources: Schema.Array(MusicSourceCapability),
-}) {}
-
-export class MusicSourceUpdateInfo extends Schema.Class<MusicSourceUpdateInfo>(
-  "MusicSourceUpdateInfo",
-)({
-  log: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_027)),
-  updateUrl: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(1_024))),
-}) {}
-
-export const MusicSourceStatusResponse = Schema.Struct({
-  active: Schema.NullOr(MusicSourceEntry),
-  update: Schema.NullOr(MusicSourceUpdateInfo),
-});
-export type MusicSourceStatusResponse = typeof MusicSourceStatusResponse.Type;
-
-const MusicSearchQuery = Schema.String.check(
-  Schema.isMinLength(1),
-  Schema.isMaxLength(80),
-  Schema.isPattern(/\S/u),
-);
-const MusicSearchTotal = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const Bvid = Schema.String.check(Schema.isPattern(/^BV[0-9A-Za-z]{10}$/u));
+const MusicReference = Schema.String.check(Schema.isMinLength(32), Schema.isMaxLength(2_048));
+const MusicPosition = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 86_400 }));
+const MusicRevision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const MusicServerTime = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const MusicTitle = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
+const MusicArtist = Schema.String.check(Schema.isMaxLength(128));
 const MusicPictureUrl = Schema.NullOr(
   Schema.String.check(
     Schema.isMinLength(1),
@@ -60,92 +18,47 @@ const MusicPictureUrl = Schema.NullOr(
     Schema.isPattern(/^https?:\/\/\S+$/iu),
   ),
 );
-const MusicSearchDuration = Schema.NullOr(
+const MusicDuration = Schema.NullOr(
   Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 86_400 })),
 );
+const MusicSearchPage = Schema.Int.check(Schema.isGreaterThan(0));
+
+export class MusicBackendStatusResponse extends Schema.Class<MusicBackendStatusResponse>(
+  "MusicBackendStatusResponse",
+)({
+  source: Schema.Literal("bilibili"),
+  available: Schema.Boolean,
+  qualities: Schema.Array(BilibiliAudioQuality),
+}) {}
 
 export class MusicSearchRequest extends Schema.Class<MusicSearchRequest>("MusicSearchRequest")({
-  source: MusicSourcePlatform,
-  query: MusicSearchQuery,
+  query: Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(80),
+    Schema.isPattern(/\S/u),
+  ),
+  page: Schema.optionalKey(MusicSearchPage),
 }) {}
 
 export class MusicSearchTrack extends Schema.Class<MusicSearchTrack>("MusicSearchTrack")({
-  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
-  source: MusicSourcePlatform,
-  title: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
-  artist: Schema.String.check(Schema.isMaxLength(128)),
-  album: Schema.String.check(Schema.isMaxLength(128)),
-  durationSeconds: MusicSearchDuration,
+  bvid: Bvid,
+  title: MusicTitle,
+  artist: MusicArtist,
+  durationSeconds: MusicDuration,
   pictureUrl: MusicPictureUrl,
-  qualitys: Schema.Array(MusicSourceQuality).check(Schema.isMaxLength(4)),
-  musicInfo: Schema.Unknown,
+  qualities: Schema.Array(BilibiliAudioQuality).check(Schema.isMinLength(1), Schema.isMaxLength(3)),
+  reference: MusicReference,
 }) {}
 
 export class MusicSearchResponse extends Schema.Class<MusicSearchResponse>("MusicSearchResponse")({
-  source: MusicSourcePlatform,
-  total: MusicSearchTotal,
-  tracks: Schema.Array(MusicSearchTrack).check(Schema.isMaxLength(20)),
+  total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  tracks: Schema.Array(MusicSearchTrack),
+  nextPage: Schema.optionalKey(Schema.NullOr(MusicSearchPage)),
 }) {}
-
-export class MusicSourceResolveRequest extends Schema.Class<MusicSourceResolveRequest>(
-  "MusicSourceResolveRequest",
-)({
-  source: MusicSourcePlatform,
-  action: MusicSourceAction,
-  info: Schema.Unknown,
-}) {}
-
-export class MusicUrlResolveResult extends Schema.Class<MusicUrlResolveResult>(
-  "MusicUrlResolveResult",
-)({
-  source: MusicSourcePlatform,
-  action: Schema.Literal("musicUrl"),
-  data: Schema.Struct({
-    type: Schema.optionalKey(MusicSourceQuality),
-    url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048)),
-  }),
-}) {}
-
-export class MusicPictureResolveResult extends Schema.Class<MusicPictureResolveResult>(
-  "MusicPictureResolveResult",
-)({
-  source: MusicSourcePlatform,
-  action: Schema.Literal("pic"),
-  data: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048)),
-}) {}
-
-export class MusicLyricResolveResult extends Schema.Class<MusicLyricResolveResult>(
-  "MusicLyricResolveResult",
-)({
-  source: MusicSourcePlatform,
-  action: Schema.Literal("lyric"),
-  data: Schema.Struct({
-    lyric: Schema.String.check(Schema.isMaxLength(51_200)),
-    tlyric: Schema.NullOr(Schema.String.check(Schema.isMaxLength(5_120))),
-    rlyric: Schema.NullOr(Schema.String.check(Schema.isMaxLength(5_120))),
-    lxlyric: Schema.NullOr(Schema.String.check(Schema.isMaxLength(8_192))),
-  }),
-}) {}
-
-export const MusicSourceResolveResponse = Schema.Union([
-  MusicUrlResolveResult,
-  MusicPictureResolveResult,
-  MusicLyricResolveResult,
-]);
-export type MusicSourceResolveResponse = typeof MusicSourceResolveResponse.Type;
-
-const MusicPosition = Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 86_400 }));
-const MusicRevision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
-const MusicServerTime = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
-const MusicTitle = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128));
-const MusicArtist = Schema.String.check(Schema.isMaxLength(128));
 
 export class MusicPlayControl extends Schema.TaggedClass<MusicPlayControl>()("play", {
-  source: MusicSourcePlatform,
-  info: Schema.Unknown,
-  title: MusicTitle,
-  artist: MusicArtist,
-  pictureUrl: MusicPictureUrl,
+  reference: MusicReference,
+  quality: BilibiliAudioQuality,
 }) {}
 
 export class MusicPauseControl extends Schema.TaggedClass<MusicPauseControl>()("pause", {}) {}
@@ -171,18 +84,16 @@ export class MusicControllerInfo extends Schema.Class<MusicControllerInfo>("Musi
 }) {}
 
 export class MusicTrackSummary extends Schema.Class<MusicTrackSummary>("MusicTrackSummary")({
-  source: MusicSourcePlatform,
+  bvid: Bvid,
   title: MusicTitle,
   artist: MusicArtist,
   pictureUrl: MusicPictureUrl,
+  durationSeconds: MusicDuration,
 }) {}
 
 export class MusicResolvedTrack extends Schema.Class<MusicResolvedTrack>("MusicResolvedTrack")({
-  source: MusicSourcePlatform,
-  title: MusicTitle,
-  artist: MusicArtist,
-  pictureUrl: MusicPictureUrl,
-  type: Schema.optionalKey(MusicSourceQuality),
+  ...MusicTrackSummary.fields,
+  quality: BilibiliAudioQuality,
   url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048)),
 }) {}
 
@@ -196,7 +107,6 @@ export class MusicLoadingState extends Schema.TaggedClass<MusicLoadingState>()("
   revision: MusicRevision,
   changedAt: MusicServerTime,
   changedBy: MusicControllerInfo,
-  track: MusicTrackSummary,
 }) {}
 
 export class MusicPlayingState extends Schema.TaggedClass<MusicPlayingState>()("playing", {
@@ -224,21 +134,23 @@ export const MusicPlaybackState = Schema.Union([
 ]);
 export type MusicPlaybackState = typeof MusicPlaybackState.Type;
 
-export const MusicSourceErrorCode = Schema.Literals([
+export const MusicBackendErrorCode = Schema.Literals([
   "INVALID_REQUEST",
   "UNAUTHORIZED",
   "RATE_LIMITED",
-  "SOURCE_UNAVAILABLE",
-  "INITIALIZATION_FAILED",
-  "RUNTIME_UNAVAILABLE",
+  "AUTH_REQUIRED",
+  "RISK_CONTROLLED",
+  "VIDEO_UNAVAILABLE",
+  "AUDIO_UNAVAILABLE",
   "UPSTREAM_FAILED",
   "TIMEOUT",
+  "BACKEND_UNAVAILABLE",
   "POLICY_DENIED",
 ]);
-export type MusicSourceErrorCode = typeof MusicSourceErrorCode.Type;
+export type MusicBackendErrorCode = typeof MusicBackendErrorCode.Type;
 
-export const MusicSourceErrorResponse = Schema.Struct({
-  error: MusicSourceErrorCode,
+export const MusicBackendErrorResponse = Schema.Struct({
+  error: MusicBackendErrorCode,
   message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(256))),
 });
-export type MusicSourceErrorResponse = typeof MusicSourceErrorResponse.Type;
+export type MusicBackendErrorResponse = typeof MusicBackendErrorResponse.Type;

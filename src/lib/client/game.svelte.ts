@@ -21,6 +21,7 @@ import { JoystickInput } from "./input/joystick-input";
 import { GamepadInput } from "./input/gamepad-input";
 import { nextNetworkInput, type NetworkInputCommand } from "./input/network-input";
 import { MusicPlayback } from "./audio/music";
+import { musicBackendErrorNotice } from "./music-errors";
 import { Sfx } from "./audio/sfx";
 import type { GameConnectionStatus } from "./game-readiness";
 import { terminalGameCloseNotice } from "./game-close-notice";
@@ -34,7 +35,7 @@ import {
 import { VoiceManager, type VoicePeerView } from "./voice/voice-manager";
 import type { SettingsStore } from "./stores/settings.svelte";
 
-/** 打开共享音乐管理弹窗的窗口事件：设置弹窗经控制器广播，音乐弹窗监听。 */
+/** 打开共享音乐管理界面的窗口事件，供设置入口与后续界面实现解耦。 */
 export const OPEN_MUSIC_MANAGER_EVENT = "serpentia:open-music-manager";
 
 export type GameMenuId = "settings" | "voice" | "music";
@@ -149,7 +150,15 @@ export class GameController {
     private readonly settings: SettingsStore,
     private readonly onSessionExpired: () => void,
   ) {
-    this.music = new MusicPlayback(() => this.clock.serverNow() ?? Date.now());
+    this.music = new MusicPlayback(
+      () => this.clock.serverNow() ?? Date.now(),
+      (failure) =>
+        this.showMusicError(
+          failure === "load"
+            ? "音乐加载失败，请更换歌曲或音质后重试"
+            : "浏览器暂未允许播放，请点击页面后重试",
+        ),
+    );
     this.predictor = new SelfPredictor(descriptor.rules, descriptor.tickRate);
     this.pointer = new PointerInput(this.input);
     this.joystick = new JoystickInput(this.input);
@@ -315,6 +324,9 @@ export class GameController {
         break;
       case "music-state":
         this.acceptMusicState(message.music);
+        break;
+      case "music-error":
+        this.showMusicError(musicBackendErrorNotice(message.code));
         break;
       case "error":
         this.handleServerError(message.code, message.retryable);
@@ -520,17 +532,17 @@ export class GameController {
       this.onSessionExpired();
       return;
     }
-    if (code === "MUSIC_CONTROL_FAILED") {
-      this.musicError = "当前音源无法解析这首歌，请更换歌曲或来源";
-      if (this.musicErrorTimer) clearTimeout(this.musicErrorTimer);
-      this.musicErrorTimer = setTimeout(() => this.clearMusicError(), 5_000);
-      return;
-    }
     if (code === "NICKNAME_IN_USE") this.notice = "昵称已被占用，请更换昵称";
     else if (code === "RATE_LIMITED") this.notice = "操作太频繁，已被限流";
     else if (code === "STALE_INPUT") {
       this.forceInputResend();
     } else if (!retryable) this.notice = `服务器错误：${code}`;
+  }
+
+  private showMusicError(message: string): void {
+    this.musicError = message;
+    if (this.musicErrorTimer) clearTimeout(this.musicErrorTimer);
+    this.musicErrorTimer = setTimeout(() => this.clearMusicError(), 5_000);
   }
 
   private clearMusicError(): void {

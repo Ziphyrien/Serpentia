@@ -47,6 +47,7 @@ interface ObstacleSegment {
   readonly start: Point;
   readonly end: Point;
   readonly collisionDistance: number;
+  readonly velocity?: Point;
 }
 
 interface TrajectoryEvaluation {
@@ -220,7 +221,7 @@ function evaluateTrajectory(
     // The safety buffer is much larger than one frame of travel, so checking every other frame
     // preserves collision coverage while keeping the 10 Hz planner inexpensive.
     if (frame % 2 === 0) {
-      const obstacleClearance = minimumObstacleClearance({ x, y }, obstacles);
+      const obstacleClearance = minimumObstacleClearance({ x, y }, obstacles, frame + 1);
       minimumObstacle = Math.min(minimumObstacle, obstacleClearance);
       if (obstacleClearance <= 0) break;
     }
@@ -300,11 +301,15 @@ function obstacleSegments(
     const otherHead = snake.body[0];
     if (otherHead !== undefined) {
       const speed = FRAME_DISTANCE * (snake.boosting ? 2 : 1);
-      const predictedHead = {
-        x: otherHead.x + Math.cos(snake.angle) * speed * PREDICTION_FRAMES,
-        y: otherHead.y + Math.sin(snake.angle) * speed * PREDICTION_FRAMES,
-      };
-      segments.push({ start: otherHead, end: predictedHead, collisionDistance });
+      segments.push({
+        start: otherHead,
+        end: otherHead,
+        collisionDistance,
+        velocity: {
+          x: Math.cos(snake.angle) * speed,
+          y: Math.sin(snake.angle) * speed,
+        },
+      });
     }
   }
   return segments;
@@ -313,11 +318,19 @@ function obstacleSegments(
 function minimumObstacleClearance(
   point: Point,
   obstacles: ReadonlyArray<ObstacleSegment>,
+  elapsedFrames: number,
 ): number {
   let clearance = MAX_CLEARANCE;
   for (const obstacle of obstacles) {
+    const relativePoint =
+      obstacle.velocity === undefined
+        ? point
+        : {
+            x: point.x - obstacle.velocity.x * elapsedFrames,
+            y: point.y - obstacle.velocity.y * elapsedFrames,
+          };
     const segmentDistance = Math.sqrt(
-      pointToSegmentDistanceSquared(point, obstacle.start, obstacle.end),
+      pointToSegmentDistanceSquared(relativePoint, obstacle.start, obstacle.end),
     );
     clearance = Math.min(clearance, segmentDistance - obstacle.collisionDistance);
   }
