@@ -72,6 +72,7 @@
           sfx={controller.sfx}
           music={controller.music}
           onManageMusic={() => controller.requestMusicManager()}
+          onMenuOpenChange={(open) => controller.setMenuOpen("settings", open)}
           {onReturnHome}
         />
         <MusicDialog {controller} />

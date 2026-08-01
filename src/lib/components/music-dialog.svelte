@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { Dialog } from "bits-ui";
   import FastForward from "lucide-svelte/icons/fast-forward";
   import ListMusic from "lucide-svelte/icons/list-music";
@@ -87,6 +87,14 @@
 
   /** 播放位置由服务端锚点推算，弹窗打开期间每 500ms 同步一次。 */
   let position = $state(0);
+
+  $effect(() => {
+    const active = open;
+    untrack(() => controller.setMenuOpen("music", active));
+    return () => {
+      if (active) untrack(() => controller.setMenuOpen("music", false));
+    };
+  });
 
   onMount(() => {
     const handleOpen = (): void => {

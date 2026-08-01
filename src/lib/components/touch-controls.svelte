@@ -12,9 +12,9 @@
   // 长度不够时加速无效：按钮变暗提示，按下也不显示生效样式
   const canBoost = $derived(controller.self.length > controller.descriptor.rules.minimumLength);
   const buttonClass = $derived.by(() => {
-    if (!boosting) return "border-white/70 bg-map-grid/90 text-map-ink";
-    if (!canBoost) return "scale-95 border-white/50 bg-map-grid/70 text-map-ink/50";
-    return "scale-95 border-amber-200 bg-amber-400 text-night-950";
+    if (!boosting) return "bg-map-grid/90 text-map-ink";
+    if (!canBoost) return "scale-95 bg-map-grid/70 text-map-ink/50";
+    return "scale-95 bg-amber-400 text-night-950";
   });
 
   onMount(() => {
@@ -39,7 +39,7 @@
 ></div>
 
 <button
-  class="touch-boost absolute right-6 bottom-10 z-10 flex touch-none items-center justify-center rounded-full border-4 font-black transition select-none {buttonClass} {canBoost
+  class="touch-boost absolute right-6 bottom-10 z-10 flex touch-none items-center justify-center rounded-full font-black transition select-none {buttonClass} {canBoost
     ? ''
     : 'opacity-50'}"
   style="text-shadow: none;"

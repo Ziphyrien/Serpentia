@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Dialog, mergeProps } from "bits-ui";
   import Settings from "lucide-svelte/icons/settings";
   import House from "lucide-svelte/icons/house";
@@ -17,12 +18,14 @@
     sfx,
     music,
     onManageMusic,
+    onMenuOpenChange,
     onReturnHome,
   }: {
     settings: SettingsStore;
     sfx: Sfx;
     music: MusicPlayback;
     onManageMusic: () => void;
+    onMenuOpenChange: (open: boolean) => void;
     onReturnHome: () => void;
   } = $props();
 
@@ -30,6 +33,13 @@
 
   $effect(() => sfx.setVolume(settings.sfxVolume));
   $effect(() => music.setVolume(settings.musicVolume));
+  $effect(() => {
+    const active = open;
+    untrack(() => onMenuOpenChange(active));
+    return () => {
+      if (active) untrack(() => onMenuOpenChange(false));
+    };
+  });
 </script>
 
 <Dialog.Root bind:open>

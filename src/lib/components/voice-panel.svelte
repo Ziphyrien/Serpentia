@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { Dialog, mergeProps } from "bits-ui";
   import Headphones from "lucide-svelte/icons/headphones";
   import Mic from "lucide-svelte/icons/mic";
@@ -13,6 +14,14 @@
   let { controller }: { controller: GameController } = $props();
 
   let open = $state(false);
+
+  $effect(() => {
+    const active = open;
+    untrack(() => controller.setMenuOpen("voice", active));
+    return () => {
+      if (active) untrack(() => controller.setMenuOpen("voice", false));
+    };
+  });
 
   const talkingCount = $derived(controller.voicePeers.filter((peer) => peer.microphoneEnabled).length);
   const micLive = $derived(controller.voiceJoined);

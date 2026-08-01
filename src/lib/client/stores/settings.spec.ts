@@ -60,8 +60,8 @@ describe("settings store", () => {
     );
 
     const settings = new SettingsStore();
-    expect(settings.sfxVolume).toBe(0.7);
-    expect(settings.musicVolume).toBe(0.4);
+    expect(settings.sfxVolume).toBe(0.3);
+    expect(settings.musicVolume).toBe(0.55);
     expect(settings.showNicknames).toBe(true);
   });
 });

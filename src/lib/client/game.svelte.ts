@@ -15,6 +15,7 @@ import { PredictionLeadEstimator } from "./net/prediction-lead";
 import { SnapshotBuffer } from "./sim/snapshot-buffer";
 import { SelfPredictor } from "./sim/self-predictor";
 import { InputState } from "./input/input-state";
+import { MenuAutopilot } from "./input/menu-autopilot";
 import { PointerInput } from "./input/pointer-input";
 import { JoystickInput } from "./input/joystick-input";
 import { GamepadInput } from "./input/gamepad-input";
@@ -35,6 +36,8 @@ import type { SettingsStore } from "./stores/settings.svelte";
 
 /** 打开共享音乐管理弹窗的窗口事件：设置弹窗经控制器广播，音乐弹窗监听。 */
 export const OPEN_MUSIC_MANAGER_EVENT = "serpentia:open-music-manager";
+
+export type GameMenuId = "settings" | "voice" | "music";
 
 export interface KillFeedEntry {
   id: number;
@@ -123,6 +126,9 @@ export class GameController {
     return 1000 / this.descriptor.tickRate;
   }
   private readonly unsubscribeInput: () => void;
+  private readonly openMenus = new Set<GameMenuId>();
+  private readonly menuAutopilot = new MenuAutopilot();
+  private menuInputCommand: NetworkInputCommand | undefined;
   private pingTimer: ReturnType<typeof setInterval> | undefined;
   private pingNonce = 0;
   private pingSentAt = new Map<string, number>();
@@ -231,6 +237,12 @@ export class GameController {
     window.dispatchEvent(new CustomEvent(OPEN_MUSIC_MANAGER_EVENT));
   }
 
+  setMenuOpen(menu: GameMenuId, open: boolean): void {
+    if (open) this.openMenus.add(menu);
+    else this.openMenus.delete(menu);
+    this.updateMenuAutopilot();
+  }
+
   setPeerVolume(playerId: PlayerId, volume: number): void {
     this.voice.setPeerVolume(playerId, volume);
   }
@@ -238,6 +250,9 @@ export class GameController {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.openMenus.clear();
+    this.menuAutopilot.reset();
+    this.menuInputCommand = undefined;
     this.stopConnectionLoops();
     this.unsubscribeInput();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
@@ -367,6 +382,7 @@ export class GameController {
     const ranked = rankAliveSnakes(snapshot.snakes);
     this.leaderboard = visibleHudRanks(ranked, this.selfId);
     this.gameMapMarkers = selectGameMapMarkers(ranked, snapshot.snakes, this.selfId);
+    this.updateMenuAutopilot();
 
     this.processEvents(snapshot, events);
   }
@@ -474,6 +490,27 @@ export class GameController {
     if (this.self.magnetRemaining !== 0) {
       this.self = { ...this.self, magnetRemaining: 0 };
     }
+  }
+
+  private updateMenuAutopilot(): void {
+    if (this.openMenus.size === 0) {
+      this.menuAutopilot.reset();
+      this.menuInputCommand = undefined;
+      this.scheduleInputSend();
+      return;
+    }
+    const snapshot = this.latestSnapshot;
+    if (snapshot === undefined) {
+      this.menuAutopilot.reset();
+      this.menuInputCommand = undefined;
+      return;
+    }
+    this.menuInputCommand = this.menuAutopilot.command(
+      snapshot,
+      this.selfId,
+      this.descriptor.rules.arenaHalfSize,
+    );
+    this.scheduleInputSend();
   }
 
   private handleServerError(code: string, retryable: boolean): void {
@@ -588,8 +625,13 @@ export class GameController {
   }
 
   private pendingInputCommand(): NetworkInputCommand | undefined {
+    const command = this.menuInputCommand;
+    const activeInput =
+      command === undefined
+        ? this.input
+        : { angle: command.angle, boosting: command.boosting, hasDirection: true };
     return nextNetworkInput(
-      this.input,
+      activeInput,
       this.authoritativeInputAngle,
       { angle: this.lastSentAngle, boosting: this.lastSentBoosting },
       INPUT.angleEpsilon,

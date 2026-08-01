@@ -9,16 +9,15 @@
 
   const session = new SessionStore({ status: "anonymous", descriptor: undefined });
 
-  async function bootstrapAndResume(): Promise<void> {
+  async function bootstrapHome(): Promise<void> {
     await session.bootstrap();
-    if (session.state.status === "authenticated") {
-      await goto("/game", { replaceState: true });
-    }
+    // 首页始终是显式入口：清理残留 Cookie 会话，不自动恢复并跳转到 /game。
+    if (session.state.status === "authenticated") await session.endSession();
   }
 
   onMount(() => {
     const disposeFullscreen = installTouchFullscreen();
-    void bootstrapAndResume();
+    void bootstrapHome();
     return disposeFullscreen;
   });
 </script>
@@ -32,7 +31,7 @@
     <p class="text-center text-base font-bold">{session.state.message}</p>
     <button
       class="rounded-full bg-linear-to-b from-[#ff7895] to-map-border px-8 py-2.5 font-black text-white shadow-[0_4px_0_#c83255,0_8px_20px_rgba(235,79,113,0.22)] transition active:translate-y-1 active:shadow-[0_1px_0_#c83255]"
-      onclick={() => void bootstrapAndResume()}
+      onclick={() => void bootstrapHome()}
     >
       重试
     </button>

@@ -33,7 +33,7 @@
   </Select.Trigger>
   <Select.Portal>
     <Select.Content
-      class="z-[60] max-h-60 w-(--bits-select-anchor-width) overflow-y-auto rounded-xl border border-panel-border bg-night-900 p-1 text-white shadow-2xl"
+      class="z-60 max-h-60 w-(--bits-select-anchor-width) overflow-y-auto rounded-xl border border-panel-border bg-night-900 p-1 text-white shadow-2xl"
       sideOffset={6}
     >
       <Select.Viewport>
@@ -41,7 +41,7 @@
           <Select.Item
             value={option.value}
             label={option.label}
-            class="flex cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm font-bold text-white/85 outline-none select-none data-[highlighted]:bg-white/10 data-[selected]:text-lime-300"
+            class="flex cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm font-bold text-white/85 outline-none select-none data-highlighted:bg-white/10 data-selected:text-lime-300"
           >
             {#snippet children({ selected })}
               <span class="truncate">{option.label}</span>

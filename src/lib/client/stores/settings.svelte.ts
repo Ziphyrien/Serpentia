@@ -13,8 +13,8 @@ type PersistedSettingsData = typeof PersistedSettingsData.Type;
 const decodeSettings = Schema.decodeUnknownSync(PersistedSettingsData);
 
 const DEFAULTS = {
-  sfxVolume: 0.7,
-  musicVolume: 0.4,
+  sfxVolume: 0.3,
+  musicVolume: 0.55,
   showNicknames: true,
 };
 

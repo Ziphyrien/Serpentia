@@ -52,7 +52,7 @@ const CREDENTIAL_RETRY_MS = 30_000;
 const SILENT_LISTEN_RETRY_DELAYS_MS: ReadonlyArray<number> = [150, 300, 600];
 const PEER_RESTART_DELAY_MS = 1_000;
 const NEGOTIATION_RETRY_DELAY_MS = 250;
-const DEFAULT_PEER_VOLUME = 1;
+const DEFAULT_PEER_VOLUME = 1; // 100%
 
 /** Cancellable P2P voice lifecycle with deterministic offer ownership. */
 export class VoiceManager {

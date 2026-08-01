@@ -1,8 +1,5 @@
-diff --git a/node_modules/bits-ui/.bun-tag-3e33cb592574fb29 b/.bun-tag-3e33cb592574fb29
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/bits/slider/slider.svelte.js b/dist/bits/slider/slider.svelte.js
-index eb30e0b45a03d014d58d9d30f63aed4630c26dd1..5e889b4f804757f6efa0c3e4c8ab83e56a2d0b9c 100644
+index eb30e0b45a03d014d58d9d30f63aed4630c26dd1..37cf9740e13cfcdc274961427db36eb086b41532 100644
 --- a/dist/bits/slider/slider.svelte.js
 +++ b/dist/bits/slider/slider.svelte.js
 @@ -13,6 +13,7 @@ import { isElementOrSVGElement } from "../../internal/is.js";
@@ -13,7 +10,16 @@ index eb30e0b45a03d014d58d9d30f63aed4630c26dd1..5e889b4f804757f6efa0c3e4c8ab83e5
  const sliderAttrs = createBitsAttrs({
      component: "slider",
      parts: ["root", "thumb", "range", "tick", "tick-label", "thumb-label"],
-@@ -168,11 +169,23 @@ class SliderSingleRootState extends SliderBaseRootState {
+@@ -51,6 +52,8 @@ class SliderBaseRootState {
+     #touchAction = $derived.by(() => {
+         if (this.opts.disabled.current)
+             return undefined;
++        if (isPseudoLandscapeActive())
++            return "none";
+         return this.opts.orientation.current === "horizontal" ? "pan-y" : "pan-x";
+     });
+     getAllThumbs = () => {
+@@ -168,32 +171,38 @@ class SliderSingleRootState extends SliderBaseRootState {
          activeThumb.focus();
          const { left, right, top, bottom } = sliderNode.getBoundingClientRect();
          if (this.direction === "lr") {
@@ -41,8 +47,38 @@ index eb30e0b45a03d014d58d9d30f63aed4630c26dd1..5e889b4f804757f6efa0c3e4c8ab83e5
 +            }
          }
          else if (this.direction === "rl") {
-             this.applyPosition({
-@@ -350,6 +363,10 @@ class SliderMultiRootState extends SliderBaseRootState {
+-            this.applyPosition({
+-                clientXY: e.clientX,
+-                start: right,
+-                end: left,
+-            });
++            this.applyPosition(isPseudoLandscapeActive()
++                ? { clientXY: e.clientY, start: bottom, end: top }
++                : { clientXY: e.clientX, start: right, end: left });
+         }
+         else if (this.direction === "bt") {
+-            this.applyPosition({
+-                clientXY: e.clientY,
+-                start: bottom,
+-                end: top,
+-            });
++            this.applyPosition(isPseudoLandscapeActive()
++                ? { clientXY: e.clientX, start: left, end: right }
++                : { clientXY: e.clientY, start: bottom, end: top });
+         }
+         else if (this.direction === "tb") {
+-            this.applyPosition({
+-                clientXY: e.clientY,
+-                start: top,
+-                end: bottom,
+-            });
++            this.applyPosition(isPseudoLandscapeActive()
++                ? { clientXY: e.clientX, start: right, end: left }
++                : { clientXY: e.clientY, start: top, end: bottom });
+         }
+     };
+     handlePointerDown = (e) => {
+@@ -350,10 +359,18 @@ class SliderMultiRootState extends SliderBaseRootState {
          }
          const distances = thumbs.map((thumb) => {
              if (this.opts.orientation.current === "horizontal") {
@@ -53,7 +89,15 @@ index eb30e0b45a03d014d58d9d30f63aed4630c26dd1..5e889b4f804757f6efa0c3e4c8ab83e5
                  const { left, right } = thumb.getBoundingClientRect();
                  return Math.abs(e.clientX - (left + right) / 2);
              }
-@@ -378,12 +395,23 @@ class SliderMultiRootState extends SliderBaseRootState {
+             else {
++                if (isPseudoLandscapeActive()) {
++                    const { left, right } = thumb.getBoundingClientRect();
++                    return Math.abs(e.clientX - (left + right) / 2);
++                }
+                 const { top, bottom } = thumb.getBoundingClientRect();
+                 return Math.abs(e.clientY - (top + bottom) / 2);
+             }
+@@ -378,36 +395,38 @@ class SliderMultiRootState extends SliderBaseRootState {
          const { left, right, top, bottom } = sliderNode.getBoundingClientRect();
          const direction = this.direction;
          if (direction === "lr") {
@@ -82,7 +126,40 @@ index eb30e0b45a03d014d58d9d30f63aed4630c26dd1..5e889b4f804757f6efa0c3e4c8ab83e5
 +            }
          }
          else if (direction === "rl") {
-             this.applyPosition({
+-            this.applyPosition({
+-                clientXY: e.clientX,
+-                activeThumbIdx: activeThumb.idx,
+-                start: right,
+-                end: left,
+-            });
++            this.applyPosition(isPseudoLandscapeActive()
++                ? { clientXY: e.clientY, activeThumbIdx: activeThumb.idx, start: bottom, end: top }
++                : { clientXY: e.clientX, activeThumbIdx: activeThumb.idx, start: right, end: left });
+         }
+         else if (direction === "bt") {
+-            this.applyPosition({
+-                clientXY: e.clientY,
+-                activeThumbIdx: activeThumb.idx,
+-                start: bottom,
+-                end: top,
+-            });
++            this.applyPosition(isPseudoLandscapeActive()
++                ? { clientXY: e.clientX, activeThumbIdx: activeThumb.idx, start: left, end: right }
++                : { clientXY: e.clientY, activeThumbIdx: activeThumb.idx, start: bottom, end: top });
+         }
+         else if (direction === "tb") {
+-            this.applyPosition({
+-                clientXY: e.clientY,
+-                activeThumbIdx: activeThumb.idx,
+-                start: top,
+-                end: bottom,
+-            });
++            this.applyPosition(isPseudoLandscapeActive()
++                ? { clientXY: e.clientX, activeThumbIdx: activeThumb.idx, start: right, end: left }
++                : { clientXY: e.clientY, activeThumbIdx: activeThumb.idx, start: top, end: bottom });
+         }
+     };
+     handlePointerDown = (e) => {
 diff --git a/dist/bits/utilities/floating-layer/use-floating-layer.svelte.js b/dist/bits/utilities/floating-layer/use-floating-layer.svelte.js
 index 2bf4c4a6d600ad53a9cc0d3b668c3f06667a8f95..a830fdd276096fac356b806a3ab3d9d5eaf6d5db 100644
 --- a/dist/bits/utilities/floating-layer/use-floating-layer.svelte.js
