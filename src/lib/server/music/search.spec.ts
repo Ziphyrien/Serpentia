@@ -116,6 +116,7 @@ const fetcher: MusicFetch = async (input) => {
                 album: "Album",
                 albumId: "55",
                 duration: 184,
+                img3: "https://img.example/mg.jpg",
                 audioFormats: [
                   { formatType: "PQ", asize: 3_000_000 },
                   { formatType: "HQ", asize: 7_000_000 },
@@ -133,6 +134,22 @@ const fetcher: MusicFetch = async (input) => {
 const service = new MusicSearchService(
   new MusicOutboundHttp(fetcher, async () => [{ address: "8.8.8.8", family: 4 }]),
 );
+
+function expectedPictureUrl(source: MusicSourcePlatform): string {
+  switch (source) {
+    case "kw":
+    case "kg":
+      return "";
+    case "tx":
+      return "https://y.gtimg.cn/music/photo_new/T002R500x500M000tx-album-mid.jpg";
+    case "wy":
+      return "https://img.example/wy.jpg";
+    case "mg":
+      return "https://img.example/mg.jpg";
+    case "local":
+      return "";
+  }
+}
 
 function expectedTitle(source: MusicSourcePlatform): string {
   switch (source) {
@@ -165,6 +182,7 @@ describe("LX-compatible music search", () => {
         artist: "Singer",
         album: "Album",
         durationSeconds: expect.any(Number),
+        pictureUrl: source === "kw" || source === "kg" ? null : expectedPictureUrl(source),
         qualitys: ["128k", "320k"],
         musicInfo: {
           source,

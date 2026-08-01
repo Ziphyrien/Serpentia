@@ -100,11 +100,28 @@ export class MusicCoordinator {
           source: command.source,
           title: command.title,
           artist: command.artist,
+          pictureUrl: command.pictureUrl,
         }),
       }),
     );
     const controller = new AbortController();
     this.pending = controller;
+    let pictureUrl = command.pictureUrl;
+    if (pictureUrl === null) {
+      const pictureRequest = MusicSourceResolveRequest.make({
+        source: command.source,
+        action: "pic",
+        info: command.info,
+      });
+      void this.resolver.resolve(pictureRequest, controller.signal).then(
+        (result) => {
+          if (result.action !== "pic" || !this.isRevisionCurrent(revision)) return;
+          pictureUrl = result.data;
+          this.publishPicture(revision, pictureUrl);
+        },
+        () => undefined,
+      );
+    }
     const request = MusicSourceResolveRequest.make({
       source: command.source,
       action: "musicUrl",
@@ -125,6 +142,7 @@ export class MusicCoordinator {
               source: command.source,
               title: command.title,
               artist: command.artist,
+              pictureUrl,
               ...(type === undefined ? {} : { type }),
               url: result.data.url,
             }),
@@ -248,7 +266,39 @@ export class MusicCoordinator {
   }
 
   private isCurrent(revision: number, controller: AbortController): boolean {
-    return !this.disposed && this.revision === revision && this.pending === controller;
+    return this.isRevisionCurrent(revision) && this.pending === controller;
+  }
+
+  private isRevisionCurrent(revision: number): boolean {
+    return !this.disposed && this.revision === revision;
+  }
+
+  private publishPicture(revision: number, pictureUrl: string): void {
+    const state = this.stateValue;
+    if (state.revision !== revision) return;
+    if (state._tag === "loading") {
+      this.publish(
+        MusicLoadingState.make({
+          revision: state.revision,
+          changedAt: state.changedAt,
+          changedBy: state.changedBy,
+          track: MusicTrackSummary.make({ ...state.track, pictureUrl }),
+        }),
+      );
+      return;
+    }
+    if (state._tag === "playing") {
+      this.publish(
+        MusicPlayingState.make({
+          revision: state.revision,
+          changedAt: state.changedAt,
+          changedBy: state.changedBy,
+          track: MusicResolvedTrack.make({ ...state.track, pictureUrl }),
+          positionSeconds: state.positionSeconds,
+          anchorServerTime: state.anchorServerTime,
+        }),
+      );
+    }
   }
 
   private publish(state: MusicPlaybackState): void {

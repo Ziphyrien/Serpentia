@@ -20,17 +20,18 @@ import {
 import { isMusicSourceError, musicSourceError } from "./errors";
 import { parseMusicSourceScript } from "./metadata";
 import { MusicOutboundHttp } from "./outbound-http";
+import { hasBuiltinPictureResolver, MusicPictureResolver } from "./picture";
 import { MusicRuntime } from "./runtime";
 import { MusicSearchService } from "./search";
 
 const MAX_INFO_BYTES = 16_384;
 const platforms: ReadonlyArray<MusicSourcePlatform> = ["kw", "kg", "tx", "wy", "mg", "local"];
 const actionsBySource: Readonly<Record<MusicSourcePlatform, ReadonlyArray<MusicSourceAction>>> = {
-  kw: ["musicUrl"],
-  kg: ["musicUrl"],
-  tx: ["musicUrl"],
+  kw: ["musicUrl", "pic"],
+  kg: ["musicUrl", "pic"],
+  tx: ["musicUrl", "pic"],
   wy: ["musicUrl"],
-  mg: ["musicUrl"],
+  mg: ["musicUrl", "pic"],
   local: ["musicUrl", "lyric", "pic"],
 };
 const qualitysBySource: Readonly<Record<MusicSourcePlatform, ReadonlyArray<string>>> = {
@@ -51,6 +52,7 @@ export interface MusicSourceServiceOptions {
 export class MusicSourceService {
   private readonly http: MusicOutboundHttp;
   private readonly searcher: MusicSearchService;
+  private readonly pictures: MusicPictureResolver;
   private readonly watchFile: boolean;
   private runtime: MusicRuntime | undefined;
   private entry: MusicSourceEntry | undefined;
@@ -65,6 +67,7 @@ export class MusicSourceService {
   ) {
     this.http = options.http ?? new MusicOutboundHttp();
     this.searcher = new MusicSearchService(this.http);
+    this.pictures = new MusicPictureResolver(this.http);
     this.watchFile = options.watch ?? true;
   }
 
@@ -119,6 +122,7 @@ export class MusicSourceService {
             artist: track.artist,
             album: track.album,
             durationSeconds: track.durationSeconds,
+            pictureUrl: track.pictureUrl,
             qualitys,
             musicInfo: track.musicInfo,
           })];
@@ -150,6 +154,10 @@ export class MusicSourceService {
       if (!capability.qualitys.includes(type)) {
         throw musicSourceError("INVALID_REQUEST", "Music source does not advertise this quality");
       }
+    }
+    if (request.action === "pic" && hasBuiltinPictureResolver(request.source)) {
+      const value = await this.pictures.resolve(request.source, request.info, signal);
+      return this.normalizeResult(request, value);
     }
 
     try {
@@ -329,9 +337,13 @@ function normalizeCapabilities(value: unknown): Array<MusicSourceCapability> {
     if (!isRecord(candidate) || candidate.type !== "music") continue;
     const allowedActions = actionsBySource[source];
     const allowedQualitys = qualitysBySource[source];
-    const actions = uniqueStrings(candidate.actions)
+    const declaredActions = uniqueStrings(candidate.actions)
       .filter(isAction)
       .filter((action) => allowedActions.includes(action));
+    const actions =
+      hasBuiltinPictureResolver(source) && declaredActions.includes("musicUrl")
+        ? [...new Set<MusicSourceAction>([...declaredActions, "pic"])]
+        : declaredActions;
     const qualitys = uniqueStrings(candidate.qualitys)
       .filter(isQuality)
       .filter((quality) => allowedQualitys.includes(quality));

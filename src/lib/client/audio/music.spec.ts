@@ -98,6 +98,7 @@ const track = MusicResolvedTrack.make({
   source: "kw",
   title: "Track",
   artist: "Artist",
+  pictureUrl: null,
   type: "320k",
   url: "https://audio.example.test/track.mp3",
 });

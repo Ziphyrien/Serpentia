@@ -509,7 +509,7 @@ async function searchMigu(
         album: cleanText(item.album, 128),
         albumId: scalarValue(item.albumId),
         durationSeconds: durationValue(item.duration),
-        picUrl: stringValue(item.img3) ?? stringValue(item.img2) ?? stringValue(item.img1) ?? null,
+        picUrl: miguPictureUrl(item),
         qualitys: uniqueQualitys(qualitys),
         extraMeta,
       });
@@ -517,6 +517,14 @@ async function searchMigu(
     }
   }
   return { tracks, total: numberValue(data.totalCount) ?? tracks.length };
+}
+
+function miguPictureUrl(item: JsonRecord): string | null {
+  const value = stringValue(item.img3) ?? stringValue(item.img2) ?? stringValue(item.img1);
+  if (!value) return null;
+  if (/^https?:\/\//iu.test(value)) return value;
+  if (value.startsWith("//")) return "https:" + value;
+  return "https://d.musicapp.migu.cn" + (value.startsWith("/") ? value : "/" + value);
 }
 
 function miguQuality(value: string | undefined): MusicSourceQuality | undefined {
@@ -540,6 +548,7 @@ function makeTrack(input: TrackInput): MusicSearchTrack | undefined {
   const qualitys = uniqueQualitys(input.qualitys);
   if (qualitys.length === 0) return undefined;
   const durationSeconds = normalizeDuration(input.durationSeconds);
+  const pictureUrl = normalizePictureUrl(input.picUrl);
   const qualityList: Array<JsonRecord> = [];
   const qualityMap: JsonRecord = {};
   for (const quality of qualitys) {
@@ -551,7 +560,7 @@ function makeTrack(input: TrackInput): MusicSearchTrack | undefined {
   const meta: JsonRecord = {
     songId: input.songId,
     albumName: boundedString(input.album, 128),
-    picUrl: input.picUrl ? boundedString(input.picUrl, 2_048) : null,
+    picUrl: pictureUrl,
     qualitys: qualityList,
     _qualitys: qualityMap,
   };
@@ -572,7 +581,7 @@ function makeTrack(input: TrackInput): MusicSearchTrack | undefined {
     interval: durationSeconds === null ? null : formatDuration(durationSeconds),
     albumName: album,
     albumId: input.albumId ?? "",
-    img: input.picUrl ? boundedString(input.picUrl, 2_048) : null,
+    img: pictureUrl,
     types: qualityList,
     _types: qualityMap,
     typeUrl: {},
@@ -587,9 +596,17 @@ function makeTrack(input: TrackInput): MusicSearchTrack | undefined {
     artist,
     album,
     durationSeconds,
+    pictureUrl,
     qualitys: qualitys.map((quality) => quality.type),
     musicInfo,
   });
+}
+
+function normalizePictureUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const raw = value.trim();
+  const normalized = raw.startsWith("//") ? "https:" + raw : raw;
+  return /^https?:\/\/\S+$/iu.test(normalized) ? boundedString(normalized, 2_048) : null;
 }
 
 async function requestBody(

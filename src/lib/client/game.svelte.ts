@@ -521,7 +521,7 @@ export class GameController {
       return;
     }
     if (code === "MUSIC_CONTROL_FAILED") {
-      this.musicError = "歌曲解析失败，请更换音质或来源后重试";
+      this.musicError = "当前音源无法解析这首歌，请更换歌曲或来源";
       if (this.musicErrorTimer) clearTimeout(this.musicErrorTimer);
       this.musicErrorTimer = setTimeout(() => this.clearMusicError(), 5_000);
       return;

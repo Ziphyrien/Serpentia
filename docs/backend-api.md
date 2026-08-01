@@ -154,6 +154,7 @@ Cookie: serpentia_session=...
       "artist": "示例歌手",
       "album": "示例专辑",
       "durationSeconds": 180,
+      "pictureUrl": "https://img.example.test/cover.jpg",
       "qualitys": ["128k", "320k"],
       "musicInfo": {
         "id": "kw_123",
@@ -189,7 +190,7 @@ Cookie: serpentia_session=...
 }
 ```
 
-该端点要求有效游戏会话。请求必须属于当前脚本声明且由 LX 白名单允许的能力；`kw/kg/tx/wy/mg` 支持 `musicUrl` 与 `128k/320k/flac/flac24bit`，`local` 可声明 `musicUrl/pic/lyric`。单个 `info` 编码后最多 16 KiB，处理器期限为 20 秒。
+该端点要求有效游戏会话。`kw/kg/tx/wy/mg` 的 `musicUrl` 及 `128k/320k/flac/flac24bit` 由当前 LX 音源脚本声明；`kw/kg/tx/mg` 的 `pic` 由服务端内置洛雪同款解析器提供，网易封面优先使用搜索结果中的 `picUrl`；`local` 可由脚本声明 `musicUrl/pic/lyric`。单个 `info` 编码后最多 16 KiB，处理器期限为 20 秒。
 
 `musicUrl` 成功响应：
 
@@ -200,6 +201,8 @@ Cookie: serpentia_session=...
   "data": { "type": "320k", "url": "https://cdn.example/song.flac" }
 }
 ```
+
+封面解析沿用洛雪的图片动作：搜索结果中的 `pictureUrl` 非空时直接使用；为空时服务端会把同一份 `musicInfo` 发送到 `action: "pic"`。音频 URL 与封面 URL 并行解析，封面成功后写入共享播放状态；图片解析失败或较慢都不会阻塞音频播放。
 
 服务端只允许音源通过受控 `lx.request` 访问公网 HTTP/HTTPS 80/443，拒绝私网/回环 DNS、敏感 headers、超限请求/响应和未重新校验的重定向。稳定错误码包括：
 

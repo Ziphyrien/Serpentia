@@ -24,6 +24,9 @@ function makeHttp(requests: Array<string>): MusicOutboundHttp {
     if (url.includes("music.example.test")) {
       return Response.json({ url: "https://audio.example.test/fixture.mp3" });
     }
+    if (url.includes("artistpicserver.kuwo.cn")) {
+      return new Response("http://img.example.test/kuwo.jpg");
+    }
     return Response.json({ code: 0, data: "https://audio.example.test/root.mp3" });
   }, publicLookup);
 }
@@ -54,7 +57,7 @@ describe("root LX music source service", () => {
           source: "kw",
           name: "Kuwo",
           type: "music",
-          actions: ["musicUrl"],
+          actions: ["musicUrl", "pic"],
           qualitys: ["128k", "320k"],
         },
         {
@@ -77,6 +80,19 @@ describe("root LX music source service", () => {
         source: "kw",
         action: "musicUrl",
         data: { type: "320k", url: "https://audio.example.test/fixture.mp3" },
+      });
+
+      const onlinePicture = await service.resolve(
+        MusicSourceResolveRequest.make({
+          source: "kw",
+          action: "pic",
+          info: { musicInfo: { songmid: "123" } },
+        }),
+      );
+      expect(onlinePicture).toEqual({
+        source: "kw",
+        action: "pic",
+        data: "https://img.example.test/kuwo.jpg",
       });
 
       const picture = await service.resolve(

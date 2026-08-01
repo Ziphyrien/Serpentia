@@ -200,13 +200,6 @@
     }
   }
 
-  function resetSearch(): void {
-    abortSearch();
-    searchResults = [];
-    searched = false;
-    searchError = undefined;
-  }
-
   function abortSearch(): void {
     searchAbort?.abort();
     searchAbort = undefined;
@@ -225,6 +218,7 @@
         source: track.source,
         title: track.title,
         artist: track.artist,
+        pictureUrl: track.pictureUrl,
         info: { type: quality, musicInfo: track.musicInfo },
       }),
     );
@@ -288,6 +282,10 @@
     }
   }
 
+  function hideBrokenImage(event: Event): void {
+    if (event.currentTarget instanceof HTMLImageElement) event.currentTarget.hidden = true;
+  }
+
   function stateLabel(state: MusicPlaybackState | undefined): string {
     switch (state?._tag) {
       case "playing":
@@ -334,7 +332,7 @@
   <Dialog.Portal>
     <Dialog.Overlay class="fixed inset-0 z-40 bg-night-950/70 backdrop-blur-sm" />
     <Dialog.Content
-      class="fixed top-1/2 left-1/2 z-50 max-h-[calc(100dvh-2rem)] w-[min(94vw,25rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-panel-border bg-night-900 p-6 text-white shadow-2xl {pseudoLandscape.active ? 'dialog-pseudo' : ''}"
+      class="fixed top-1/2 left-1/2 z-50 h-[calc(100dvh-2rem)] max-h-184 w-[min(94vw,25rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-3xl border border-panel-border bg-night-900 p-6 text-white shadow-2xl music-dialog {pseudoLandscape.active ? 'dialog-pseudo' : ''}"
     >
       <div class="mb-5 flex items-center justify-between">
         <Dialog.Title class="flex items-center gap-2 text-lg font-black tracking-wide">
@@ -346,44 +344,83 @@
         </Dialog.Close>
       </div>
 
-      <div class="rounded-2xl bg-white/5 p-4">
+      <div class="group relative min-h-36 overflow-hidden rounded-2xl border border-white/10 bg-night-950/80 shadow-xl">
         {#if currentTrack}
-          <div class="flex items-start gap-3">
-            <span
-              class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full {playbackTag === 'playing'
-                ? 'bg-lime-400/20 text-lime-300'
-                : 'bg-white/10 text-white/60'}"
-            >
-              {#if playbackTag === "loading"}
-                <LoaderCircle size={16} class="animate-spin" />
-              {:else}
-                <Music size={16} />
-              {/if}
-            </span>
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-black text-white">{currentTrack.title}</p>
-              <p class="truncate text-xs text-white/50">
-                {currentTrack.artist || "未知艺术家"} · {sourceName(currentTrack.source)}
-              </p>
-              <p
-                class="mt-1 text-xs font-bold {playbackTag === 'playing'
-                  ? 'text-lime-300'
-                  : 'text-white/50'}"
-              >
-                {stateLabel(controller.musicState)}
-                {#if playbackTag === "playing" || playbackTag === "paused"}
-                  · {formatPosition(position)}
+          {#if currentTrack.pictureUrl}
+            {#key currentTrack.pictureUrl}
+              <img
+                src={currentTrack.pictureUrl}
+                alt=""
+                aria-hidden="true"
+                referrerpolicy="no-referrer"
+                class="pointer-events-none absolute inset-0 size-full scale-125 object-cover opacity-35 blur-2xl transition duration-700 group-hover:scale-110 group-hover:opacity-45"
+                onerror={hideBrokenImage}
+              />
+            {/key}
+          {/if}
+          <div class="pointer-events-none absolute inset-0 bg-linear-to-r from-black/90 via-black/70 to-black/45 backdrop-blur-sm"></div>
+
+          <div class="relative z-10 p-4">
+            <div class="flex items-center gap-4">
+              <div class="relative size-16 shrink-0">
+                <span class="absolute inset-0 flex items-center justify-center rounded-xl bg-white/10 text-white/45 ring-1 ring-white/10">
+                  <Music size={22} />
+                </span>
+                {#if currentTrack.pictureUrl}
+                  {#key currentTrack.pictureUrl}
+                    <img
+                      src={currentTrack.pictureUrl}
+                      alt="{currentTrack.title} 封面"
+                      referrerpolicy="no-referrer"
+                      class="relative size-full rounded-xl object-cover shadow-2xl ring-1 ring-white/15 transition duration-500 {playbackTag === 'playing' ? 'scale-105' : ''}"
+                      onerror={hideBrokenImage}
+                    />
+                  {/key}
                 {/if}
-                {#if changedByName}
-                  · 由 {changedByName} 操作
-                {/if}
-              </p>
+                <span
+                  class="absolute -right-1 -bottom-1 flex size-6 items-center justify-center rounded-full border border-white/15 bg-night-950/90 {playbackTag === 'playing'
+                    ? 'text-lime-300'
+                    : 'text-white/65'} shadow-lg backdrop-blur-sm"
+                >
+                  {#if playbackTag === "loading"}
+                    <LoaderCircle size={12} class="animate-spin" />
+                  {:else}
+                    <Music size={11} />
+                  {/if}
+                </span>
+              </div>
+
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-base font-black text-white">{currentTrack.title}</p>
+                <p class="mt-0.5 truncate text-xs text-white/60">
+                  {currentTrack.artist || "未知艺术家"} · {sourceName(currentTrack.source)}
+                </p>
+                <p
+                  class="mt-1.5 truncate text-xs font-bold {playbackTag === 'playing'
+                    ? 'text-lime-300'
+                    : 'text-white/55'}"
+                >
+                  {stateLabel(controller.musicState)}
+                  {#if playbackTag === "playing" || playbackTag === "paused"}
+                    · {formatPosition(position)}
+                  {/if}
+                  {#if changedByName}
+                    · 由 {changedByName} 操作
+                  {/if}
+                </p>
+              </div>
             </div>
-          </div>
-          <div class="mt-3 flex flex-wrap items-center gap-2">
-            {#if playbackTag === "playing" || playbackTag === "paused"}
-              <Button size="sm" onclick={togglePlayback}>
-                {#if playbackTag === "playing"}
+
+            <div class="mt-4 flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                disabled={playbackTag === "loading"}
+                onclick={togglePlayback}
+              >
+                {#if playbackTag === "loading"}
+                  <LoaderCircle size={13} class="animate-spin" />
+                  加载
+                {:else if playbackTag === "playing"}
                   <Pause size={13} />
                   暂停
                 {:else}
@@ -394,6 +431,7 @@
               <Button
                 size="sm"
                 aria-label="后退 {SEEK_STEP_SECONDS} 秒"
+                disabled={playbackTag === "loading"}
                 onclick={() => seekBy(-SEEK_STEP_SECONDS)}
               >
                 <Rewind size={13} />
@@ -402,30 +440,33 @@
               <Button
                 size="sm"
                 aria-label="前进 {SEEK_STEP_SECONDS} 秒"
+                disabled={playbackTag === "loading"}
                 onclick={() => seekBy(SEEK_STEP_SECONDS)}
               >
                 <FastForward size={13} />
                 {SEEK_STEP_SECONDS}s
               </Button>
-            {/if}
-            <Button size="sm" intent="danger" onclick={stopPlayback}>
-              <Square size={13} />
-              停止
-            </Button>
+              <Button size="sm" intent="danger" onclick={stopPlayback}>
+                <Square size={13} />
+                停止
+              </Button>
+            </div>
           </div>
         {:else}
-          <div class="flex items-center gap-2.5 text-white/50">
+          <div class="flex min-h-36 items-center gap-2.5 p-4 text-white/50">
             <Music size={16} />
             <p class="text-xs font-bold">暂无播放，搜索一首歌和大家一起听</p>
           </div>
         {/if}
       </div>
 
-      {#if controller.musicError}
-        <p class="mt-3 rounded-xl bg-red-500/15 px-4 py-2 text-xs font-bold text-red-300" role="status">
-          {controller.musicError}
-        </p>
-      {/if}
+      <div class="mt-3 min-h-9">
+        {#if controller.musicError}
+          <p class="rounded-xl bg-red-500/15 px-4 py-2 text-xs font-bold text-red-300" role="status">
+            {controller.musicError}
+          </p>
+        {/if}
+      </div>
 
       <div class="mt-5 border-t border-white/10 pt-5">
         <p class="mb-3 text-sm font-black text-white/85">搜索点歌</p>
@@ -463,7 +504,6 @@
                   bind:value={selectedSource}
                   options={sourceOptions}
                   ariaLabel="搜索来源"
-                  onValueChange={resetSearch}
                 />
               </label>
               <label class="min-w-0 flex-1">
@@ -513,52 +553,67 @@
             {/if}
           </div>
 
-          {#if searchError}
-            <p
-              class="mt-3 rounded-xl bg-red-500/15 px-4 py-2 text-xs font-bold text-red-300"
-              role="status"
-            >
-              {searchError}
-            </p>
-          {/if}
-
-          {#if searchResults.length > 0}
-            <div class="mt-4 flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
-              {#each searchResults as track (track.id)}
-                <div class="flex items-center gap-3 rounded-2xl bg-white/5 px-3 py-2.5">
-                  <span
-                    class="flex size-8 shrink-0 items-center justify-center rounded-full bg-white/10 text-white/60"
-                  >
-                    <Music size={14} />
-                  </span>
-                  <div class="min-w-0 flex-1">
-                    <p class="truncate text-sm font-black text-white">{track.title}</p>
-                    <p class="truncate text-xs text-white/50">
-                      {track.artist || "未知艺术家"}{track.album ? ` · ${track.album}` : ""}
-                    </p>
-                    <p class="mt-0.5 truncate text-[10px] font-bold text-white/35">
-                      {formatTrackDuration(track.durationSeconds)} · {qualitySummary(track)}
-                    </p>
-                  </div>
-                  <Button
-                    intent="primary"
-                    size="sm"
-                    class="shrink-0"
-                    disabled={!canPlay(track)}
-                    aria-label="点播 {track.title}"
-                    onclick={() => playTrack(track)}
-                  >
-                    <Play size={13} />
-                    点播
-                  </Button>
-                </div>
-              {/each}
+          <div class="music-results mt-3 h-64 overflow-y-auto pr-1">
+            <div class="min-h-9">
+              {#if searchError}
+                <p
+                  class="rounded-xl bg-red-500/15 px-4 py-2 text-xs font-bold text-red-300"
+                  role="status"
+                >
+                  {searchError}
+                </p>
+              {/if}
             </div>
-          {:else if searched && !searchLoading}
-            <p class="mt-4 rounded-2xl bg-white/5 px-4 py-5 text-center text-xs font-bold text-white/45">
-              没找到相关歌曲，换个关键词或来源试试
-            </p>
-          {/if}
+
+            {#if searchResults.length > 0}
+              <div class="mt-2 flex flex-col gap-2">
+                {#each searchResults as track (track.id)}
+                  <div class="flex items-center gap-3 rounded-2xl bg-white/5 px-3 py-2.5">
+                    <div
+                      class="relative flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/10 text-white/50 ring-1 ring-white/10"
+                    >
+                      <Music size={15} />
+                      {#if track.pictureUrl}
+                        <img
+                          src={track.pictureUrl}
+                          alt=""
+                          aria-hidden="true"
+                          loading="lazy"
+                          referrerpolicy="no-referrer"
+                          class="absolute inset-0 size-full object-cover"
+                          onerror={hideBrokenImage}
+                        />
+                      {/if}
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate text-sm font-black text-white">{track.title}</p>
+                      <p class="truncate text-xs text-white/50">
+                        {track.artist || "未知艺术家"}{track.album ? ` · ${track.album}` : ""}
+                      </p>
+                      <p class="mt-0.5 truncate text-[10px] font-bold text-white/35">
+                        {formatTrackDuration(track.durationSeconds)} · {qualitySummary(track)}
+                      </p>
+                    </div>
+                    <Button
+                      intent="primary"
+                      size="sm"
+                      class="shrink-0"
+                      disabled={!canPlay(track)}
+                      aria-label="点播 {track.title}"
+                      onclick={() => playTrack(track)}
+                    >
+                      <Play size={13} />
+                      点播
+                    </Button>
+                  </div>
+                {/each}
+              </div>
+            {:else if searched && !searchLoading}
+              <p class="mt-2 rounded-2xl bg-white/5 px-4 py-5 text-center text-xs font-bold text-white/45">
+                没找到相关歌曲，换个关键词或来源试试
+              </p>
+            {/if}
+          </div>
         {/if}
       </div>
     </Dialog.Content>
@@ -571,9 +626,15 @@
    * 宽高约束换成旋转后的画面尺寸（画面宽 = 100dvh，画面高 = 100dvw）。
    */
   /* class 应用在 bits-ui 组件上，Svelte 无法静态识别，需 :global 防止裁剪 */
+  :global(.music-dialog),
+  .music-results {
+    scrollbar-gutter: stable;
+  }
+
   :global(.dialog-pseudo) {
     width: min(94dvh, 25rem);
-    max-height: calc(100dvw - 2rem);
+    height: min(calc(100dvw - 2rem), 46rem);
+    max-height: none;
     rotate: 90deg;
   }
 

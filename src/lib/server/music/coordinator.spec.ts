@@ -56,6 +56,7 @@ function play(title: string): MusicPlayControl {
     info: { type: "320k", musicInfo: { hash: title } },
     title,
     artist: "Artist",
+    pictureUrl: "https://img.example.test/" + title + ".jpg",
   });
 }
 

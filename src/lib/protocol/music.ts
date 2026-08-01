@@ -53,6 +53,13 @@ const MusicSearchQuery = Schema.String.check(
   Schema.isPattern(/\S/u),
 );
 const MusicSearchTotal = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const MusicPictureUrl = Schema.NullOr(
+  Schema.String.check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(2_048),
+    Schema.isPattern(/^https?:\/\/\S+$/iu),
+  ),
+);
 const MusicSearchDuration = Schema.NullOr(
   Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 86_400 })),
 );
@@ -69,6 +76,7 @@ export class MusicSearchTrack extends Schema.Class<MusicSearchTrack>("MusicSearc
   artist: Schema.String.check(Schema.isMaxLength(128)),
   album: Schema.String.check(Schema.isMaxLength(128)),
   durationSeconds: MusicSearchDuration,
+  pictureUrl: MusicPictureUrl,
   qualitys: Schema.Array(MusicSourceQuality).check(Schema.isMaxLength(4)),
   musicInfo: Schema.Unknown,
 }) {}
@@ -137,6 +145,7 @@ export class MusicPlayControl extends Schema.TaggedClass<MusicPlayControl>()("pl
   info: Schema.Unknown,
   title: MusicTitle,
   artist: MusicArtist,
+  pictureUrl: MusicPictureUrl,
 }) {}
 
 export class MusicPauseControl extends Schema.TaggedClass<MusicPauseControl>()("pause", {}) {}
@@ -165,12 +174,14 @@ export class MusicTrackSummary extends Schema.Class<MusicTrackSummary>("MusicTra
   source: MusicSourcePlatform,
   title: MusicTitle,
   artist: MusicArtist,
+  pictureUrl: MusicPictureUrl,
 }) {}
 
 export class MusicResolvedTrack extends Schema.Class<MusicResolvedTrack>("MusicResolvedTrack")({
   source: MusicSourcePlatform,
   title: MusicTitle,
   artist: MusicArtist,
+  pictureUrl: MusicPictureUrl,
   type: Schema.optionalKey(MusicSourceQuality),
   url: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048)),
 }) {}

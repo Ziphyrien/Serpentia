@@ -68,6 +68,7 @@ it("lets every player compete while the last server-received play command wins",
           info: { type: "320k", musicInfo: { hash: "first" } },
           title: "First",
           artist: "Alpha",
+          pictureUrl: "https://img.example.test/first.jpg",
         },
       }),
     );
@@ -82,6 +83,7 @@ it("lets every player compete while the last server-received play command wins",
           info: { type: "320k", musicInfo: { hash: "second" } },
           title: "Second",
           artist: "Beta",
+          pictureUrl: "https://img.example.test/second.jpg",
         },
       }),
     );
@@ -107,7 +109,11 @@ it("lets every player compete while the last server-received play command wins",
       _tag: "playing",
       revision: 2,
       changedBy: { playerId: "friend-b", nickname: "Beta" },
-      track: { title: "Second", url: "https://audio.example.test/second.mp3" },
+      track: {
+        title: "Second",
+        pictureUrl: "https://img.example.test/second.jpg",
+        url: "https://audio.example.test/second.mp3",
+      },
     });
     expect(latestMusic(beta.sent)).toEqual(latestMusic(alpha.sent));
   } finally {
