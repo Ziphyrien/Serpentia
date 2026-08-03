@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { containsAsciiControlCharacters } from "./ascii-control";
 import { bilibiliError } from "./errors";
 
 const BILIBILI_COOKIE_KEY = "BILIBILI_COOKIE";
@@ -74,7 +75,7 @@ function environmentAssignmentKey(line: string): string | undefined {
 }
 
 function encodeEnvironmentValue(value: string): string {
-  if (!value || /[\u0000-\u001f\u007f']/u.test(value)) {
+  if (!value || value.includes("'") || containsAsciiControlCharacters(value)) {
     throw bilibiliError(
       "INVALID_CONFIG",
       "environment.encode",
@@ -82,6 +83,10 @@ function encodeEnvironmentValue(value: string): string {
     );
   }
   return `'${value}'`;
+}
+
+function isMissingFileError(cause: unknown): boolean {
+  return cause instanceof Error && "code" in cause && cause.code === "ENOENT";
 }
 
 async function assertRegularOrMissing(path: string): Promise<void> {
@@ -95,7 +100,7 @@ async function assertRegularOrMissing(path: string): Promise<void> {
       );
     }
   } catch (cause) {
-    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return;
+    if (isMissingFileError(cause)) return;
     throw cause;
   }
 }
@@ -104,7 +109,7 @@ async function readOptionalText(path: string): Promise<string> {
   try {
     return await readFile(path, "utf8");
   } catch (cause) {
-    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") return "";
+    if (isMissingFileError(cause)) return "";
     throw cause;
   }
 }

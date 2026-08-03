@@ -145,10 +145,8 @@ export class FoodLayer {
           record.x = food.position.x;
           record.y = food.position.y;
           record.node.position.set(record.x, record.y);
-          this.updateVisibility(record, view);
-        } else {
-          this.updateVisibility(record, view);
         }
+        this.updateVisibility(record, view);
         continue;
       }
 
@@ -415,11 +413,10 @@ export class FoodLayer {
   }
 
   private updateVisibility(record: FoodRecord, view: ViewBounds): void {
-    if (record.consumed !== undefined) {
-      record.node.visible = false;
-      return;
-    }
-    if (record.absorb?.kind === "predicted" && record.absorb.complete) {
+    if (
+      record.consumed !== undefined ||
+      (record.absorb?.kind === "predicted" && record.absorb.complete)
+    ) {
       record.node.visible = false;
       return;
     }

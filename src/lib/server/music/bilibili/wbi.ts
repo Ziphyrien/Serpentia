@@ -7,10 +7,9 @@ import { bilibiliError, isBilibiliError } from "./errors";
 // WBI permutation is part of Bilibili's public request signing algorithm.
 // Cross-checked against bbplayer (MIT): https://github.com/bbplayer-app/bbplayer
 const MIXIN_KEY_ORDER = [
-  46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
-  33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61,
-  26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36,
-  20, 34, 44, 52,
+  46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28,
+  14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54,
+  21, 56, 59, 6, 63, 57, 62, 11, 36, 20, 34, 44, 52,
 ];
 const KEY_TTL_MILLISECONDS = 12 * 60 * 60 * 1_000;
 const WBI_FILTER = /[!'()*]/gu;
@@ -100,17 +99,25 @@ export function signWbi(
   timestampSeconds: number,
 ): string {
   const source = imageKey + subKey;
-  const mixinKey = MIXIN_KEY_ORDER.map((index) => source[index] ?? "").join("").slice(0, 32);
+  const mixinKey = MIXIN_KEY_ORDER.map((index) => source[index] ?? "")
+    .join("")
+    .slice(0, 32);
   const values = new Map<string, string>();
   for (const [key, value] of Object.entries(parameters)) {
     values.set(key, String(value).replace(WBI_FILTER, ""));
   }
   values.set("wts", String(timestampSeconds));
   const query = [...values.entries()]
-    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .sort(([left], [right]) => {
+      if (left < right) return -1;
+      if (left > right) return 1;
+      return 0;
+    })
     .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     .join("&");
-  const signature = createHash("md5").update(query + mixinKey).digest("hex");
+  const signature = createHash("md5")
+    .update(query + mixinKey)
+    .digest("hex");
   return `${query}&w_rid=${signature}`;
 }
 

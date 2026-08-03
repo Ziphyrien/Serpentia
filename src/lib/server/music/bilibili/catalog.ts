@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { decode as decodeHtml } from "he";
+import { replaceAsciiControlCharacters } from "./ascii-control";
 import {
   BilibiliPageListResponse,
   BilibiliSearchResponse,
@@ -34,11 +35,7 @@ export class BilibiliCatalog {
     private readonly now: () => number = Date.now,
   ) {}
 
-  async search(
-    query: string,
-    page = 1,
-    signal?: AbortSignal,
-  ): Promise<BilibiliSearchResult> {
+  async search(query: string, page = 1, signal?: AbortSignal): Promise<BilibiliSearchResult> {
     const normalized = query.trim().replace(/\s+/gu, " ");
     if (!normalized || !Number.isInteger(page) || page < 1) {
       throw bilibiliError("INVALID_REQUEST", "catalog.search", "Invalid search request");
@@ -76,7 +73,11 @@ export class BilibiliCatalog {
       return value;
     } catch (cause) {
       if (isBilibiliError(cause)) throw cause;
-      throw bilibiliError("PROTOCOL_ERROR", "catalog.search", "Bilibili search response failed validation");
+      throw bilibiliError(
+        "PROTOCOL_ERROR",
+        "catalog.search",
+        "Bilibili search response failed validation",
+      );
     }
   }
 
@@ -128,19 +129,16 @@ export class BilibiliCatalog {
 }
 
 function normalizeText(value: string, maximumLength: number): string {
-  const decoded = decodeHtml(value.replace(/<[^>]*>/gu, ""))
-    .replace(/[\u0000-\u001f\u007f]/gu, " ")
+  const decoded = replaceAsciiControlCharacters(decodeHtml(value.replace(/<[^>]*>/gu, "")))
     .replace(/\s+/gu, " ")
     .trim();
   return [...decoded].slice(0, maximumLength).join("");
 }
 
 function normalizePictureUrl(value: string): string | null {
-  const candidate = value.startsWith("//")
-    ? `https:${value}`
-    : value.startsWith("http://")
-      ? `https://${value.slice("http://".length)}`
-      : value;
+  let candidate = value;
+  if (value.startsWith("//")) candidate = `https:${value}`;
+  else if (value.startsWith("http://")) candidate = `https://${value.slice("http://".length)}`;
   try {
     const parsed = new URL(candidate);
     return parsed.protocol === "https:" && parsed.username === "" && parsed.password === ""
@@ -154,7 +152,8 @@ function normalizePictureUrl(value: string): string | null {
 function parseDuration(value: string | number): number | null {
   if (typeof value === "number") return Number.isFinite(value) && value >= 0 ? value : null;
   const parts = value.split(":");
-  if (parts.length < 1 || parts.length > 3 || parts.some((part) => !/^\d+$/u.test(part))) return null;
+  if (parts.length < 1 || parts.length > 3 || parts.some((part) => !/^\d+$/u.test(part)))
+    return null;
   let seconds = 0;
   for (const part of parts) seconds = seconds * 60 + Number(part);
   return Number.isFinite(seconds) && seconds >= 0 && seconds <= 86_400 ? seconds : null;

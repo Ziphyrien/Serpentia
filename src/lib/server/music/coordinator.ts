@@ -229,11 +229,7 @@ export class MusicCoordinator {
   }
 
   private isCurrent(revision: number, controller: AbortController): boolean {
-    return this.isRevisionCurrent(revision) && this.pending === controller;
-  }
-
-  private isRevisionCurrent(revision: number): boolean {
-    return !this.disposed && this.revision === revision;
+    return !this.disposed && this.revision === revision && this.pending === controller;
   }
 
   private publish(state: MusicPlaybackState): void {

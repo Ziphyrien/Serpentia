@@ -1,3 +1,4 @@
+import { containsAsciiControlCharacters } from "./ascii-control";
 import { bilibiliError } from "./errors";
 
 const MAX_COOKIE_LENGTH = 8_192;
@@ -55,11 +56,15 @@ export class BilibiliCredentials {
         throw bilibiliError("PROTOCOL_ERROR", "credentials.merge", "Invalid refreshed cookie name");
       }
       if (/[^\u0020-\u007e]/u.test(value) || value.includes(";")) {
-        throw bilibiliError("PROTOCOL_ERROR", "credentials.merge", "Invalid refreshed cookie value");
+        throw bilibiliError(
+          "PROTOCOL_ERROR",
+          "credentials.merge",
+          "Invalid refreshed cookie value",
+        );
       }
       merged.set(name, value);
     }
-    return [...merged].map(([name, value]) => `${name}=${value}`).join("; ");
+    return serializeCookiePairs(merged);
   }
 
   replace(value: string): void {
@@ -77,9 +82,7 @@ export class BilibiliCredentials {
   }
 }
 
-export function cookiePairsFromSetCookieHeaders(
-  headers: Headers,
-): ReadonlyMap<string, string> {
+export function cookiePairsFromSetCookieHeaders(headers: Headers): ReadonlyMap<string, string> {
   const values = headers.getSetCookie();
   const candidates =
     values.length > 0
@@ -121,7 +124,7 @@ function parseCookieHeader(value: string): ParsedCookie {
   if (
     !normalized ||
     normalized.length > MAX_COOKIE_LENGTH ||
-    /[\u0000-\u001f\u007f]/u.test(normalized)
+    containsAsciiControlCharacters(normalized)
   ) {
     throw bilibiliError(
       "INVALID_CONFIG",
@@ -164,7 +167,11 @@ function parseCookieHeader(value: string): ParsedCookie {
     );
   }
   return {
-    header: [...pairs].map(([name, cookieValue]) => `${name}=${cookieValue}`).join("; "),
+    header: serializeCookiePairs(pairs),
     pairs,
   };
+}
+
+function serializeCookiePairs(pairs: ReadonlyMap<string, string>): string {
+  return [...pairs].map(([name, value]) => `${name}=${value}`).join("; ");
 }

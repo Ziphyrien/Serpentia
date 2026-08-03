@@ -1,8 +1,5 @@
 import type { InputState } from "./input-state";
-import {
-  compensatePseudoLandscapeAngle,
-  pseudoLandscape,
-} from "../pseudo-landscape.svelte";
+import { compensatePseudoLandscapeAngle, pseudoLandscape } from "../pseudo-landscape.svelte";
 
 /**
  * 桌面端输入：鼠标相对屏幕中心的方向 + 左键/空格加速。
@@ -58,10 +55,14 @@ export class PointerInput {
   };
 
   private onBlur = (): void => {
+    this.releaseInputState();
+  };
+
+  private releaseInputState(): void {
     this.state.releaseDirection("pointer");
     this.state.setBoosting("pointer", false);
     this.state.setBoosting("keyboard", false);
-  };
+  }
 
   private onContextMenu = (event: Event): void => {
     const target = event.target as HTMLElement | null;
@@ -78,8 +79,6 @@ export class PointerInput {
     window.removeEventListener("keyup", this.onKeyUp);
     window.removeEventListener("blur", this.onBlur);
     window.removeEventListener("contextmenu", this.onContextMenu);
-    this.state.releaseDirection("pointer");
-    this.state.setBoosting("pointer", false);
-    this.state.setBoosting("keyboard", false);
+    this.releaseInputState();
   }
 }

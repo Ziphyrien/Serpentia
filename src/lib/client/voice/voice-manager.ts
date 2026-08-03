@@ -272,14 +272,17 @@ export class VoiceManager {
     audio.volume = this.volumes.get(participant.playerId) ?? DEFAULT_PEER_VOLUME;
     const isOfferOwner = this.selfId() < participant.playerId;
     const localTrack = this.localStream?.getAudioTracks()[0];
-    const audioTransceiver = isOfferOwner
-      ? localTrack !== undefined && this.localStream !== undefined
-        ? pc.addTransceiver(localTrack, {
-            direction: "sendrecv",
-            streams: [this.localStream],
-          })
-        : pc.addTransceiver("audio", { direction: "sendrecv" })
-      : undefined;
+    let audioTransceiver: RTCRtpTransceiver | undefined;
+    if (isOfferOwner) {
+      if (localTrack !== undefined && this.localStream !== undefined) {
+        audioTransceiver = pc.addTransceiver(localTrack, {
+          direction: "sendrecv",
+          streams: [this.localStream],
+        });
+      } else {
+        audioTransceiver = pc.addTransceiver("audio", { direction: "sendrecv" });
+      }
+    }
     const entry: PeerEntry = {
       pc,
       audio,
@@ -584,7 +587,7 @@ export class VoiceManager {
         void peer.audioTransceiver.sender.replaceTrack(null).catch(() => undefined);
       }
     }
-    this.localStream?.getTracks().forEach((track) => track.stop());
+    if (this.localStream !== undefined) stopStream(this.localStream);
     this.localStream = undefined;
     this.localMeter?.source.disconnect();
     this.localMeter?.analyser.disconnect();

@@ -129,20 +129,16 @@
     }
     return undefined;
   });
-  const progressPercent = $derived(
-    playback.tag === "playing" || playback.tag === "paused"
-      ? playback.duration !== null && playback.duration > 0
-        ? Math.min(100, (playback.position / playback.duration) * 100)
-        : 0
-      : 0,
-  );
-  const progressText = $derived(
-    playback.tag === "playing" || playback.tag === "paused"
-      ? playback.duration !== null
-        ? `${formatClock(playback.position)} / ${formatClock(playback.duration)}`
-        : formatClock(playback.position)
-      : "",
-  );
+  const progressPercent = $derived.by(() => {
+    if (playback.tag !== "playing" && playback.tag !== "paused") return 0;
+    if (playback.duration === null || playback.duration <= 0) return 0;
+    return Math.min(100, (playback.position / playback.duration) * 100);
+  });
+  const progressText = $derived.by(() => {
+    if (playback.tag !== "playing" && playback.tag !== "paused") return "";
+    if (playback.duration === null) return formatClock(playback.position);
+    return `${formatClock(playback.position)} / ${formatClock(playback.duration)}`;
+  });
 
   function formatClock(seconds: number): string {
     const total = Math.max(0, Math.floor(seconds));

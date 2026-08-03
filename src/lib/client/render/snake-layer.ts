@@ -122,11 +122,7 @@ export class SnakeLayer {
     private readonly magnetTextures: ReadonlyArray<Texture> = [],
   ) {
     if (skinFrames.size === 0) throw new Error("Internal skin textures are missing");
-    this.container.addChild(
-      this.snakeContainer,
-      this.magnetContainer,
-      this.protectContainer,
-    );
+    this.container.addChild(this.snakeContainer, this.magnetContainer, this.protectContainer);
   }
 
   lastBodyOf(id: string): { body: ReadonlyArray<Point>; bodyColor: number } | undefined {
@@ -148,21 +144,21 @@ export class SnakeLayer {
     }
     for (const [id, nodes] of this.snakes) {
       if (!seen.has(id)) {
-        nodes.root.destroy({ children: true });
-        nodes.magnet.root.destroy({ children: true });
-        nodes.protect.destroy();
+        this.destroyNodes(nodes);
         this.snakes.delete(id);
       }
     }
   }
 
   destroy(): void {
-    for (const nodes of this.snakes.values()) {
-      nodes.root.destroy({ children: true });
-      nodes.magnet.root.destroy({ children: true });
-      nodes.protect.destroy();
-    }
+    for (const nodes of this.snakes.values()) this.destroyNodes(nodes);
     this.snakes.clear();
+  }
+
+  private destroyNodes(nodes: SnakeNodes): void {
+    nodes.root.destroy({ children: true });
+    nodes.magnet.root.destroy({ children: true });
+    nodes.protect.destroy();
   }
 
   private ensureNodes(id: string, skinId: number): SnakeNodes {
@@ -170,9 +166,7 @@ export class SnakeLayer {
     // 皮肤在同一条蛇上换过之后，贴图池必须整体重建。
     if (existing) {
       if (existing.skin.id === internalSkinOrDefault(skinId).id) return existing;
-      existing.root.destroy({ children: true });
-      existing.magnet.root.destroy({ children: true });
-      existing.protect.destroy();
+      this.destroyNodes(existing);
       this.snakes.delete(id);
     }
 

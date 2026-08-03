@@ -40,10 +40,15 @@ function deferred<T>(): Deferred<T> {
 
 type SearchHandler = (query: string, page: number) => unknown | Promise<unknown>;
 
+function requestUrl(input: string | URL | Request): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
 function makeLibrary(handler: SearchHandler): MusicLibrary {
   const client = new MusicClient("/status", "/search", async (input, init) => {
-    const url =
-      typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const url = requestUrl(input);
     if (url.endsWith("/status")) return Response.json(STATUS);
     const body = JSON.parse(String(init?.body)) as { query: string; page?: number };
     return Response.json(await handler(body.query, body.page ?? 1));
@@ -405,8 +410,7 @@ describe("MusicLibrary status", () => {
   } {
     let statusCalls = 0;
     const client = new MusicClient("/status", "/search", async (input) => {
-      const url =
-        typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      const url = requestUrl(input);
       if (url.endsWith("/status")) {
         statusCalls += 1;
         return handler();

@@ -64,9 +64,7 @@ export class GameRoom {
         this.broadcast({ v: GAME_PROTOCOL_VERSION, _tag: "music-state", music });
       },
       commandFailed: (playerId, code) => {
-        const connectionId = this.controller.connectionIdForPlayer(playerId);
-        const connection =
-          connectionId === undefined ? undefined : this.connections.get(connectionId);
+        const connection = this.connectionForPlayer(playerId);
         if (connection !== undefined) {
           this.send(connection, { v: GAME_PROTOCOL_VERSION, _tag: "music-error", code });
         }
@@ -249,15 +247,17 @@ export class GameRoom {
       case "music-control":
         this.handleMusicControl(connection, message.command);
         return;
-      case "input": {
-        const accepted = this.controller.applyInput(connection.id, {
-          sequence: message.sequence,
-          targetTick: message.targetTick,
-          angle: message.angle,
-          boosting: message.boosting,
-        });
-        if (!accepted) this.sendError(connection, "STALE_INPUT", true);
-      }
+      case "input":
+        if (
+          !this.controller.applyInput(connection.id, {
+            sequence: message.sequence,
+            targetTick: message.targetTick,
+            angle: message.angle,
+            boosting: message.boosting,
+          })
+        ) {
+          this.sendError(connection, "STALE_INPUT", true);
+        }
     }
   }
 
@@ -310,9 +310,7 @@ export class GameRoom {
       return;
     }
 
-    const targetConnectionId = this.controller.connectionIdForPlayer(targetPlayerId);
-    const target =
-      targetConnectionId === undefined ? undefined : this.connections.get(targetConnectionId);
+    const target = this.connectionForPlayer(targetPlayerId);
     if (target === undefined || !this.voiceRoster.has(targetPlayerId)) {
       this.sendError(connection, "VOICE_TARGET_UNAVAILABLE", true);
       return;
@@ -324,6 +322,11 @@ export class GameRoom {
       fromPlayerId: identity.playerId,
       signal,
     });
+  }
+
+  private connectionForPlayer(playerId: string): GameRoomConnection | undefined {
+    const connectionId = this.controller.connectionIdForPlayer(playerId);
+    return connectionId === undefined ? undefined : this.connections.get(connectionId);
   }
 
   private startLoop(): void {
@@ -370,9 +373,7 @@ export class GameRoom {
     this.closeExpiredSessions();
     const result = this.controller.tick();
     for (const input of result.appliedInputs) {
-      const connectionId = this.controller.connectionIdForPlayer(input.playerId);
-      const connection =
-        connectionId === undefined ? undefined : this.connections.get(connectionId);
+      const connection = this.connectionForPlayer(input.playerId);
       if (connection === undefined) continue;
       this.send(connection, {
         v: GAME_PROTOCOL_VERSION,
