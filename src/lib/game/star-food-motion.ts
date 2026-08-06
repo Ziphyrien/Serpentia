@@ -51,7 +51,10 @@ export function predictFoodPresentationPosition(
 
   const frameCount = presentationSourceFrame - authoritativeSourceFrame;
   const motion = food.motion;
-  if (motion === undefined || frameCount === 0) return { ...food.position };
+  // Static food never needs a presented position. Returning undefined lets the
+  // renderer reuse the authoritative FoodState instead of cloning it per frame.
+  if (motion === undefined) return undefined;
+  if (frameCount === 0) return { ...food.position };
 
   // 倒计时为 R 时，前 R-1 帧仍沿当前方向；第 R 帧会先随机换向再移动。
   const knownStraightFrames = Math.max(0, motion.linearFramesRemaining - 1);
@@ -85,7 +88,10 @@ function predictKnownFoodPosition(
 
   const frameCount = targetSourceFrame - authoritativeSourceFrame;
   const motion = food.motion;
-  if (motion === undefined || frameCount === 0) return { ...food.position };
+  // Static coordinates are immutable protocol data; reuse them to avoid one
+  // collision candidate allocation per food per presentation frame.
+  if (motion === undefined) return food.position;
+  if (frameCount === 0) return { ...food.position };
   if (frameCount >= motion.linearFramesRemaining) return undefined;
 
   const radians = normalGameDegreesToRadians(motion.directionDegrees);

@@ -99,6 +99,22 @@ function expectSamePose(
   expect(right.angle).toBeCloseTo(left.angle, 8);
 }
 
+function expectSameBody(
+  left: { readonly body: ReadonlyArray<{ x: number; y: number }> },
+  right: { readonly body: ReadonlyArray<{ x: number; y: number }> },
+): void {
+  expect(right.body).toHaveLength(left.body.length);
+  for (let index = 0; index < left.body.length; index += 1) {
+    const leftPoint = left.body[index];
+    const rightPoint = right.body[index];
+    expect(leftPoint).toBeDefined();
+    expect(rightPoint).toBeDefined();
+    if (leftPoint === undefined || rightPoint === undefined) continue;
+    expect(rightPoint.x).toBeCloseTo(leftPoint.x, 8);
+    expect(rightPoint.y).toBeCloseTo(leftPoint.y, 8);
+  }
+}
+
 function distanceToSegment(
   point: { readonly x: number; readonly y: number },
   start: { readonly x: number; readonly y: number },
@@ -547,7 +563,10 @@ describe("self prediction", () => {
       if (now % 100 === 0) {
         withSnapshots.reconcile(snapshotOf(server), now / TICK_MS, now);
       }
-      expectSamePose(withoutSnapshots.renderState()!, withSnapshots.renderState()!);
+      const reference = withoutSnapshots.renderState()!;
+      const reconciled = withSnapshots.renderState()!;
+      expectSamePose(reference, reconciled);
+      expectSameBody(reference, reconciled);
     }
   });
 
@@ -572,7 +591,10 @@ describe("self prediction", () => {
 
     withSnapshot.advance(150);
     baseline.advance(150);
-    expectSamePose(baseline.renderState()!, withSnapshot.renderState()!);
+    const baselineState = baseline.renderState()!;
+    const replayedState = withSnapshot.renderState()!;
+    expectSamePose(baselineState, replayedState);
+    expectSameBody(baselineState, replayedState);
   });
 
   it("applies authoritative length without moving the head", () => {

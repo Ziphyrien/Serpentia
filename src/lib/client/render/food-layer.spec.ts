@@ -236,6 +236,19 @@ describe("food layer absorb timeline", () => {
     food.destroy();
   });
 
+  it("refreshes an authoritative index when a reused array advances source frame", () => {
+    const food = layer();
+    const authority: FoodState[] = [{ ...FOOD, position: { x: 80, y: 0 } }];
+    food.sync(authority, VIEW, 100, authority);
+
+    const next = { ...FOOD, position: { x: 41, y: 0 } };
+    authority[0] = next;
+    food.sync(authority, VIEW, 101, authority);
+
+    expect(predict(food, { x: 0, y: 0 }, 101)).toEqual([next]);
+    food.destroy();
+  });
+
   it("switches a cached same-id respawn on the twelfth presentation source frame", () => {
     const food = layer();
     const respawned: FoodState = {

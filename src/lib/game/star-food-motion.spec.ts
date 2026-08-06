@@ -34,6 +34,11 @@ describe("star food collision prediction", () => {
     });
   });
 
+  it("lets static food reuse its authoritative state during presentation", () => {
+    const dot: FoodState = { ...STAR, value: 1, lengthValue: 1, motion: undefined };
+    expect(predictFoodPresentationPosition(dot, 100, 106, 2_432, 8)).toBeUndefined();
+  });
+
   it("advances smoothly on a fractional presentation source frame", () => {
     expect(predictFoodPresentationPosition(STAR, 100, 105.5, 2_432, 21)).toEqual({
       x: 16.5,
@@ -75,6 +80,8 @@ describe("star food collision prediction", () => {
 
   it("keeps static foods at their authoritative position", () => {
     const dot: FoodState = { ...STAR, value: 1, lengthValue: 1, motion: undefined };
-    expect(predictFoodCollisionPosition(dot, 100, 106, 2_432, 8)).toEqual({ x: 0, y: 0 });
+    const position = predictFoodCollisionPosition(dot, 100, 106, 2_432, 8);
+    expect(position).toEqual({ x: 0, y: 0 });
+    expect(position).toBe(dot.position);
   });
 });

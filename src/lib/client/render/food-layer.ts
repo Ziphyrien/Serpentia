@@ -53,6 +53,9 @@ interface FoodRecord {
   kind: FoodState["kind"];
   variant: number;
   star: boolean;
+  radius: number;
+  radiusFood: FoodState | undefined;
+  radiusSourceFrame: number;
   absorb: ActiveFoodAbsorb | undefined;
   respawn: FoodState | undefined;
   consumed: FoodConsumedEvent | undefined;
@@ -78,6 +81,7 @@ export class FoodLayer {
   private readonly remainsContainer = new Container();
   private readonly records = new Map<number, FoodRecord>();
   private authoritativeFoods = new Map<number, FoodState>();
+  private authoritativeFoodsInput: ReadonlyArray<FoodState> | undefined;
   private authoritativeSourceFrame = 0;
   private readonly cullMargin: number;
 
@@ -107,8 +111,14 @@ export class FoodLayer {
     authoritativeSourceFrame: number,
     authoritativeFoods: ReadonlyArray<FoodState> = foods,
   ): void {
+    if (
+      this.authoritativeFoodsInput !== authoritativeFoods ||
+      this.authoritativeSourceFrame !== authoritativeSourceFrame
+    ) {
+      this.authoritativeFoodsInput = authoritativeFoods;
+      this.authoritativeFoods = new Map(authoritativeFoods.map((food) => [food.id, food]));
+    }
     this.authoritativeSourceFrame = authoritativeSourceFrame;
-    this.authoritativeFoods = new Map(authoritativeFoods.map((food) => [food.id, food]));
     const seen = new Set<number>();
     for (const food of foods) {
       seen.add(food.id);
@@ -123,6 +133,18 @@ export class FoodLayer {
         record?.node.destroy();
         record = this.createRecord(food, star);
         this.records.set(food.id, record);
+      }
+      if (
+        record.food === food &&
+        record.kind === food.kind &&
+        record.variant === food.variant &&
+        record.star === star &&
+        record.absorb === undefined &&
+        record.consumed === undefined &&
+        record.respawn === undefined
+      ) {
+        this.updateVisibility(record, view);
+        continue;
       }
       record.food = food;
 
@@ -162,9 +184,13 @@ export class FoodLayer {
         continue;
       }
       record.respawn = undefined;
-      record.x = food.position.x;
-      record.y = food.position.y;
-      record.node.position.set(record.x, record.y);
+      const nextX = food.position.x;
+      const nextY = food.position.y;
+      if (record.x !== nextX || record.y !== nextY) {
+        record.x = nextX;
+        record.y = nextY;
+        record.node.position.set(nextX, nextY);
+      }
       this.updateVisibility(record, view);
     }
 
@@ -249,7 +275,15 @@ export class FoodLayer {
       ) {
         continue;
       }
-      const radius = foodRadiusOf(authoritativeFood, this.rules);
+      if (
+        record.radiusFood !== authoritativeFood ||
+        record.radiusSourceFrame !== this.authoritativeSourceFrame
+      ) {
+        record.radiusFood = authoritativeFood;
+        record.radiusSourceFrame = this.authoritativeSourceFrame;
+        record.radius = foodRadiusOf(authoritativeFood, this.rules);
+      }
+      const radius = record.radius;
       const contact = eatContactDistance(snakeRadius, radius, eatDistanceFactor) + extraEatScope;
       const visibleDx = visibleHead.x - record.x;
       const visibleDy = visibleHead.y - record.y;
@@ -385,11 +419,14 @@ export class FoodLayer {
   destroy(): void {
     for (const record of this.records.values()) record.node.destroy();
     this.records.clear();
+    this.authoritativeFoods.clear();
+    this.authoritativeFoodsInput = undefined;
   }
 
   private createRecord(food: FoodState, star: boolean): FoodRecord {
     const texture = this.textureFor(food, star);
     const node = new Sprite({ texture, anchor: 0.5 });
+    node.position.set(food.position.x, food.position.y);
     const diameter = foodRadiusOf(food, this.rules) * 2;
     // 原版 GL 节点始终把 UV 铺满 `size × size` 方形 quad；部分 candy 帧并非正方形，
     // 因此必须分别缩放 X/Y，不能等比缩放后留下窄边。
@@ -405,6 +442,9 @@ export class FoodLayer {
       kind: food.kind,
       variant: food.variant,
       star,
+      radius: foodRadiusOf(food, this.rules),
+      radiusFood: food,
+      radiusSourceFrame: this.authoritativeSourceFrame,
       absorb: undefined,
       respawn: undefined,
       consumed: undefined,

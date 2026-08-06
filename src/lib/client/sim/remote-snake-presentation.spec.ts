@@ -23,8 +23,7 @@ const motion = snakeMotionRules({
   maximumLength: rules.maximumLength,
 });
 
-function snake(id: string, x: number, boosting = false): SnakeSnapshot {
-  const length = 200;
+function snake(id: string, x: number, boosting = false, length = 200): SnakeSnapshot {
   return {
     id,
     nickname: id,
@@ -143,6 +142,130 @@ describe("remote snake presentation", () => {
 
     const corrected = presentation.sample([snake("remote", 40)], 1, 4, 1_000 / 60, "self")[0];
     expect(corrected?.body[0].x).toBeCloseTo(22.5, 8);
+  });
+
+  it("keeps integer-frame views detached from later motion updates", () => {
+    const presentation = new RemoteSnakePresentation(rules, TICK_RATE);
+    const remote = snake("remote", 0);
+    const first = presentation.sample([remote], 0, 0, 0, "self")[0];
+    expect(first).toBeDefined();
+    const firstBody = first!.body.map((point) => ({ ...point }));
+
+    presentation.sample([remote], 0, 2.5, 1_000 / 60, "self");
+    expect(first!.body).toEqual(firstBody);
+  });
+
+  it("reuses fractional state across body-size changes without stale points", () => {
+    const presentation = new RemoteSnakePresentation(rules, TICK_RATE);
+    const lengths = [80, 83, 86, 80];
+
+    for (let authoritativeTick = 0; authoritativeTick < lengths.length; authoritativeTick += 1) {
+      const remote = snake("remote", 0, false, lengths[authoritativeTick]);
+      const sourceFrame = authoritativeTick * motion.sourceFramesPerTick + 0.5;
+      const continued = presentation.sample(
+        [remote],
+        authoritativeTick,
+        sourceFrame,
+        100,
+        "self",
+      )[0];
+      const fresh = new RemoteSnakePresentation(rules, TICK_RATE).sample(
+        [remote],
+        authoritativeTick,
+        sourceFrame,
+        100,
+        "self",
+      )[0];
+
+      expect(continued?.body).toHaveLength(fresh?.body.length ?? 0);
+      expect(continued?.angle).toBeCloseTo(fresh?.angle ?? 0, 8);
+      for (let index = 0; index < (fresh?.body.length ?? 0); index += 1) {
+        expect(continued?.body[index]?.x).toBeCloseTo(fresh?.body[index]?.x ?? 0, 8);
+        expect(continued?.body[index]?.y).toBeCloseTo(fresh?.body[index]?.y ?? 0, 8);
+      }
+    }
+  });
+
+  it("keeps aligned fractional scratch equivalent across jumps and resets", () => {
+    const presentation = new RemoteSnakePresentation(rules, TICK_RATE);
+    const sequence = [
+      { authoritativeTick: 0, sourceFrame: 0, skinId: DEFAULT_SKIN_ID },
+      { authoritativeTick: 0, sourceFrame: 0.5, skinId: DEFAULT_SKIN_ID },
+      { authoritativeTick: 0, sourceFrame: 1.5, skinId: DEFAULT_SKIN_ID },
+      { authoritativeTick: 0, sourceFrame: 3, skinId: DEFAULT_SKIN_ID },
+      { authoritativeTick: 0, sourceFrame: 4.5, skinId: DEFAULT_SKIN_ID },
+      { authoritativeTick: 1, sourceFrame: 3.5, skinId: DEFAULT_SKIN_ID + 1 },
+      { authoritativeTick: 1, sourceFrame: 4, skinId: DEFAULT_SKIN_ID + 1 },
+      { authoritativeTick: 2, sourceFrame: 7.5, skinId: DEFAULT_SKIN_ID },
+    ];
+
+    for (const sample of sequence) {
+      const remote = { ...snake("remote", 0), skinId: sample.skinId };
+      const actual = presentation.sample(
+        [remote],
+        sample.authoritativeTick,
+        sample.sourceFrame,
+        100,
+        "self",
+      )[0];
+      const expected = new RemoteSnakePresentation(rules, TICK_RATE).sample(
+        [remote],
+        sample.authoritativeTick,
+        sample.sourceFrame,
+        100,
+        "self",
+      )[0];
+
+      expect(actual?.body).toHaveLength(expected?.body.length ?? 0);
+      expect(actual?.angle).toBeCloseTo(expected?.angle ?? 0, 8);
+      for (let index = 0; index < (expected?.body.length ?? 0); index += 1) {
+        expect(actual?.body[index]?.x).toBeCloseTo(expected?.body[index]?.x ?? 0, 8);
+        expect(actual?.body[index]?.y).toBeCloseTo(expected?.body[index]?.y ?? 0, 8);
+      }
+    }
+  });
+
+  it("clears a large authority correction before resuming regular motion", () => {
+    const presentation = new RemoteSnakePresentation(rules, TICK_RATE);
+    const initial = snake("remote", 0);
+    const corrected = snake("remote", 1_000);
+    presentation.sample([initial], 0, 0, 0, "self");
+    presentation.sample([corrected], 1, 3, 100, "self");
+
+    let actual: ReturnType<RemoteSnakePresentation["sample"]>[number] | undefined;
+    for (let sourceFrame = 4; sourceFrame <= 60; sourceFrame += 1) {
+      actual = presentation.sample([corrected], 1, sourceFrame, 100, "self")[0];
+    }
+    const expected = new RemoteSnakePresentation(rules, TICK_RATE).sample(
+      [corrected],
+      1,
+      60,
+      100,
+      "self",
+    )[0];
+
+    expect(actual?.body).toHaveLength(expected?.body.length ?? 0);
+    for (let index = 0; index < (expected?.body.length ?? 0); index += 1) {
+      expect(actual?.body[index]?.x).toBeCloseTo(expected?.body[index]?.x ?? 0, 8);
+      expect(actual?.body[index]?.y).toBeCloseTo(expected?.body[index]?.y ?? 0, 8);
+    }
+  });
+
+  it("rebuilds reused state across large authority body-size changes", () => {
+    const presentation = new RemoteSnakePresentation(rules, TICK_RATE);
+    for (const [authoritativeTick, length] of [80, 5_000, 80].entries()) {
+      const remote = snake("remote", 0, false, length);
+      const presented = presentation.sample(
+        [remote],
+        authoritativeTick,
+        authoritativeTick * motion.sourceFramesPerTick + 0.5,
+        0,
+        "self",
+      )[0];
+      const expectedLength = createBody({ x: 0, y: 0 }, 0, length, motion).length;
+      expect(presented?.body).toHaveLength(expectedLength);
+      expect(presented?.body.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y))).toBe(true);
+    }
   });
 
   it("drops dead, local, and stale remote entries", () => {

@@ -31,12 +31,17 @@ interface TrackedRemoteSnake {
   readonly presentationSourceFrame: number;
   readonly authoritativeTick: number;
   readonly motionState: SnakeMotionState;
+  readonly fractionalMotionState: SnakeMotionState | undefined;
+  readonly fractionalSimulatedSourceFrame: number | undefined;
+  readonly bodyCorrectionActive: boolean;
   readonly simulatedSourceFrame: number;
 }
 
 interface PredictedRemoteSnake {
   readonly view: PresentedRemoteSnake;
   readonly motionState: SnakeMotionState;
+  readonly fractionalMotionState: SnakeMotionState | undefined;
+  readonly fractionalSimulatedSourceFrame: number | undefined;
   readonly simulatedSourceFrame: number;
 }
 
@@ -82,13 +87,25 @@ export class RemoteSnakePresentation {
         previous !== undefined &&
         previous.skinId === snake.skinId &&
         presentationSourceFrame >= previous.presentationSourceFrame;
-      const body = canSmooth
-        ? smoothBody(
-            previous.body,
-            predicted.body,
-            maximumCorrectionDistance(predicted.boosting, elapsedSeconds),
-          )
-        : predicted.body;
+      const correctionDistance = maximumCorrectionDistance(predicted.boosting, elapsedSeconds);
+      const canSkipSmoothing =
+        canSmooth &&
+        !previous.bodyCorrectionActive &&
+        previous.authoritativeTick === authoritativeTick &&
+        correctionDistance >=
+          maximumRegularTravelDistance(
+            presentationSourceFrame - previous.presentationSourceFrame,
+          );
+      let body: ReadonlyArray<Point>;
+      let bodyCorrectionActive: boolean;
+      if (!canSmooth || canSkipSmoothing) {
+        body = predicted.body;
+        bodyCorrectionActive = false;
+      } else {
+        const smoothed = smoothBody(previous.body, predicted.body, correctionDistance);
+        body = smoothed.body;
+        bodyCorrectionActive = smoothed.correctionActive;
+      }
       const angle = canSmooth
         ? smoothAngle(
             previous.angle,
@@ -106,6 +123,9 @@ export class RemoteSnakePresentation {
         presentationSourceFrame,
         authoritativeTick,
         motionState: prediction.motionState,
+        fractionalMotionState: prediction.fractionalMotionState,
+        fractionalSimulatedSourceFrame: prediction.fractionalSimulatedSourceFrame,
+        bodyCorrectionActive,
         simulatedSourceFrame: prediction.simulatedSourceFrame,
       });
       presented.push({ ...predicted, body, angle });
@@ -136,7 +156,9 @@ function predictRemoteSnake(
     previous !== undefined &&
     previous.authoritativeTick === authoritativeTick &&
     previous.simulatedSourceFrame <= wholeTargetSourceFrame;
-  const state = canContinue ? previous.motionState : motionStateFrom(snake);
+  const state = canContinue
+    ? previous.motionState
+    : motionStateFrom(snake, previous?.motionState);
   let simulatedSourceFrame = canContinue ? previous.simulatedSourceFrame : authoritativeSourceFrame;
   while (simulatedSourceFrame < wholeTargetSourceFrame) {
     advanceSnakeSourceFrame(state, motion);
@@ -144,15 +166,44 @@ function predictRemoteSnake(
   }
 
   const fraction = targetSourceFrame - wholeTargetSourceFrame;
-  let body: ReadonlyArray<Point> = state.body.map((point) => ({ ...point }));
+  let body: ReadonlyArray<Point>;
   let angle = state.angle;
+  let fractionalMotionState = previous?.fractionalMotionState;
+  let fractionalSimulatedSourceFrame = previous?.fractionalSimulatedSourceFrame;
   if (fraction > 0) {
-    const next = cloneMotionState(state);
-    advanceSnakeSourceFrame(next, motion);
+    const desiredFractionalSourceFrame = wholeTargetSourceFrame + 1;
+    const reusable = previous?.fractionalMotionState;
+    const reusableSourceFrame = previous?.fractionalSimulatedSourceFrame;
+    let next: SnakeMotionState;
+    let nextSourceFrame: number;
+    if (
+      canContinue &&
+      reusable !== undefined &&
+      reusableSourceFrame !== undefined &&
+      reusableSourceFrame <= desiredFractionalSourceFrame
+    ) {
+      next = reusable;
+      nextSourceFrame = reusableSourceFrame;
+    } else {
+      next = copyMotionState(state, reusable);
+      nextSourceFrame = wholeTargetSourceFrame;
+    }
+    while (nextSourceFrame < desiredFractionalSourceFrame) {
+      advanceSnakeSourceFrame(next, motion);
+      nextSourceFrame += 1;
+    }
+    fractionalMotionState = next;
+    fractionalSimulatedSourceFrame = nextSourceFrame;
     body = interpolateBody(state.body, next.body, fraction);
     angle = normalizeAngle(
       state.angle + normalizeSnakeDirectionDelta(next.angle - state.angle) * fraction,
     );
+  } else {
+    body = state.body.map((point) => ({ ...point }));
+    if (!canContinue) {
+      fractionalMotionState = undefined;
+      fractionalSimulatedSourceFrame = undefined;
+    }
   }
 
   return {
@@ -170,26 +221,54 @@ function predictRemoteSnake(
       magnetUntilSourceFrame: snake.magnetUntilSourceFrame ?? null,
     },
     motionState: state,
+    fractionalMotionState,
+    fractionalSimulatedSourceFrame,
     simulatedSourceFrame,
   };
 }
 
-function motionStateFrom(snake: SnakeSnapshot): SnakeMotionState {
-  return {
-    body: snake.body.map((point) => ({ ...point })),
-    angle: quantizeSnakeTargetAngle(snake.angle),
-    targetAngle: quantizeSnakeTargetAngle(snake.targetAngle ?? snake.angle),
+function motionStateFrom(
+  snake: SnakeSnapshot,
+  reusable: SnakeMotionState | undefined,
+): SnakeMotionState {
+  const target = reusable ?? {
+    body: [],
+    angle: 0,
+    targetAngle: 0,
     length: snake.length,
     bodyScale: snake.bodyScale,
     boosting: snake.boosting,
     boostInputHeld: snake.boosting,
     boostFrames: 0,
   };
+  target.angle = quantizeSnakeTargetAngle(snake.angle);
+  target.targetAngle = quantizeSnakeTargetAngle(snake.targetAngle ?? snake.angle);
+  target.length = snake.length;
+  target.bodyScale = snake.bodyScale;
+  target.boosting = snake.boosting;
+  target.boostInputHeld = snake.boosting;
+  target.boostFrames = 0;
+  target.body.length = snake.body.length;
+  for (let index = 0; index < snake.body.length; index += 1) {
+    const source = snake.body[index];
+    const point = target.body[index];
+    if (source === undefined) continue;
+    if (point === undefined) {
+      target.body[index] = { x: source.x, y: source.y };
+    } else {
+      point.x = source.x;
+      point.y = source.y;
+    }
+  }
+  return target;
 }
 
-function cloneMotionState(state: SnakeMotionState): SnakeMotionState {
-  return {
-    body: state.body.map((point) => ({ ...point })),
+function copyMotionState(
+  state: SnakeMotionState,
+  reusable: SnakeMotionState | undefined,
+): SnakeMotionState {
+  const target = reusable ?? {
+    body: [],
     angle: state.angle,
     targetAngle: state.targetAngle,
     length: state.length,
@@ -198,6 +277,26 @@ function cloneMotionState(state: SnakeMotionState): SnakeMotionState {
     boostInputHeld: state.boostInputHeld,
     boostFrames: state.boostFrames,
   };
+  target.angle = state.angle;
+  target.targetAngle = state.targetAngle;
+  target.length = state.length;
+  target.bodyScale = state.bodyScale;
+  target.boosting = state.boosting;
+  target.boostInputHeld = state.boostInputHeld;
+  target.boostFrames = state.boostFrames;
+  target.body.length = state.body.length;
+  for (let index = 0; index < state.body.length; index += 1) {
+    const source = state.body[index];
+    const point = target.body[index];
+    if (source === undefined) continue;
+    if (point === undefined) {
+      target.body[index] = { x: source.x, y: source.y };
+    } else {
+      point.x = source.x;
+      point.y = source.y;
+    }
+  }
+  return target;
 }
 
 function interpolateBody(
@@ -205,43 +304,76 @@ function interpolateBody(
   to: ReadonlyArray<Point>,
   ratio: number,
 ): Array<Point> {
+  if (from.length === to.length) {
+    const body = new Array<Point>(from.length);
+    for (let index = 0; index < from.length; index += 1) {
+      const start = from[index];
+      const end = to[index];
+      if (start === undefined || end === undefined) continue;
+      body[index] = {
+        x: start.x + (end.x - start.x) * ratio,
+        y: start.y + (end.y - start.y) * ratio,
+      };
+    }
+    return body;
+  }
+
   const pointCount = Math.max(from.length, to.length);
-  const body: Array<Point> = [];
+  const body = new Array<Point>(pointCount);
+  const fromLast = from[from.length - 1];
+  const toLast = to[to.length - 1];
   for (let index = 0; index < pointCount; index += 1) {
-    const start = from[Math.min(index, from.length - 1)];
-    const end = to[Math.min(index, to.length - 1)];
-    body.push({
+    const start = index < from.length ? from[index] : fromLast;
+    const end = index < to.length ? to[index] : toLast;
+    if (start === undefined || end === undefined) continue;
+    body[index] = {
       x: start.x + (end.x - start.x) * ratio,
       y: start.y + (end.y - start.y) * ratio,
-    });
+    };
   }
   return body;
+}
+
+interface SmoothedBody {
+  readonly body: Array<Point>;
+  readonly correctionActive: boolean;
 }
 
 function smoothBody(
   from: ReadonlyArray<Point>,
   to: ReadonlyArray<Point>,
   maximumDistance: number,
-): Array<Point> {
-  return to.map((point, index) =>
-    moveToward(from[Math.min(index, from.length - 1)] ?? point, point, maximumDistance),
-  );
-}
-
-function moveToward(from: Point, to: Point, maximumDistance: number): Point {
-  const deltaX = to.x - from.x;
-  const deltaY = to.y - from.y;
-  const distance = Math.hypot(deltaX, deltaY);
-  if (distance === 0 || distance <= maximumDistance) return { ...to };
-  if (maximumDistance <= 0) return { ...from };
-  const ratio = maximumDistance / distance;
-  return { x: from.x + deltaX * ratio, y: from.y + deltaY * ratio };
+): SmoothedBody {
+  const maximumDistanceSquared = maximumDistance * maximumDistance;
+  let correctionActive = false;
+  const body = to.map((point, index) => {
+    const fromPoint = from[Math.min(index, from.length - 1)] ?? point;
+    const deltaX = point.x - fromPoint.x;
+    const deltaY = point.y - fromPoint.y;
+    const distanceSquared = deltaX * deltaX + deltaY * deltaY;
+    if (distanceSquared === 0 || distanceSquared <= maximumDistanceSquared) {
+      return { ...point };
+    }
+    correctionActive = true;
+    if (maximumDistance <= 0) return { ...fromPoint };
+    const ratio = maximumDistance / Math.sqrt(distanceSquared);
+    return { x: fromPoint.x + deltaX * ratio, y: fromPoint.y + deltaY * ratio };
+  });
+  return { body, correctionActive };
 }
 
 function smoothAngle(from: number, to: number, maximumTurn: number): number {
   const difference = normalizeSnakeDirectionDelta(to - from);
   if (Math.abs(difference) <= maximumTurn) return to;
   return normalizeAngle(from + Math.sign(difference) * maximumTurn);
+}
+
+function maximumRegularTravelDistance(sourceFrameDelta: number): number {
+  return (
+    Math.max(0, sourceFrameDelta) *
+    SNAKE_MOTION.boostPointsPerFrame *
+    SNAKE_MOTION.pointSpacing
+  );
 }
 
 function maximumCorrectionDistance(boosting: boolean, elapsedSeconds: number): number {
