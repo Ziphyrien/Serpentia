@@ -15,7 +15,8 @@ jobs:
   auto-merge:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request'
+      (github.event.workflow_run.event == 'pull_request' ||
+      github.event.workflow_run.event == 'workflow_dispatch')
     runs-on: ubuntu-latest
     steps:
       - name: Find Dependabot pull request
@@ -27,7 +28,14 @@ jobs:
           RUN_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           if [[ -z "$PR_NUMBER" ]]; then
-            echo "No pull request is associated with this CI run."
+            PR_NUMBER="$(
+              gh api "repos/$REPOSITORY/commits/$RUN_SHA/pulls" \
+                --jq 'map(select(.state == "open")) | first | .number // empty'
+            )"
+          fi
+
+          if [[ -z "$PR_NUMBER" ]]; then
+            echo "No open pull request is associated with this CI run."
             echo "merge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi

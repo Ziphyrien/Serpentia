@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "links": [
+    {
+      "manifest": "package.json",
+      "source": "/devDependencies/vite-plus",
+      "targets": [
+        {
+          "path": "/overrides/vite",
+          "template": "npm:@voidzero-dev/vite-plus-core@{{version}}"
+        }
+      ]
+    }
+  ]
+}
