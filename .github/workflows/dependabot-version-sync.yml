@@ -62,13 +62,14 @@ jobs:
         working-directory: dependency-pr
         run: bun install --lockfile-only --ignore-scripts
 
-      - name: Commit synchronized versions
+      - name: Commit synchronized versions and queue validation
         if: steps.synchronize.outputs.changed == 'true'
         working-directory: dependency-pr
         env:
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GH_TOKEN: ${{ github.token }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           REPOSITORY: ${{ github.repository }}
         run: |
           gh auth setup-git
@@ -85,4 +86,11 @@ jobs:
           git commit -m "chore(deps): 同步版本覆盖与锁文件"
           git push origin "HEAD:refs/heads/$HEAD_REF"
 
+          new_head_sha="$(git rev-parse HEAD)"
+
           gh workflow run ci.yml --repo "$REPOSITORY" --ref "$HEAD_REF"
+          gh workflow run dependency-auto-merge.yml \
+            --repo "$REPOSITORY" \
+            --ref main \
+            -f pr_number="$PR_NUMBER" \
+            -f head_sha="$new_head_sha"

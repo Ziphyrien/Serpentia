@@ -31,7 +31,7 @@ Example for another linked override:
 }
 ```
 
-The pull-request workflow runs the trusted synchronizer from the base branch, updates only existing configured fields, regenerates this repository's `bun.lock` with lifecycle scripts disabled, commits the result to the Dependabot branch, and explicitly dispatches CI. The synchronizer itself is package-name and field agnostic; if another package ecosystem is added, its lockfile command can be attached to the same workflow. The explicit dispatch is required because pushes made with `GITHUB_TOKEN` do not normally start another workflow run.
+The pull-request workflow runs the trusted synchronizer from the base branch, updates only existing configured fields, regenerates this repository's `bun.lock` with lifecycle scripts disabled, commits the result to the Dependabot branch, and explicitly dispatches CI. It then dispatches the trusted merge workflow with the new head SHA; that workflow waits for a successful CI run for that exact SHA before merging. The synchronizer itself is package-name and field agnostic; if another package ecosystem is added, its lockfile command can be attached to the same workflow. The explicit dispatch is required because pushes made with `GITHUB_TOKEN` do not normally start another workflow run.
 
 Run the consistency check locally with:
 
