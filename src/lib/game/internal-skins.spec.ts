@@ -147,6 +147,12 @@ describe("official internal skins", () => {
     expect(nodeFrameName(skin701.headSpeed, 6)).toBe("snakehead3");
   });
 
+  it("keeps skin 701's multi-frame head valid when the animation clock is slightly negative", () => {
+    const skin = requiredSkin(701);
+    expect(nodeFrameName(skin.head, -1)).toBe("snakehead0");
+    expect(nodeFrameName(skin.head, Number.NaN)).toBe("snakehead0");
+  });
+
   it("falls back to normal skin frames for skins 3 and 4 while retaining universal flow", () => {
     for (const id of [3, 4]) {
       const skin = requiredSkin(id);

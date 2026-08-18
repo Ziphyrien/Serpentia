@@ -217,7 +217,9 @@ export function bodyPointIndexes(size: SkinSizeInfo, pointCount: number): Array<
  * `frameCount` 是同一状态（加速或非加速）已连续经过的 60 Hz 源帧数。
  */
 export function nodeFrameName(node: SkinNode, frameCount: number): string {
-  const index = Math.floor(frameCount / node.frameTime) % node.textures.length;
+  if (node.textures.length === 0) throw new Error("Skin node has no textures");
+  const normalizedFrameCount = Number.isFinite(frameCount) ? Math.max(0, frameCount) : 0;
+  const index = Math.floor(normalizedFrameCount / node.frameTime) % node.textures.length;
   return node.textures[index];
 }
 
