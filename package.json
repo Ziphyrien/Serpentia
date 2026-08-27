@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "bits-ui": "^2.19.0",
-    "effect": "^4.0.0-beta.103",
+    "effect": "^4.0.0-rc.111",
     "he": "^1.2.0",
     "howler": "^2.2.4",
     "lucide-svelte": "^1.0.1",
