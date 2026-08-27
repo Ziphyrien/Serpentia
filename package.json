@@ -43,7 +43,7 @@
     "svelte-check": "^4.7.6",
     "tailwindcss": "^4.3.0",
     "typescript": "6.0.3",
-    "vite-plus": "0.2.9"
+    "vite-plus": "0.3.0"
   },
   "overrides": {
     "vite": "npm:@voidzero-dev/vite-plus-core@0.2.9"
