@@ -27,7 +27,7 @@
     "lucide-svelte": "^1.0.1",
     "msgpackr": "^2.0.6",
     "nipplejs": "^1.0.4",
-    "pixi.js": "^8.20.0",
+    "pixi.js": "^8.20.1",
     "qrcode": "^1.5.4"
   },
   "devDependencies": {
